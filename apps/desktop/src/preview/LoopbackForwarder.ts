@@ -128,22 +128,47 @@ const listenOnLoopback = (port: number, onConnection: (socket: NodeNet.Socket) =
 
 export const parsePreviewProxyDestination = (
   firstLine: string,
+  hostHeader?: string,
 ): { readonly host: string; readonly port: number } | null => {
   const connect = /^CONNECT\s+(\S+)\s+HTTP\//iu.exec(firstLine);
   if (connect?.[1] !== undefined) {
     return parseHostPort(connect[1]);
   }
   const absolute = /^[A-Z]+\s+(https?:\/\/\S+)\s+HTTP\//iu.exec(firstLine);
-  if (absolute?.[1] === undefined) return null;
-  try {
-    const url = new URL(absolute[1]);
-    const port =
-      url.port.length > 0 ? Number.parseInt(url.port, 10) : url.protocol === "https:" ? 443 : 80;
-    if (!Number.isInteger(port) || port < 1 || port > 65_535) return null;
-    return { host: url.hostname, port };
-  } catch {
-    return null;
+  if (absolute?.[1] !== undefined) {
+    try {
+      const url = new URL(absolute[1]);
+      const port =
+        url.port.length > 0 ? Number.parseInt(url.port, 10) : url.protocol === "https:" ? 443 : 80;
+      if (!Number.isInteger(port) || port < 1 || port > 65_535) return null;
+      return { host: url.hostname, port };
+    } catch {
+      return null;
+    }
   }
+  const originForm = /^[A-Z]+\s+(\/[^ ]*)\s+HTTP\//iu.exec(firstLine);
+  if (originForm !== null && hostHeader !== undefined && hostHeader.length > 0) {
+    return parseHostPort(hostHeader) ?? parseHostPort(`${hostHeader}:80`);
+  }
+  return null;
+};
+
+const readHeaderValue = (header: string, name: string): string | undefined => {
+  const match = new RegExp(`(?:^|\\r\\n)${name}\\s*:\\s*([^\\r\\n]+)`, "iu").exec(header);
+  const value = match?.[1]?.trim();
+  return value !== undefined && value.length > 0 ? value : undefined;
+};
+
+/** Keep %XX encoding. `URL.pathname` decodes and Next.js then 3xx-loops. */
+export const absoluteProxyUrlToOriginPath = (absoluteUrl: string): string | null => {
+  const stripped = absoluteUrl.replace(/^https?:\/\//iu, "");
+  if (stripped === absoluteUrl) return null;
+  const pathStart = stripped.indexOf("/");
+  if (pathStart === -1) {
+    const queryStart = stripped.indexOf("?");
+    return queryStart === -1 ? "/" : `/${stripped.slice(queryStart)}`;
+  }
+  return stripped.slice(pathStart);
 };
 
 const parseHostPort = (value: string): { readonly host: string; readonly port: number } | null => {
@@ -164,19 +189,26 @@ const parseHostPort = (value: string): { readonly host: string; readonly port: n
   return { host: value.slice(0, separator), port };
 };
 
+const HOP_BY_HOP_HEADER =
+  /^(proxy-connection|proxy-authorization|connection|keep-alive|te|trailer|transfer-encoding|upgrade)$/iu;
+
 export const rewriteHttpProxyRequest = (header: string): string => {
   const lines = header.split("\r\n");
   const requestLine = lines[0];
   if (requestLine === undefined) return header;
   const match = /^([A-Z]+)\s+(https?:\/\/\S+)\s+(HTTP\/\d(?:\.\d)?)$/iu.exec(requestLine);
-  if (match === null) return header;
-  try {
-    const url = new URL(match[2] ?? "");
-    lines[0] = `${match[1]} ${url.pathname}${url.search} ${match[3]}`;
-    return lines.join("\r\n");
-  } catch {
-    return header;
+  if (match !== null) {
+    const originPath = absoluteProxyUrlToOriginPath(match[2] ?? "");
+    if (originPath !== null) {
+      lines[0] = `${match[1]} ${originPath} ${match[3]}`;
+    }
   }
+  return lines
+    .filter(
+      (line, index) =>
+        index === 0 || line.length === 0 || !HOP_BY_HOP_HEADER.test(line.split(":", 1)[0] ?? ""),
+    )
+    .join("\r\n");
 };
 
 const readHttpHead = (socket: NodeNet.Socket) =>
@@ -260,7 +292,7 @@ export const make = Effect.gen(function* () {
     void (async () => {
       const { header, rest } = await readHttpHead(socket);
       const firstLine = header.split("\r\n")[0] ?? "";
-      const destination = parsePreviewProxyDestination(firstLine);
+      const destination = parsePreviewProxyDestination(firstLine, readHeaderValue(header, "host"));
       if (destination === null) {
         socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
         return;
