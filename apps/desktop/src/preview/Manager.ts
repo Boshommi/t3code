@@ -54,6 +54,7 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import { PREVIEW_PICTURE_IN_PICTURE_FRAME_CHANNEL } from "../ipc/channels.ts";
 import * as BrowserSession from "./BrowserSession.ts";
+import * as PreviewLoopbackForwarder from "./LoopbackForwarder.ts";
 import {
   ANNOTATION_CAPTURED_CHANNEL,
   ANNOTATION_THEME_CHANNEL,
@@ -67,7 +68,11 @@ import { isPreviewAnnotationPayload } from "./PickedElementPayload.ts";
 import { playwrightInjectedRuntimeInstallExpression } from "./PlaywrightInjectedRuntime.ts";
 import { makePreviewAutomationKeySequence } from "./PreviewKeyboard.ts";
 import { captureFavicon, safeHttpOrigin, selectFaviconCandidates } from "./FaviconCapture.ts";
-import { decidePreviewWindowOpen, previewPopupBrowserWindowOptions } from "./PreviewWindowOpen.ts";
+import {
+  decidePreviewWindowOpen,
+  PREVIEW_POPUP_WEB_PREFERENCES,
+  previewPopupWindowBounds,
+} from "./PreviewWindowOpen.ts";
 
 export type PreviewNavStatus =
   | { kind: "Idle" }
@@ -1568,6 +1573,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     tabId: string,
     wc: Electron.WebContents,
   ) {
+    const loopbackForwarder = yield* Effect.serviceOption(
+      PreviewLoopbackForwarder.PreviewLoopbackForwarder,
+    );
     const scope = yield* Scope.fork(parentScope, "sequential");
     const attachmentId = Symbol();
     let documentId = 0;
@@ -1830,14 +1838,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       }
       runFork(forwardShortcut(event, input));
     };
-    const previewPartitionOf = (contents: Electron.WebContents): string | undefined => {
-      try {
-        const partition = contents.getWebPreferences()?.partition;
-        return typeof partition === "string" && partition.length > 0 ? partition : undefined;
-      } catch {
-        return undefined;
-      }
-    };
     const attachPreviewWindowOpenHandler = (target: Electron.WebContents): void => {
       target.setWindowOpenHandler((details) => {
         const decision = decidePreviewWindowOpen({
@@ -1846,13 +1846,21 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           features: details.features,
         });
         if (decision.kind === "allow-popup") {
+          if (Option.isSome(loopbackForwarder)) {
+            runFork(loopbackForwarder.value.ensureRelated(details.url).pipe(Effect.ignore));
+          }
           return {
             action: "allow",
-            overrideBrowserWindowOptions: previewPopupBrowserWindowOptions({
-              width: decision.width,
-              height: decision.height,
-              partition: previewPartitionOf(target),
-            }),
+            overrideBrowserWindowOptions: {
+              ...previewPopupWindowBounds(decision),
+              // Must reuse the opener session. Guest webviews often have no
+              // partition string; a new default session has no PAC and
+              // localhost is refused on the laptop instead of tunneled.
+              webPreferences: {
+                ...PREVIEW_POPUP_WEB_PREFERENCES,
+                session: target.session,
+              },
+            },
           };
         }
         if (decision.kind === "navigate-same-tab") {

@@ -6,7 +6,8 @@ import {
   DEFAULT_PREVIEW_POPUP_WIDTH,
   isAboutBlankUrl,
   parsePopupFeatureSize,
-  previewPopupBrowserWindowOptions,
+  PREVIEW_POPUP_WEB_PREFERENCES,
+  previewPopupWindowBounds,
 } from "./PreviewWindowOpen.ts";
 
 describe("parsePopupFeatureSize", () => {
@@ -80,26 +81,18 @@ describe("decidePreviewWindowOpen", () => {
   });
 });
 
-describe("previewPopupBrowserWindowOptions", () => {
-  it("keeps the preview partition and strips the guest preload", () => {
-    expect(
-      previewPopupBrowserWindowOptions({
-        width: 420,
-        height: 720,
-        partition: "persist:t3code-preview-abc",
-      }),
-    ).toEqual({
+describe("previewPopupWindowBounds", () => {
+  it("sizes the OAuth popup and strips guest Node/preload via shared prefs", () => {
+    expect(previewPopupWindowBounds({ width: 420, height: 720 })).toEqual({
       width: 420,
       height: 720,
       autoHideMenuBar: true,
-      webPreferences: {
-        partition: "persist:t3code-preview-abc",
-        preload: "",
-        nodeIntegration: false,
-        contextIsolation: true,
-        sandbox: true,
-        webviewTag: false,
-      },
+    });
+    expect(PREVIEW_POPUP_WEB_PREFERENCES).toMatchObject({
+      preload: "",
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
     });
   });
 });
