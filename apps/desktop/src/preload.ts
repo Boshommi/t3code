@@ -212,6 +212,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.invoke(IpcChannels.PREVIEW_REGISTER_WEBVIEW_CHANNEL, { tabId, webContentsId }),
     navigate: (tabId, url) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_NAVIGATE_CHANNEL, { tabId, url }),
+    ensureLoopbackForward: (input) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_ENSURE_LOOPBACK_FORWARD_CHANNEL, input),
     goBack: (tabId) => ipcRenderer.invoke(IpcChannels.PREVIEW_GO_BACK_CHANNEL, { tabId }),
     goForward: (tabId) => ipcRenderer.invoke(IpcChannels.PREVIEW_GO_FORWARD_CHANNEL, { tabId }),
     refresh: (tabId) => ipcRenderer.invoke(IpcChannels.PREVIEW_REFRESH_CHANNEL, { tabId }),
@@ -232,8 +234,12 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.invoke(IpcChannels.PREVIEW_CLEAR_COOKIES_CHANNEL, { environmentId, profileId }),
     clearCache: (environmentId, profileId) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_CLEAR_CACHE_CHANNEL, { environmentId, profileId }),
-    getPreviewConfig: (environmentId, profileId) =>
-      ipcRenderer.invoke(IpcChannels.PREVIEW_GET_CONFIG_CHANNEL, { environmentId, profileId }),
+    getPreviewConfig: (environmentId, profileId, environmentIsLoopback) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_GET_CONFIG_CHANNEL, {
+        environmentId,
+        profileId,
+        environmentIsLoopback,
+      }),
     setAnnotationTheme: (theme) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_SET_ANNOTATION_THEME_CHANNEL, { theme }),
     pickElement: (tabId) => ipcRenderer.invoke(IpcChannels.PREVIEW_PICK_ELEMENT_CHANNEL, { tabId }),

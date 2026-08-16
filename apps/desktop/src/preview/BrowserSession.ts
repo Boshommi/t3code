@@ -6,8 +6,11 @@ import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
 import * as Layer from "effect/Layer";
 import * as PlatformError from "effect/PlatformError";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as SynchronizedRef from "effect/SynchronizedRef";
+
+import { attachPreviewWebAuthn } from "./previewWebAuthnSession.ts";
 
 const PREVIEW_PARTITION_PREFIX = "persist:t3code-preview-";
 /**
@@ -33,6 +36,10 @@ const ALLOWED_PREVIEW_PERMISSIONS: ReadonlySet<string> = new Set([
   "clipboard-sanitized-write",
   "notifications",
   "geolocation",
+  // Google Identity's button iframe (accounts.google.com inside the guest)
+  // asks for storage access so it can render the signup / account picker.
+  "storage-access",
+  "top-level-storage-access",
   // Deliberately NOT local-fonts: preview sessions run untrusted web content,
   // and silently granting it would hand every page the user's installed-font
   // fingerprint (and font file bytes via FontData.blob()). The app's own font
@@ -116,6 +123,7 @@ export class BrowserSession extends Context.Service<
       persistent?: boolean,
       namespace?: BrowserSessionPartitionNamespace,
     ) => Effect.Effect<Session, BrowserSessionGetSessionError>;
+    readonly onSessionCreated: (handler: (session: Session) => void) => Effect.Effect<void>;
     /** Omit `partitions` to clear every known partition. */
     readonly clearCookies: (
       partitions?: ReadonlyArray<string>,
@@ -162,6 +170,18 @@ const encodeScopeForDigest = (scope: string): Uint8Array =>
 export const make = Effect.gen(function* BrowserSessionMake() {
   const crypto = yield* Crypto.Crypto;
   const sessionsRef = yield* SynchronizedRef.make<ReadonlyMap<string, Session>>(new Map());
+  const sessionCreatedHandlersRef = yield* Ref.make<ReadonlyArray<(session: Session) => void>>([]);
+
+  const notifySessionCreated = (session: Session) =>
+    Ref.get(sessionCreatedHandlersRef).pipe(
+      Effect.flatMap((handlers) =>
+        Effect.sync(() => {
+          for (const handler of handlers) {
+            handler(session);
+          }
+        }),
+      ),
+    );
 
   const getPartition = Effect.fn("BrowserSession.getPartition")(function* (
     scope = "shared",
@@ -190,7 +210,7 @@ export const make = Effect.gen(function* BrowserSessionMake() {
     namespace?: BrowserSessionPartitionNamespace,
   ) {
     const partition = yield* getPartition(scope, persistent, namespace);
-    return yield* SynchronizedRef.modifyEffect(sessionsRef, (sessions) => {
+    const resolvedSession = yield* SynchronizedRef.modifyEffect(sessionsRef, (sessions) => {
       const existing = sessions.get(partition);
       if (existing) return Effect.succeed([existing, sessions] as const);
       return Effect.try({
@@ -207,6 +227,7 @@ export const make = Effect.gen(function* BrowserSessionMake() {
           browserSession.setPermissionCheckHandler((_webContents, permission) =>
             ALLOWED_PREVIEW_PERMISSIONS.has(permission),
           );
+          attachPreviewWebAuthn(browserSession);
           const next = new Map(sessions);
           next.set(partition, browserSession);
           return [browserSession, next] as const;
@@ -219,6 +240,8 @@ export const make = Effect.gen(function* BrowserSessionMake() {
           }),
       });
     });
+    yield* notifySessionCreated(resolvedSession);
+    return resolvedSession;
   });
 
   return BrowserSession.of({
@@ -227,6 +250,14 @@ export const make = Effect.gen(function* BrowserSessionMake() {
       partition.startsWith(PREVIEW_PARTITION_PREFIX) ||
       partition.startsWith(PREVIEW_EPHEMERAL_PARTITION_PREFIX),
     getSession,
+    onSessionCreated: (handler) =>
+      Effect.gen(function* () {
+        yield* Ref.update(sessionCreatedHandlersRef, (handlers) => [...handlers, handler]);
+        const sessions = yield* SynchronizedRef.get(sessionsRef);
+        for (const existing of sessions.values()) {
+          handler(existing);
+        }
+      }),
     clearCookies: Effect.fn("BrowserSession.clearCookies")(function* (partitions?) {
       const sessions = yield* SynchronizedRef.get(sessionsRef);
       yield* Effect.all(
