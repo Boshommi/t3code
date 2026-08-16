@@ -71,6 +71,11 @@ describe("buildPreviewLoopbackPacScript", () => {
     expect(pac).toContain('return "DIRECT"');
     expect(pac).toContain('host === "localhost"');
   });
+
+  it("fetches its own PAC URL directly so Chromium can load the script", () => {
+    const pac = buildPreviewLoopbackPacScript(43210, "http://127.0.0.1:9/t3-preview.pac");
+    expect(pac).toContain('url.indexOf("http://127.0.0.1:9/t3-preview.pac") === 0');
+  });
 });
 
 describe("decideLoopbackForward", () => {

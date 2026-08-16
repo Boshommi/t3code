@@ -1933,8 +1933,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       if (Option.isNone(loopbackForwarder)) {
         return;
       }
-      const proxyPort = loopbackForwarder.value.proxyPort;
-      yield* Effect.promise(() => applyPreviewLoopbackProxy(wc.session, proxyPort));
+      yield* Effect.promise(() =>
+        applyPreviewLoopbackProxy(wc.session, loopbackForwarder.value.proxyPort),
+      );
       const targetUrl = relatedUrl ?? wc.getURL();
       if (targetUrl.length > 0) {
         yield* loopbackForwarder.value.ensureRelated(targetUrl).pipe(Effect.ignore);
