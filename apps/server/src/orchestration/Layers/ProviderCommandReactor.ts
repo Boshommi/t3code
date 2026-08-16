@@ -24,6 +24,7 @@ import * as Equal from "effect/Equal";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -1179,6 +1180,28 @@ const make = Effect.gen(function* () {
   const threadTitleRegenerationWorker = yield* makeDrainableWorker(
     processThreadTitleRegenerationSafely,
   );
+  const inFlightTurnStarts = yield* Ref.make(0);
+  const forkTurnStartWork = <E, R>(effect: Effect.Effect<void, E, R>) =>
+    Effect.gen(function* () {
+      yield* Ref.update(inFlightTurnStarts, (count) => count + 1);
+      yield* effect.pipe(
+        Effect.catchCause((cause) => {
+          if (Cause.hasInterruptsOnly(cause)) {
+            return Effect.interrupt;
+          }
+          return Effect.logWarning("provider command reactor background turn work failed", {
+            cause: Cause.pretty(cause),
+          });
+        }),
+        Effect.ensuring(Ref.update(inFlightTurnStarts, (count) => count - 1)),
+        Effect.forkScoped,
+      );
+    });
+  const awaitTurnStartIdle = Effect.gen(function* () {
+    while ((yield* Ref.get(inFlightTurnStarts)) > 0) {
+      yield* Effect.sleep("5 millis");
+    }
+  });
 
   const processTurnStartRequested = Effect.fn("processTurnStartRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>,
@@ -1422,27 +1445,32 @@ const make = Effect.gen(function* () {
         "Wait for context compaction to finish before sending another message.",
       );
     }
-    const sendTurnRequest = yield* buildSendTurnRequestForThread({
-      threadId: event.payload.threadId,
-      messageText: message.text,
-      ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
-      ...(event.payload.modelSelection !== undefined
-        ? { modelSelection: event.payload.modelSelection }
-        : {}),
-      interactionMode: event.payload.interactionMode,
-      createdAt: event.payload.createdAt,
-    }).pipe(
-      Effect.map(Option.some),
-      Effect.catchCause((cause) => handleTurnStartFailure(cause).pipe(Effect.as(Option.none()))),
+
+    yield* forkTurnStartWork(
+      Effect.gen(function* () {
+        const sendTurnRequest = yield* buildSendTurnRequestForThread({
+          threadId: event.payload.threadId,
+          messageText: message.text,
+          ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+          ...(event.payload.modelSelection !== undefined
+            ? { modelSelection: event.payload.modelSelection }
+            : {}),
+          interactionMode: event.payload.interactionMode,
+          createdAt: event.payload.createdAt,
+        }).pipe(
+          Effect.map(Option.some),
+          Effect.catchCause((cause) =>
+            handleTurnStartFailure(cause).pipe(Effect.as(Option.none())),
+          ),
+        );
+        if (Option.isNone(sendTurnRequest)) {
+          return;
+        }
+        yield* providerService
+          .sendTurn(sendTurnRequest.value)
+          .pipe(Effect.asVoid, Effect.catchCause(recoverTurnStartFailure));
+      }),
     );
-
-    if (Option.isNone(sendTurnRequest)) {
-      return;
-    }
-
-    yield* providerService
-      .sendTurn(sendTurnRequest.value)
-      .pipe(Effect.asVoid, Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
   });
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
@@ -1724,7 +1752,7 @@ const make = Effect.gen(function* () {
         yield* processTurnStartRequested(event);
         return;
       case "thread.turn-interrupt-requested":
-        yield* processTurnInterruptRequested(event);
+        yield* forkTurnStartWork(processTurnInterruptRequested(event).pipe(Effect.asVoid));
         return;
       case "thread.approval-response-requested":
         yield* processApprovalResponseRequested(event);
@@ -1833,6 +1861,7 @@ const make = Effect.gen(function* () {
     drain: Effect.gen(function* () {
       yield* worker.drain;
       yield* threadTitleRegenerationWorker.drain;
+      yield* awaitTurnStartIdle;
     }),
   } satisfies ProviderCommandReactorShape;
 });
