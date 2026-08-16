@@ -35,6 +35,7 @@ import {
   usePreviewMiniPlayerStore,
 } from "~/previewMiniPlayerStore";
 import { resolveBrowserNavigationTarget } from "~/browser/browserTargetResolver";
+import { resolvePreviewNavigationUrl } from "~/browser/resolvePreviewNavigationUrl";
 import {
   readActiveBrowserRecordingTargets,
   startBrowserRecording,
@@ -408,10 +409,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           case "open": {
             const input = request.input as PreviewAutomationOpenInput;
             const resolvedInputUrl = input.url
-              ? resolveBrowserNavigationTarget(environmentId, {
-                  kind: "url",
-                  url: input.url,
-                }).resolvedUrl
+              ? await resolvePreviewNavigationUrl(environmentId, input.url)
               : undefined;
             let activeTabId = resolvePreviewAutomationOpenTab(
               state,
@@ -545,14 +543,12 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           case "navigate": {
             const ready = await requireReadyTab();
             const input = request.input as PreviewAutomationNavigateInput;
-            const resolution = resolveBrowserNavigationTarget(
-              environmentId,
-              input.target ?? {
-                kind: "url",
-                url: input.url!,
-              },
-            );
-            await ready.bridge.navigate(ready.runtimeTabId, resolution.resolvedUrl);
+            const rawUrl =
+              input.target !== undefined
+                ? resolveBrowserNavigationTarget(environmentId, input.target).requestedUrl
+                : input.url!;
+            const resolvedUrl = await resolvePreviewNavigationUrl(environmentId, rawUrl);
+            await ready.bridge.navigate(ready.runtimeTabId, resolvedUrl);
             await waitForNavigationReadiness(
               threadRef,
               request.requestId,

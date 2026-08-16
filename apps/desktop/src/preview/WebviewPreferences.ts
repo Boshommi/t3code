@@ -32,11 +32,39 @@
  *   `contextIsolation="no"` is truthy → contextIsolation stays ENABLED →
  *   react-grab can't see the React DevTools hook.
  *
- * Defense in depth: `apps/desktop/src/main.ts` also runs a
- * `will-attach-webview` handler that force-sets `sandbox: true` and
- * `nodeIntegration*: false` on the actual webPreferences object, gated on
- * the preview partition, so even if this string is ever wrong, the
+ * Defense in depth: `DesktopWindow` also runs a `will-attach-webview`
+ * handler (`applyPreviewWebviewAttach`) that force-sets `sandbox: true`,
+ * `nodeIntegration*: false`, and `allowpopups` on the guest, gated on the
+ * preview partition, so even if this string is ever wrong, the
  * security-critical flags can't regress on preview tabs.
  */
 export const PREVIEW_WEBVIEW_PREFERENCES =
   "contextIsolation=false,sandbox=true,nodeIntegration=false";
+
+/** Slice of Electron `webPreferences` the attach hook is allowed to pin. */
+export type PreviewWebviewAttachPreferences = {
+  sandbox?: boolean;
+  nodeIntegration?: boolean;
+  nodeIntegrationInSubFrames?: boolean;
+  contextIsolation?: boolean;
+};
+
+/**
+ * Pins guest security flags and enables `window.open` before Chromium
+ * creates the `<webview>` guest.
+ *
+ * Google Identity (and other OAuth) call `window.open` from an iframe.
+ * Electron discards those popups — and never calls `setWindowOpenHandler`
+ * — unless `allowpopups` is set at attach time. The renderer ref that
+ * sets the attribute can run after this hook, which is too late.
+ */
+export const applyPreviewWebviewAttach = (
+  webPreferences: PreviewWebviewAttachPreferences,
+  params: Record<string, string>,
+): void => {
+  webPreferences.sandbox = true;
+  webPreferences.nodeIntegration = false;
+  webPreferences.nodeIntegrationInSubFrames = false;
+  webPreferences.contextIsolation = false;
+  params.allowpopups = "true";
+};

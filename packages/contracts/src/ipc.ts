@@ -1133,6 +1133,20 @@ export const DesktopPreviewNavigateInputSchema = Schema.Struct({
   url: Schema.String,
 });
 
+export const DesktopPreviewLoopbackForwardInputSchema = Schema.Struct({
+  environmentId: EnvironmentId,
+  url: Schema.String,
+  environmentIsLoopback: Schema.Boolean,
+  tunnelWebsocketUrl: Schema.String,
+});
+
+export const DesktopPreviewLoopbackForwardResultSchema = Schema.Struct({
+  navigateUrl: Schema.String,
+  kind: Schema.Literals(["not-applicable", "reuse-tunnel", "start-tunnel"]),
+});
+export type DesktopPreviewLoopbackForwardResult =
+  typeof DesktopPreviewLoopbackForwardResultSchema.Type;
+
 export const DesktopPreviewConfigInputSchema = Schema.Struct({
   environmentId: EnvironmentId,
   /**
@@ -1142,6 +1156,8 @@ export const DesktopPreviewConfigInputSchema = Schema.Struct({
    * UA rewrite or permission handlers installed.
    */
   profileId: Schema.optional(BrowserProfileId),
+  /** When true or omitted, the preview session stays DIRECT (no loopback SOCKS). */
+  environmentIsLoopback: Schema.optional(Schema.Boolean),
 });
 
 export const DesktopPreviewClearDataInputSchema = Schema.Struct({
@@ -1352,6 +1368,13 @@ export interface DesktopPreviewBridge {
   closeTab: (tabId: string) => Promise<void>;
   registerWebview: (tabId: string, webContentsId: number) => Promise<void>;
   navigate: (tabId: string, url: string) => Promise<void>;
+  /**
+   * Forward in-app localhost preview traffic to the remote environment.
+   * Optional: older desktop builds lack it and skip forwarding.
+   */
+  ensureLoopbackForward?: (
+    input: typeof DesktopPreviewLoopbackForwardInputSchema.Type,
+  ) => Promise<DesktopPreviewLoopbackForwardResult>;
   goBack: (tabId: string) => Promise<void>;
   goForward: (tabId: string) => Promise<void>;
   refresh: (tabId: string) => Promise<void>;
@@ -1386,6 +1409,7 @@ export interface DesktopPreviewBridge {
   getPreviewConfig: (
     environmentId: EnvironmentId,
     profileId?: string,
+    environmentIsLoopback?: boolean,
   ) => Promise<DesktopPreviewWebviewConfig>;
   /** Browsers on this machine whose cookies can be imported. */
   listBrowserImportSources: () => Promise<ReadonlyArray<BrowserImportSource>>;

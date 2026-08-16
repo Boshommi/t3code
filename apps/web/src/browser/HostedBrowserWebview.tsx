@@ -1,6 +1,7 @@
 "use client";
 
 import type { PreviewViewportSetting, ScopedThreadRef } from "@t3tools/contracts";
+import * as Option from "effect/Option";
 import { useShallow } from "zustand/react/shallow";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -8,9 +9,11 @@ import { previewBridge } from "~/components/preview/previewBridge";
 import { usePreviewBridge } from "~/components/preview/usePreviewBridge";
 import { useClientSettingsHydrated } from "~/hooks/useSettings";
 import { cn, isMacPlatform } from "~/lib/utils";
+import { usePreparedConnection } from "~/state/session";
 
 import { resolveBrowserSurfacePanelRect, useBrowserSurfaceStore } from "./browserSurfaceStore";
 import { useActiveBrowserRecordingTabIds } from "./browserRecording";
+import { previewEnvironmentIsLocal } from "./browserTargetResolver";
 import {
   browserViewportSettingKey,
   resolveBrowserViewportLayout,
@@ -33,6 +36,7 @@ interface ElectronWebview extends HTMLElement {
   partition: string;
   preload?: string;
   webpreferences?: string;
+  allowpopups?: boolean | string;
   getWebContentsId: () => number;
   executeJavaScript: (code: string, userGesture?: boolean) => Promise<unknown>;
 }
@@ -68,7 +72,13 @@ export function HostedBrowserWebview(props: {
     profileId,
   } = props;
   const clientSettingsHydrated = useClientSettingsHydrated();
-  const config = usePreviewWebviewConfig(threadRef.environmentId, profileId);
+  const preparedConnection = usePreparedConnection(threadRef.environmentId);
+  const environmentIsLoopback = previewEnvironmentIsLocal(Option.getOrNull(preparedConnection));
+  const config = usePreviewWebviewConfig(
+    threadRef.environmentId,
+    profileId,
+    environmentIsLoopback,
+  );
   const [initialSrc] = useState(() => initialUrl ?? "about:blank");
   const tabLeaseRef = useRef<AcquiredDesktopTab | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -299,6 +309,7 @@ export function HostedBrowserWebview(props: {
           src={webviewGeneration === 0 ? initialSrc : recoverySrc}
           partition={config.partition}
           webpreferences={config.webPreferences}
+          allowpopups="true"
           {...(config.preloadUrl ? { preload: config.preloadUrl } : {})}
           data-preview-tab={runtimeTabId}
           data-preview-server-tab={tabId}

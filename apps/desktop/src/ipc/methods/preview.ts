@@ -9,6 +9,8 @@ import {
   DesktopPreviewAutomationTypeInputSchema,
   DesktopPreviewAutomationWaitForInputSchema,
   DesktopPreviewConfigInputSchema,
+  DesktopPreviewLoopbackForwardInputSchema,
+  DesktopPreviewLoopbackForwardResultSchema,
   DesktopPreviewNavigateInputSchema,
   DesktopPreviewRecordingArtifactSchema,
   DesktopPreviewRecordingSaveInputSchema,
@@ -29,11 +31,17 @@ import {
   INCOGNITO_BROWSER_PROFILE_ID,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as NodeURL from "node:url";
 
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
+import * as PreviewLoopbackForwarder from "../../preview/LoopbackForwarder.ts";
+import {
+  attachPreviewLoopbackSession,
+  attachPreviewLoopbackSessionIfRemote,
+} from "../../preview/LoopbackRequestInterceptor.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
 import { PREVIEW_WEBVIEW_PREFERENCES } from "../../preview/WebviewPreferences.ts";
 import * as IpcChannels from "../channels.ts";
@@ -96,6 +104,22 @@ export const navigate = DesktopIpc.makeIpcMethod({
   handler: Effect.fn("desktop.ipc.preview.navigate")(function* ({ tabId, url }) {
     const manager = yield* PreviewManager.PreviewManager;
     yield* manager.navigate(tabId, url);
+  }),
+});
+
+export const ensureLoopbackForward = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_ENSURE_LOOPBACK_FORWARD_CHANNEL,
+  payload: DesktopPreviewLoopbackForwardInputSchema,
+  result: DesktopPreviewLoopbackForwardResultSchema,
+  handler: Effect.fn("desktop.ipc.preview.ensureLoopbackForward")(function* (input) {
+    const forwarder = yield* PreviewLoopbackForwarder.PreviewLoopbackForwarder;
+    const result = yield* forwarder.ensure(input);
+    if (result.kind !== "not-applicable" && !input.environmentIsLoopback) {
+      const manager = yield* PreviewManager.PreviewManager;
+      const session = yield* manager.getBrowserSession(input.environmentId);
+      yield* Effect.promise(() => attachPreviewLoopbackSession(session, forwarder));
+    }
+    return result;
   }),
 });
 
@@ -273,13 +297,25 @@ export const getPreviewConfig = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_GET_CONFIG_CHANNEL,
   payload: DesktopPreviewConfigInputSchema,
   result: DesktopPreviewWebviewConfigSchema,
-  handler: Effect.fn("desktop.ipc.preview.getConfig")(function* ({ environmentId, profileId }) {
+  handler: Effect.fn("desktop.ipc.preview.getConfig")(function* ({
+    environmentId,
+    profileId,
+    environmentIsLoopback,
+  }) {
     const manager = yield* PreviewManager.PreviewManager;
     const { scope, persistent, namespace } = resolvePartitionScope(environmentId, profileId);
     // Creating the session first is what installs the UA rewrite and permission
     // handlers; a guest that attached to an untouched partition would run with
     // Electron's default UA and Chromium's default permission behaviour.
-    yield* manager.getBrowserSession(scope, persistent, namespace);
+    const session = yield* manager.getBrowserSession(scope, persistent, namespace);
+    const forwarder = yield* Effect.serviceOption(
+      PreviewLoopbackForwarder.PreviewLoopbackForwarder,
+    );
+    if (Option.isSome(forwarder)) {
+      yield* Effect.promise(() =>
+        attachPreviewLoopbackSessionIfRemote(session, forwarder.value, environmentIsLoopback),
+      );
+    }
     return {
       partition: yield* manager.getBrowserPartition(scope, persistent, namespace),
       webPreferences: PREVIEW_WEBVIEW_PREFERENCES,

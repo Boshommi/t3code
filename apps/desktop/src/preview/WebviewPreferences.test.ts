@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { PREVIEW_WEBVIEW_PREFERENCES } from "./WebviewPreferences.ts";
+import { applyPreviewWebviewAttach, PREVIEW_WEBVIEW_PREFERENCES } from "./WebviewPreferences.ts";
 
 /**
  * Mirrors Electron's webview attribute parser closely enough to catch the
@@ -74,5 +74,25 @@ describe("PREVIEW_WEBVIEW_PREFERENCES", () => {
     // Electron splits on `,` without trimming, so any whitespace would turn
     // a key into an unknown one and silently drop the security flag.
     expect(PREVIEW_WEBVIEW_PREFERENCES).not.toMatch(/\s/);
+  });
+});
+
+describe("applyPreviewWebviewAttach", () => {
+  it("pins guest security flags and enables popups before the guest attaches", () => {
+    const webPreferences = {
+      sandbox: false,
+      nodeIntegration: true,
+      nodeIntegrationInSubFrames: true,
+      contextIsolation: true,
+    };
+    const params: Record<string, string> = { partition: "persist:t3code-preview-test" };
+    applyPreviewWebviewAttach(webPreferences, params);
+    expect(webPreferences).toEqual({
+      sandbox: true,
+      nodeIntegration: false,
+      nodeIntegrationInSubFrames: false,
+      contextIsolation: false,
+    });
+    expect(params.allowpopups).toBe("true");
   });
 });

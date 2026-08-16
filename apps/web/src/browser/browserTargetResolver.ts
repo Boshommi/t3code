@@ -1,3 +1,4 @@
+import type { PreparedConnection } from "@t3tools/client-runtime/connection";
 import type {
   BrowserNavigationTarget,
   EnvironmentId,
@@ -6,6 +7,7 @@ import type {
 import { isLoopbackHost, normalizePreviewUrl } from "@t3tools/shared/preview";
 import { isLocalLoopbackHost, isPrivateNetworkHost } from "@t3tools/shared/hostClassification";
 
+import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
 import { readPreparedConnection } from "~/state/session";
 
 export {
@@ -14,6 +16,28 @@ export {
   isPrivateNetworkHost,
   isPublicFaviconHost,
 } from "@t3tools/shared/hostClassification";
+
+/**
+ * Local chats (this device, WSL, or any environment already on loopback)
+ * must not use the desktop preview SOCKS tunnel. That path exists to reach
+ * localhost on a remote machine.
+ */
+export function previewEnvironmentIsLocal(
+  connection: {
+    readonly httpBaseUrl: string;
+    readonly target?: PreparedConnection["target"];
+  } | null,
+): boolean {
+  if (connection === null) return true;
+  const target = connection.target;
+  if (target?._tag === "PrimaryConnectionTarget") return true;
+  if (target !== undefined && isDesktopLocalConnectionTarget(target)) return true;
+  try {
+    return isLocalLoopbackHost(new URL(connection.httpBaseUrl).hostname);
+  } catch {
+    return true;
+  }
+}
 
 const readEnvironmentUrl = (environmentId: EnvironmentId): URL => {
   const connection = readPreparedConnection(environmentId);
