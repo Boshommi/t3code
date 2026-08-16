@@ -26,6 +26,7 @@ import * as Equal from "effect/Equal";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -1191,6 +1192,28 @@ const make = Effect.gen(function* () {
   const threadTitleRegenerationWorker = yield* makeDrainableWorker(
     processThreadTitleRegenerationSafely,
   );
+  const inFlightTurnStarts = yield* Ref.make(0);
+  const forkTurnStartWork = <E, R>(effect: Effect.Effect<void, E, R>) =>
+    Effect.gen(function* () {
+      yield* Ref.update(inFlightTurnStarts, (count) => count + 1);
+      yield* effect.pipe(
+        Effect.catchCause((cause) => {
+          if (Cause.hasInterruptsOnly(cause)) {
+            return Effect.interrupt;
+          }
+          return Effect.logWarning("provider command reactor background turn work failed", {
+            cause: Cause.pretty(cause),
+          });
+        }),
+        Effect.ensuring(Ref.update(inFlightTurnStarts, (count) => count - 1)),
+        Effect.forkScoped,
+      );
+    });
+  const awaitTurnStartIdle = Effect.gen(function* () {
+    while ((yield* Ref.get(inFlightTurnStarts)) > 0) {
+      yield* Effect.sleep("5 millis");
+    }
+  });
 
   const processTurnStartRequested = Effect.fn("processTurnStartRequested")(function* (
     receivedEvent: Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>,
@@ -1467,35 +1490,36 @@ const make = Effect.gen(function* () {
       turnsAfterCompaction.set(event.payload.threadId, queued);
       return;
     }
-    const sendTurnRequest = yield* buildSendTurnRequestForThread({
-      threadId: event.payload.threadId,
-      messageText: projectComposerContextForProvider({
-        text: message.text,
-        records: message.context?.records ?? [],
-      }),
-      ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
-      ...(event.payload.modelSelection !== undefined
-        ? { modelSelection: event.payload.modelSelection }
-        : {}),
-      interactionMode: event.payload.interactionMode,
-      createdAt: event.payload.createdAt,
-    }).pipe(
-      Effect.map(Option.some),
-      Effect.catchCause((cause) => handleTurnStartFailure(cause).pipe(Effect.as(Option.none()))),
-    );
-
-    if (Option.isNone(sendTurnRequest)) {
-      return;
-    }
-
-    const send = providerService
-      .sendTurn(sendTurnRequest.value)
-      .pipe(Effect.asVoid, Effect.catchCause(recoverTurnStartFailure));
-    // The forked send settles `sent` from here on, so drop the entry the post-processing hook uses.
+    // Drop the replay entry before forking so the post-processing hook does not settle it
+    // while session start still runs off the sequential reactor.
     if (resumed && event.commandId !== null) resumedTurnStarts.delete(event.commandId);
-    yield* send.pipe(
-      Effect.ensuring(resumed ? Deferred.succeed(resumed.sent, undefined) : Effect.void),
-      Effect.forkScoped,
+    yield* forkTurnStartWork(
+      Effect.gen(function* () {
+        const sendTurnRequest = yield* buildSendTurnRequestForThread({
+          threadId: event.payload.threadId,
+          messageText: projectComposerContextForProvider({
+            text: message.text,
+            records: message.context?.records ?? [],
+          }),
+          ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+          ...(event.payload.modelSelection !== undefined
+            ? { modelSelection: event.payload.modelSelection }
+            : {}),
+          interactionMode: event.payload.interactionMode,
+          createdAt: event.payload.createdAt,
+        }).pipe(
+          Effect.map(Option.some),
+          Effect.catchCause((cause) =>
+            handleTurnStartFailure(cause).pipe(Effect.as(Option.none())),
+          ),
+        );
+        if (Option.isNone(sendTurnRequest)) {
+          return;
+        }
+        yield* providerService
+          .sendTurn(sendTurnRequest.value)
+          .pipe(Effect.asVoid, Effect.catchCause(recoverTurnStartFailure));
+      }).pipe(Effect.ensuring(resumed ? Deferred.succeed(resumed.sent, undefined) : Effect.void)),
     );
   });
 
@@ -1795,7 +1819,7 @@ const make = Effect.gen(function* () {
         yield* processTurnStartRequested(event);
         return;
       case "thread.turn-interrupt-requested":
-        yield* processTurnInterruptRequested(event);
+        yield* forkTurnStartWork(processTurnInterruptRequested(event).pipe(Effect.asVoid));
         return;
       case "thread.approval-response-requested":
         yield* processApprovalResponseRequested(event);
@@ -1920,6 +1944,7 @@ const make = Effect.gen(function* () {
     drain: Effect.gen(function* () {
       yield* worker.drain;
       yield* threadTitleRegenerationWorker.drain;
+      yield* awaitTurnStartIdle;
     }),
   } satisfies ProviderCommandReactorShape;
 });
