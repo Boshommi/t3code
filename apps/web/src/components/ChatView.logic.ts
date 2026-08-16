@@ -453,6 +453,29 @@ export function buildExpiredTerminalContextToastCopy(
   };
 }
 
+export function isWorktreeOriginFetchFailure(errorMessage: string): boolean {
+  return (
+    /GitVcsDriver\.fetchRemote/i.test(errorMessage) ||
+    /git fetch origin failed/i.test(errorMessage) ||
+    /could not read Username/i.test(errorMessage)
+  );
+}
+
+export function buildWorktreeBootstrapFailureToastCopy(input: {
+  errorMessage: string;
+  startFromOrigin: boolean;
+}): { title: string; description: string } {
+  const errorMessage = input.errorMessage.trim() || "Failed to create a new worktree.";
+  const description =
+    input.startFromOrigin && isWorktreeOriginFetchFailure(errorMessage)
+      ? `${errorMessage} Turn off "Start from origin" to use your local branch instead.`
+      : errorMessage;
+  return {
+    title: "Could not create worktree",
+    description,
+  };
+}
+
 export function branchMismatchKey(
   threadId: string | null,
   mismatch: { threadBranch: string; currentBranch: string } | null,

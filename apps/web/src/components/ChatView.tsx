@@ -342,6 +342,7 @@ import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   branchMismatchKey,
   buildExpiredTerminalContextToastCopy,
+  buildWorktreeBootstrapFailureToastCopy,
   buildLocalDraftThread,
   buildLoadingThreadFromShell,
   buildThreadTurnInterruptInput,
@@ -6350,10 +6351,23 @@ function ChatViewContent(props: ChatViewProps) {
             );
           }
         }
-        setThreadError(
-          threadIdForSend,
-          error instanceof Error ? error.message : "Failed to send message.",
-        );
+        const errorMessage = error instanceof Error ? error.message : "Failed to send message.";
+        setThreadError(threadIdForSend, errorMessage);
+        // Bootstrap deletes the half-created thread, so the banner often
+        // vanishes with it. Toast the worktree failure so it stays visible.
+        if (baseBranchForWorktree) {
+          const toastCopy = buildWorktreeBootstrapFailureToastCopy({
+            errorMessage,
+            startFromOrigin,
+          });
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: toastCopy.title,
+              description: toastCopy.description,
+            }),
+          );
+        }
       }
     }
     sendInFlightRef.current = false;
