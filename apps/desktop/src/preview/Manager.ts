@@ -2080,6 +2080,25 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     );
   });
 
+  const preparePreviewGuest = (
+    wc: Electron.WebContents,
+    relatedUrl?: string,
+  ): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const loopbackForwarder = yield* Effect.serviceOption(
+        PreviewLoopbackForwarder.PreviewLoopbackForwarder,
+      );
+      if (Option.isNone(loopbackForwarder)) {
+        return;
+      }
+      const proxyPort = loopbackForwarder.value.proxyPort;
+      yield* Effect.promise(() => applyPreviewLoopbackProxy(wc.session, proxyPort));
+      const targetUrl = relatedUrl ?? wc.getURL();
+      if (targetUrl.length > 0) {
+        yield* loopbackForwarder.value.ensureRelated(targetUrl).pipe(Effect.ignore);
+      }
+    });
+
   const registerWebviewUnlocked = Effect.fn("PreviewManager.registerWebviewUnlocked")(function* (
     tabId: string,
     webContentsId: number,
@@ -2238,9 +2257,15 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       wc.getURL() !== pendingUrl
     ) {
       runFork(
-        attemptPromise({ operation: "registerWebview.loadPendingUrl", tabId, webContentsId }, () =>
-          wc.loadURL(pendingUrl),
-        ).pipe(Effect.ignore),
+        preparePreviewGuest(wc, pendingUrl).pipe(
+          Effect.andThen(
+            attemptPromise(
+              { operation: "registerWebview.loadPendingUrl", tabId, webContentsId },
+              () => wc.loadURL(pendingUrl),
+            ),
+          ),
+          Effect.ignore,
+        ),
       );
     }
   });
@@ -2342,6 +2367,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       );
       return;
     }
+    yield* preparePreviewGuest(wc, url);
     if (wc.getURL() === url) {
       yield* attempt({ operation: "navigate.reload", tabId, webContentsId: wc.id }, () =>
         wc.reload(),
@@ -2353,26 +2379,32 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     );
   });
 
-  const withWebContents = Effect.fn("PreviewManager.withWebContents")(function* (
-    operation: string,
-    tabId: string,
-    use: (wc: Electron.WebContents) => void,
-  ) {
+  const goBack = Effect.fn("PreviewManager.goBack")(function* (tabId: string) {
     const wc = yield* requireWebContents(tabId);
-    yield* attempt({ operation, tabId, webContentsId: wc.id }, () => use(wc));
-  });
-
-  const goBack = (tabId: string) =>
-    withWebContents("goBack", tabId, (wc) => {
+    yield* preparePreviewGuest(wc);
+    yield* attempt({ operation: "goBack", tabId, webContentsId: wc.id }, () => {
       if (wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack();
     });
-  const goForward = (tabId: string) =>
-    withWebContents("goForward", tabId, (wc) => {
+  });
+  const goForward = Effect.fn("PreviewManager.goForward")(function* (tabId: string) {
+    const wc = yield* requireWebContents(tabId);
+    yield* preparePreviewGuest(wc);
+    yield* attempt({ operation: "goForward", tabId, webContentsId: wc.id }, () => {
       if (wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward();
     });
-  const refresh = (tabId: string) => withWebContents("refresh", tabId, (wc) => wc.reload());
-  const hardReload = (tabId: string) =>
-    withWebContents("hardReload", tabId, (wc) => wc.reloadIgnoringCache());
+  });
+  const refresh = Effect.fn("PreviewManager.refresh")(function* (tabId: string) {
+    const wc = yield* requireWebContents(tabId);
+    yield* preparePreviewGuest(wc, wc.getURL());
+    yield* attempt({ operation: "refresh", tabId, webContentsId: wc.id }, () => wc.reload());
+  });
+  const hardReload = Effect.fn("PreviewManager.hardReload")(function* (tabId: string) {
+    const wc = yield* requireWebContents(tabId);
+    yield* preparePreviewGuest(wc, wc.getURL());
+    yield* attempt({ operation: "hardReload", tabId, webContentsId: wc.id }, () =>
+      wc.reloadIgnoringCache(),
+    );
+  });
 
   const openDevTools = Effect.fn("PreviewManager.openDevTools")(function* (tabId: string) {
     const wc = yield* requireWebContents(tabId);

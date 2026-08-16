@@ -11,8 +11,8 @@ export const previewLoopbackPacDataUrl = (proxyPort: number): string =>
     buildPreviewLoopbackPacScript(proxyPort),
   ).toString("base64")}`;
 
-export const applyPreviewLoopbackProxy = (session: Session, proxyPort: number) => {
-  void session
+export const applyPreviewLoopbackProxy = (session: Session, proxyPort: number): Promise<void> =>
+  session
     .setProxy({
       mode: "pac_script",
       pacScript: previewLoopbackPacDataUrl(proxyPort),
@@ -20,10 +20,9 @@ export const applyPreviewLoopbackProxy = (session: Session, proxyPort: number) =
     .catch((error: unknown) => {
       console.warn("Failed to apply the preview loopback PAC", error);
     });
-};
 
 export const attachPreviewLoopbackRequestInterceptor = (session: Session, proxyPort: number) => {
-  applyPreviewLoopbackProxy(session, proxyPort);
+  void applyPreviewLoopbackProxy(session, proxyPort);
 };
 
 export const layer = Layer.effectDiscard(
