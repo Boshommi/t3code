@@ -1,5 +1,9 @@
 import { findRecordedWorktreeSetup, mergeDirectPreviewAnnotation } from "./ChatView.logic";
 import { recallCheckoutIsRepo, rememberCheckoutIsRepo } from "./ChatView.logic";
+import {
+  buildWorktreeBootstrapFailureToastCopy,
+  isWorktreeOriginFetchFailure,
+} from "./ChatView.logic";
 import { ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
 import { deriveProviderInstanceEntries } from "../providerInstances";
 import {
@@ -1022,5 +1026,54 @@ describe("mergeDirectPreviewAnnotation", () => {
     });
     expect(result.images).toEqual([]);
     expect(result.previewAnnotations[0]?.screenshot).toBeNull();
+  });
+});
+
+describe("buildWorktreeBootstrapFailureToastCopy", () => {
+  const fetchOriginError =
+    "Git command failed in GitVcsDriver.fetchRemote (/repo): git fetch origin failed";
+
+  it("detects origin fetch failures", () => {
+    expect(isWorktreeOriginFetchFailure(fetchOriginError)).toBe(true);
+    expect(isWorktreeOriginFetchFailure("could not read Username for 'https://github.com'")).toBe(
+      true,
+    );
+    expect(isWorktreeOriginFetchFailure("worktree already exists")).toBe(false);
+  });
+
+  it("hints to start from the local branch when origin fetch fails", () => {
+    expect(
+      buildWorktreeBootstrapFailureToastCopy({
+        errorMessage: fetchOriginError,
+        startFromOrigin: true,
+      }),
+    ).toEqual({
+      title: "Could not create worktree",
+      description: `${fetchOriginError} Turn off "Start from origin" to use your local branch instead.`,
+    });
+  });
+
+  it("keeps the raw error when start-from-origin was off", () => {
+    expect(
+      buildWorktreeBootstrapFailureToastCopy({
+        errorMessage: fetchOriginError,
+        startFromOrigin: false,
+      }),
+    ).toEqual({
+      title: "Could not create worktree",
+      description: fetchOriginError,
+    });
+  });
+
+  it("falls back when the error has no message", () => {
+    expect(
+      buildWorktreeBootstrapFailureToastCopy({
+        errorMessage: "   ",
+        startFromOrigin: true,
+      }),
+    ).toEqual({
+      title: "Could not create worktree",
+      description: "Failed to create a new worktree.",
+    });
   });
 });

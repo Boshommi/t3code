@@ -490,6 +490,7 @@ import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   branchMismatchKey,
   buildExpiredTerminalContextToastCopy,
+  buildWorktreeBootstrapFailureToastCopy,
   buildLocalDraftThread,
   collectUserMessageBlobPreviewUrls,
   createLocalDispatchSnapshot,
@@ -7367,11 +7368,23 @@ export default function ChatView(props: ChatViewProps) {
       }
       if (!isAtomCommandInterrupted(failure)) {
         const error = squashAtomCommandFailure(failure);
-        setThreadError(
-          threadIdForSend,
-          error instanceof Error ? error.message : "Failed to send message.",
-        );
-        if (
+        const errorMessage = error instanceof Error ? error.message : "Failed to send message.";
+        setThreadError(threadIdForSend, errorMessage);
+        // A failed worktree bootstrap can take the half-created thread, and
+        // its error banner, with it. Toast so the failure stays visible.
+        if (baseBranchForWorktree) {
+          const toastCopy = buildWorktreeBootstrapFailureToastCopy({
+            errorMessage,
+            startFromOrigin,
+          });
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: toastCopy.title,
+              description: toastCopy.description,
+            }),
+          );
+        } else if (
           draftId &&
           (backgroundDraftOpened || currentRouteThreadKeyRef.current !== routeThreadKey)
         ) {
@@ -7382,7 +7395,7 @@ export default function ChatView(props: ChatViewProps) {
                 submissionIntent === "background"
                   ? "Background task failed"
                   : "Could not start thread",
-              description: error instanceof Error ? error.message : "Failed to send message.",
+              description: errorMessage,
               actionProps: {
                 children: "Open draft",
                 onClick: () => {
