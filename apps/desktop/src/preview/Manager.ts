@@ -67,6 +67,7 @@ import { isPreviewAnnotationPayload } from "./PickedElementPayload.ts";
 import { playwrightInjectedRuntimeInstallExpression } from "./PlaywrightInjectedRuntime.ts";
 import { makePreviewAutomationKeySequence } from "./PreviewKeyboard.ts";
 import { captureFavicon, safeHttpOrigin, selectFaviconCandidates } from "./FaviconCapture.ts";
+import { decidePreviewWindowOpen, previewPopupBrowserWindowOptions } from "./PreviewWindowOpen.ts";
 
 export type PreviewNavStatus =
   | { kind: "Idle" }
@@ -1829,6 +1830,46 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       }
       runFork(forwardShortcut(event, input));
     };
+    const previewPartitionOf = (contents: Electron.WebContents): string | undefined => {
+      try {
+        const partition = contents.getWebPreferences()?.partition;
+        return typeof partition === "string" && partition.length > 0 ? partition : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    const attachPreviewWindowOpenHandler = (target: Electron.WebContents): void => {
+      target.setWindowOpenHandler((details) => {
+        const decision = decidePreviewWindowOpen({
+          url: details.url,
+          disposition: details.disposition,
+          features: details.features,
+        });
+        if (decision.kind === "allow-popup") {
+          return {
+            action: "allow",
+            overrideBrowserWindowOptions: previewPopupBrowserWindowOptions({
+              width: decision.width,
+              height: decision.height,
+              partition: previewPartitionOf(target),
+            }),
+          };
+        }
+        if (decision.kind === "navigate-same-tab") {
+          runFork(
+            attemptPromise(
+              { operation: "openPreviewWindow", tabId, webContentsId: target.id },
+              () => target.loadURL(decision.url),
+            ).pipe(Effect.ignore),
+          );
+        }
+        return { action: "deny" };
+      });
+      target.on("did-create-window", handlePreviewPopupCreated);
+    };
+    const handlePreviewPopupCreated = (child: BrowserWindow): void => {
+      attachPreviewWindowOpenHandler(child.webContents);
+    };
     yield* Scope.addFinalizer(
       scope,
       attempt({ operation: "detachListeners", tabId, webContentsId: wc.id }, () => {
@@ -1844,6 +1885,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         wc.off("audio-state-changed", audioStateChanged);
         wc.off("did-create-window", windowCreated);
         wc.off("before-input-event", beforeInput);
+        wc.off("did-create-window", handlePreviewPopupCreated);
         wc.ipc.off(HUMAN_INPUT_CHANNEL, humanInput);
         wc.ipc.off(MOUSE_NAVIGATE_CHANNEL, mouseNavigate);
       }).pipe(Effect.ignore),
@@ -1861,18 +1903,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         wc.on("audio-state-changed", audioStateChanged);
         wc.ipc.on(HUMAN_INPUT_CHANNEL, humanInput);
         wc.ipc.on(MOUSE_NAVIGATE_CHANNEL, mouseNavigate);
-        wc.setWindowOpenHandler((details) => {
-          if (previewWindowOpenAction(details) === "popup") {
-            return { action: "allow", overrideBrowserWindowOptions: POPUP_WINDOW_OPTIONS };
-          }
-          runFork(
-            attemptPromise({ operation: "openPreviewWindow", tabId, webContentsId: wc.id }, () =>
-              wc.loadURL(details.url),
-            ).pipe(Effect.ignore),
-          );
-          return { action: "deny" };
-        });
-        wc.on("did-create-window", windowCreated);
+        attachPreviewWindowOpenHandler(wc);
         wc.on("before-input-event", beforeInput);
       });
       yield* Ref.update(attachedRef, (attached) =>
