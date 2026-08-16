@@ -4,22 +4,18 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { attachPreviewLoopbackRequestInterceptor } from "./LoopbackRequestInterceptor.ts";
 
 describe("attachPreviewLoopbackRequestInterceptor", () => {
-  it("ensures a related tunnel before a localhost iframe request continues", async () => {
-    const ensureRelated = vi.fn(async () => undefined);
-    const onBeforeRequest = vi.fn();
-    const session = { webRequest: { onBeforeRequest } };
-    attachPreviewLoopbackRequestInterceptor(session as unknown as Session, ensureRelated);
-    attachPreviewLoopbackRequestInterceptor(session as unknown as Session, ensureRelated);
-    expect(onBeforeRequest).toHaveBeenCalledTimes(1);
-    const listener = onBeforeRequest.mock.calls[0]?.[1] as (
-      details: { url: string },
-      callback: (response: object) => void,
-    ) => void;
-    const callback = vi.fn();
-    listener({ url: "http://localhost:5173/app" }, callback);
-    await vi.waitFor(() => {
-      expect(ensureRelated).toHaveBeenCalledWith("http://localhost:5173/app");
-      expect(callback).toHaveBeenCalledWith({});
-    });
+  it("installs a preview-only PAC once per session", () => {
+    const setProxy = vi.fn(async () => undefined);
+    const session = { setProxy };
+    attachPreviewLoopbackRequestInterceptor(session as unknown as Session, 43210);
+    attachPreviewLoopbackRequestInterceptor(session as unknown as Session, 43210);
+    expect(setProxy).toHaveBeenCalledTimes(1);
+    const config = setProxy.mock.calls.at(0)?.at(0);
+    expect(config).toEqual(
+      expect.objectContaining({
+        mode: "pac_script",
+        pacScript: expect.stringContaining("data:application/x-ns-proxy-autoconfig;base64,"),
+      }),
+    );
   });
 });

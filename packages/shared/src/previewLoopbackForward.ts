@@ -90,6 +90,18 @@ export function parsePreviewTunnelPort(rawUrl: URL): number | null {
   return port;
 }
 
+export function buildPreviewLoopbackPacScript(proxyPort: number): string {
+  return [
+    "function FindProxyForURL(url, host) {",
+    '  if (host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1" || host === "0.0.0.0") {',
+    `    return "PROXY 127.0.0.1:${String(proxyPort)}";`,
+    "  }",
+    '  return "DIRECT";',
+    "}",
+    "",
+  ].join("\n");
+}
+
 export function decideLoopbackForward(input: {
   readonly environmentIsLoopback: boolean;
   readonly target: LoopbackPreviewTarget | null;
