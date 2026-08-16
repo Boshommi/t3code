@@ -999,6 +999,20 @@ export const DesktopPreviewNavigateInputSchema = Schema.Struct({
   url: Schema.String,
 });
 
+export const DesktopPreviewLoopbackForwardInputSchema = Schema.Struct({
+  environmentId: EnvironmentId,
+  url: Schema.String,
+  environmentIsLoopback: Schema.Boolean,
+  tunnelWebsocketUrl: Schema.String,
+});
+
+export const DesktopPreviewLoopbackForwardResultSchema = Schema.Struct({
+  navigateUrl: Schema.String,
+  kind: Schema.Literals(["not-applicable", "reuse-tunnel", "prefer-local", "start-tunnel"]),
+});
+export type DesktopPreviewLoopbackForwardResult =
+  typeof DesktopPreviewLoopbackForwardResultSchema.Type;
+
 export const DesktopPreviewConfigInputSchema = Schema.Struct({
   environmentId: EnvironmentId,
 });
@@ -1151,6 +1165,14 @@ export interface DesktopPreviewBridge {
   closeTab: (tabId: string) => Promise<void>;
   registerWebview: (tabId: string, webContentsId: number) => Promise<void>;
   navigate: (tabId: string, url: string) => Promise<void>;
+  /**
+   * Prefer a local loopback port when it is already taken. Otherwise bind that
+   * same port and forward it to the remote environment's 127.0.0.1.
+   * Optional: older desktop builds lack it and skip forwarding.
+   */
+  ensureLoopbackForward?: (
+    input: typeof DesktopPreviewLoopbackForwardInputSchema.Type,
+  ) => Promise<DesktopPreviewLoopbackForwardResult>;
   goBack: (tabId: string) => Promise<void>;
   goForward: (tabId: string) => Promise<void>;
   refresh: (tabId: string) => Promise<void>;

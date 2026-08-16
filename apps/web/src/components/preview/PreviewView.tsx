@@ -8,7 +8,6 @@ import {
   type PreviewViewportSetting,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
-import { normalizePreviewUrl } from "@t3tools/shared/preview";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -26,7 +25,9 @@ import {
   updatePreviewServerSnapshot,
   useThreadPreviewState,
 } from "~/previewStateStore";
+import { prepareDesktopLoopbackPreviewUrl } from "~/browser/resolvePreviewNavigationUrl";
 import { resolveDiscoveredServerUrl } from "~/browser/browserTargetResolver";
+import { normalizePreviewUrl } from "@t3tools/shared/preview";
 import { useEnvironmentHttpBaseUrl } from "~/state/environments";
 import { previewEnvironment } from "~/state/preview";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -177,7 +178,8 @@ export function PreviewView({
   const handleSubmitUrl = useCallback(
     async (next: string) => {
       try {
-        const normalized = normalizePreviewUrl(next);
+        const prepared = await prepareDesktopLoopbackPreviewUrl(threadRef.environmentId, next);
+        const normalized = prepared ?? normalizePreviewUrl(next);
         if (await navigateToResolvedUrl(normalized)) {
           recordVisitForThread(threadRef, normalized);
         }
@@ -191,7 +193,8 @@ export function PreviewView({
   const handleOpenServerUrl = useCallback(
     async (next: string) => {
       try {
-        const resolved = resolveDiscoveredServerUrl(threadRef.environmentId, next);
+        const prepared = await prepareDesktopLoopbackPreviewUrl(threadRef.environmentId, next);
+        const resolved = prepared ?? resolveDiscoveredServerUrl(threadRef.environmentId, next);
         if (await navigateToResolvedUrl(resolved)) {
           recordVisitForThread(threadRef, next);
         }

@@ -8,6 +8,8 @@ import {
   DesktopPreviewAutomationTypeInputSchema,
   DesktopPreviewAutomationWaitForInputSchema,
   DesktopPreviewConfigInputSchema,
+  DesktopPreviewLoopbackForwardInputSchema,
+  DesktopPreviewLoopbackForwardResultSchema,
   DesktopPreviewNavigateInputSchema,
   DesktopPreviewRecordingArtifactSchema,
   DesktopPreviewRecordingSaveInputSchema,
@@ -27,6 +29,7 @@ import * as Schema from "effect/Schema";
 import * as NodeURL from "node:url";
 
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
+import * as PreviewLoopbackForwarder from "../../preview/LoopbackForwarder.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
 import { PREVIEW_WEBVIEW_PREFERENCES } from "../../preview/WebviewPreferences.ts";
 import * as IpcChannels from "../channels.ts";
@@ -89,6 +92,16 @@ export const navigate = DesktopIpc.makeIpcMethod({
   handler: Effect.fn("desktop.ipc.preview.navigate")(function* ({ tabId, url }) {
     const manager = yield* PreviewManager.PreviewManager;
     yield* manager.navigate(tabId, url);
+  }),
+});
+
+export const ensureLoopbackForward = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_ENSURE_LOOPBACK_FORWARD_CHANNEL,
+  payload: DesktopPreviewLoopbackForwardInputSchema,
+  result: DesktopPreviewLoopbackForwardResultSchema,
+  handler: Effect.fn("desktop.ipc.preview.ensureLoopbackForward")(function* (input) {
+    const forwarder = yield* PreviewLoopbackForwarder.PreviewLoopbackForwarder;
+    return yield* forwarder.ensure(input);
   }),
 });
 
