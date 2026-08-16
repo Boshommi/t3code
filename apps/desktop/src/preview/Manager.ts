@@ -55,6 +55,7 @@ import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import { PREVIEW_PICTURE_IN_PICTURE_FRAME_CHANNEL } from "../ipc/channels.ts";
 import * as BrowserSession from "./BrowserSession.ts";
 import * as PreviewLoopbackForwarder from "./LoopbackForwarder.ts";
+import { applyPreviewLoopbackProxy } from "./LoopbackRequestInterceptor.ts";
 import {
   ANNOTATION_CAPTURED_CHANNEL,
   ANNOTATION_THEME_CHANNEL,
@@ -1576,6 +1577,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     const loopbackForwarder = yield* Effect.serviceOption(
       PreviewLoopbackForwarder.PreviewLoopbackForwarder,
     );
+    if (Option.isSome(loopbackForwarder)) {
+      applyPreviewLoopbackProxy(wc.session, loopbackForwarder.value.proxyPort);
+    }
     const scope = yield* Scope.fork(parentScope, "sequential");
     const attachmentId = Symbol();
     let documentId = 0;
@@ -1876,6 +1880,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       target.on("did-create-window", handlePreviewPopupCreated);
     };
     const handlePreviewPopupCreated = (child: BrowserWindow): void => {
+      if (Option.isSome(loopbackForwarder)) {
+        applyPreviewLoopbackProxy(child.webContents.session, loopbackForwarder.value.proxyPort);
+      }
       attachPreviewWindowOpenHandler(child.webContents);
     };
     yield* Scope.addFinalizer(
@@ -2104,6 +2111,12 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       // The guest we already own re-announced itself, so nothing about the tab
       // changed. Only push its zoom back down — Chromium may have just handed
       // this guest the app window's zoom level.
+      const loopbackForwarder = yield* Effect.serviceOption(
+        PreviewLoopbackForwarder.PreviewLoopbackForwarder,
+      );
+      if (Option.isSome(loopbackForwarder)) {
+        applyPreviewLoopbackProxy(wc.session, loopbackForwarder.value.proxyPort);
+      }
       yield* assertTabZoom(tabId);
       yield* attempt({ operation: "registerWebview.sendTheme", tabId, webContentsId }, () =>
         wc.send(ANNOTATION_THEME_CHANNEL, annotationTheme),
