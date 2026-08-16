@@ -206,8 +206,16 @@ export function PreviewView({
   );
 
   const handleRefresh = useCallback(() => {
-    if (previewBridge && runtimeTabId) void previewBridge.refresh(runtimeTabId);
-  }, [runtimeTabId]);
+    if (!previewBridge || !runtimeTabId) return;
+    const bridge = previewBridge;
+    const targetUrl = url;
+    void (async () => {
+      if (targetUrl.length > 0) {
+        await prepareDesktopLoopbackPreviewUrl(threadRef.environmentId, targetUrl);
+      }
+      await bridge.refresh(runtimeTabId);
+    })();
+  }, [runtimeTabId, threadRef.environmentId, url]);
 
   const handleZoomIn = useCallback(() => {
     if (previewBridge && runtimeTabId) void previewBridge.zoomIn(runtimeTabId);
