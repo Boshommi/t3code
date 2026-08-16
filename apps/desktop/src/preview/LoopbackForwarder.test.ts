@@ -6,7 +6,12 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { decideLoopbackForward } from "@t3tools/shared/previewLoopbackForward";
 
-import { make, pipeLocalSocketToTunnel } from "./LoopbackForwarder.ts";
+import {
+  make,
+  parsePreviewProxyDestination,
+  pipeLocalSocketToTunnel,
+  rewriteHttpProxyRequest,
+} from "./LoopbackForwarder.ts";
 
 const listen = (port: number) =>
   Effect.callback<NodeNet.Server>((resume) => {
@@ -59,6 +64,9 @@ describe("PreviewLoopbackForwarder", () => {
         tunnelWebsocketUrl: "ws://127.0.0.1:9/preview-tunnel?wsTicket=ticket&port=1",
       });
       expect(reuse.kind).toBe("reuse-tunnel");
+      const claimed = yield* listen(port);
+      expect(typeof claimed.address() === "object").toBe(true);
+      claimed.close();
     }),
   );
 
@@ -107,6 +115,51 @@ describe("PreviewLoopbackForwarder", () => {
         localPortHasListener: true,
       }).kind,
     ).toBe("prefer-local");
+  });
+
+  effectIt.effect("does not occupy the preview port for the default browser", () =>
+    Effect.gen(function* () {
+      const probe = yield* listen(0);
+      const address = probe.address();
+      const port = typeof address === "object" && address !== null ? address.port : 0;
+      probe.close();
+      const forwarder = yield* make;
+      yield* forwarder.ensure({
+        environmentId: EnvironmentId.make("env-1"),
+        url: `http://localhost:${String(port)}/`,
+        environmentIsLoopback: false,
+        tunnelWebsocketUrl: `ws://127.0.0.1:9/preview-tunnel?wsTicket=ticket&port=${String(port)}`,
+      });
+      const refused = yield* Effect.callback<boolean>((resume) => {
+        const socket = NodeNet.createConnection({ host: "127.0.0.1", port });
+        socket.once("error", (error) =>
+          resume(Effect.succeed("code" in error && error.code === "ECONNREFUSED")),
+        );
+        socket.once("connect", () => {
+          socket.destroy();
+          resume(Effect.succeed(false));
+        });
+        return Effect.sync(() => socket.destroy());
+      });
+      expect(refused).toBe(true);
+    }),
+  );
+
+  it("parses CONNECT and absolute-form proxy destinations", () => {
+    expect(parsePreviewProxyDestination("CONNECT localhost:5173 HTTP/1.1")).toEqual({
+      host: "localhost",
+      port: 5173,
+    });
+    expect(parsePreviewProxyDestination("GET http://127.0.0.1:3000/app HTTP/1.1")).toEqual({
+      host: "127.0.0.1",
+      port: 3000,
+    });
+  });
+
+  it("rewrites absolute-form preview proxy requests", () => {
+    expect(
+      rewriteHttpProxyRequest("GET http://localhost:3000/app?x=1 HTTP/1.1\r\nHost: localhost:3000"),
+    ).toBe("GET /app?x=1 HTTP/1.1\r\nHost: localhost:3000");
   });
 
   it("closes both sides when the tunnel websocket errors", () => {
