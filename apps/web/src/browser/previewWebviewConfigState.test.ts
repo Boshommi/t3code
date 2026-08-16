@@ -38,24 +38,60 @@ describe("loadPreviewWebviewConfig", () => {
     }),
   );
 
-  it.effect("forwards the environment id and profile to the bridge", () =>
+  it.effect("forwards the environment id, profile, and locality to the bridge", () =>
     Effect.gen(function* () {
-      let requested: { environmentId: EnvironmentId; profileId: string | undefined } | null = null;
+      let requested: {
+        environmentId: EnvironmentId;
+        profileId: string | undefined;
+        environmentIsLoopback: boolean | undefined;
+      } | null = null;
       const config = {
         partition: "persist:test-preview",
         webPreferences: "sandbox=yes",
         preloadUrl: null,
       };
-      const result = yield* loadPreviewWebviewConfig(environmentId, "work", {
-        getPreviewConfig: (requestedEnvironmentId, profileId) => {
-          requested = { environmentId: requestedEnvironmentId, profileId };
-          return Promise.resolve(config);
+      const result = yield* loadPreviewWebviewConfig(
+        environmentId,
+        "work",
+        {
+          getPreviewConfig: (requestedEnvironmentId, profileId, environmentIsLoopback) => {
+            requested = {
+              environmentId: requestedEnvironmentId,
+              profileId,
+              environmentIsLoopback,
+            };
+            return Promise.resolve(config);
+          },
+        },
+        false,
+      );
+
+      // The partition is derived in main from environment + profile; SOCKS
+      // attach depends on whether this environment is already loopback.
+      expect(requested).toEqual({
+        environmentId,
+        profileId: "work",
+        environmentIsLoopback: false,
+      });
+      expect(result).toEqual(config);
+    }),
+  );
+
+  it.effect("defaults to a local session so desktop does not attach the loopback proxy", () =>
+    Effect.gen(function* () {
+      let requestedLoopback: boolean | undefined;
+      yield* loadPreviewWebviewConfig(environmentId, undefined, {
+        getPreviewConfig: (_input, _profileId, environmentIsLoopback) => {
+          requestedLoopback = environmentIsLoopback;
+          return Promise.resolve({
+            partition: "persist:test-preview",
+            webPreferences: "sandbox=yes",
+            preloadUrl: null,
+          });
         },
       });
 
-      // The partition is derived in main from both, so both have to arrive.
-      expect(requested).toEqual({ environmentId, profileId: "work" });
-      expect(result).toEqual(config);
+      expect(requestedLoopback).toBe(true);
     }),
   );
 });

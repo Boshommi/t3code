@@ -9,6 +9,7 @@ import {
 } from "~/browser/browserDefaults";
 import { isWebUrl, resolveBrowserLinkTargetPreference } from "~/browser/browserLinkTarget";
 import type { OpenPreviewMutation } from "~/browser/openFileInPreview";
+import { resolvePreviewNavigationUrl } from "~/browser/resolvePreviewNavigationUrl";
 import { recordVisitForThread } from "~/browserHistoryStore";
 import { applyPreviewServerSnapshot, isPreviewSupportedInRuntime } from "~/previewStateStore";
 import { useRightPanelStore } from "~/rightPanelStore";
@@ -64,11 +65,12 @@ export async function openTerminalLinkInPreview<E>(
   };
 
   const defaults = await resolveBrowserDefaults();
+  const url = await resolvePreviewNavigationUrl(input.threadRef.environmentId, input.url);
   const result = await input.openPreview({
     environmentId: input.threadRef.environmentId,
     input: {
       threadId: input.threadRef.threadId,
-      url: input.url,
+      url,
       // Same reason as `openUrlInPreview`: this path handles its own result
       // mapping, so the configured defaults are applied explicitly.
       viewport: browserDefaultOpenViewport(defaults),
