@@ -405,6 +405,7 @@ import {
   agentControlledBrowserCloseConfirmation,
   branchMismatchKey,
   buildExpiredTerminalContextToastCopy,
+  buildWorktreeBootstrapFailureToastCopy,
   buildLocalDraftThread,
   buildLoadingThreadFromShell,
   buildRunningThreadTurnInterruptInput,
@@ -8176,16 +8177,28 @@ export default function ChatView(props: ChatViewProps) {
             );
           }
         }
-        setThreadError(
-          threadIdForSend,
-          error instanceof Error ? error.message : "Failed to send message.",
-        );
-        if (backgroundDraftOpened && draftId) {
+        const errorMessage = error instanceof Error ? error.message : "Failed to send message.";
+        setThreadError(threadIdForSend, errorMessage);
+        // Bootstrap deletes the half-created thread, so the banner often
+        // vanishes with it. Toast the worktree failure so it stays visible.
+        if (baseBranchForWorktree) {
+          const toastCopy = buildWorktreeBootstrapFailureToastCopy({
+            errorMessage,
+            startFromOrigin,
+          });
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: toastCopy.title,
+              description: toastCopy.description,
+            }),
+          );
+        } else if (backgroundDraftOpened && draftId) {
           toastManager.add(
             stackedThreadToast({
               type: "error",
               title: "Background task failed",
-              description: error instanceof Error ? error.message : "Failed to send message.",
+              description: errorMessage,
               actionProps: {
                 children: "Open draft",
                 onClick: () => {
