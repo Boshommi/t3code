@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
 import * as Layer from "effect/Layer";
 import * as PlatformError from "effect/PlatformError";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
@@ -102,6 +103,7 @@ export class BrowserSession extends Context.Service<
     ) => Effect.Effect<string, BrowserSessionPartitionDerivationError>;
     readonly isPartition: (partition: string) => boolean;
     readonly getSession: (scope?: string) => Effect.Effect<Session, BrowserSessionGetSessionError>;
+    readonly onSessionCreated: (handler: (session: Session) => void) => Effect.Effect<void>;
     readonly clearCookies: () => Effect.Effect<void, BrowserSessionStorageClearError>;
     readonly clearCache: () => Effect.Effect<void, BrowserSessionCacheClearError>;
   }
@@ -110,6 +112,18 @@ export class BrowserSession extends Context.Service<
 export const make = Effect.gen(function* BrowserSessionMake() {
   const crypto = yield* Crypto.Crypto;
   const sessionsRef = yield* SynchronizedRef.make<ReadonlyMap<string, Session>>(new Map());
+  const sessionCreatedHandlersRef = yield* Ref.make<ReadonlyArray<(session: Session) => void>>([]);
+
+  const notifySessionCreated = (session: Session) =>
+    Ref.get(sessionCreatedHandlersRef).pipe(
+      Effect.flatMap((handlers) =>
+        Effect.sync(() => {
+          for (const handler of handlers) {
+            handler(session);
+          }
+        }),
+      ),
+    );
 
   const getPartition = Effect.fn("BrowserSession.getPartition")(function* (scope = "shared") {
     const digest = yield* crypto.digest("SHA-256", new TextEncoder().encode(scope)).pipe(
@@ -126,7 +140,7 @@ export const make = Effect.gen(function* BrowserSessionMake() {
 
   const getSession = Effect.fn("BrowserSession.getSession")(function* (scope = "shared") {
     const partition = yield* getPartition(scope);
-    return yield* SynchronizedRef.modifyEffect(sessionsRef, (sessions) => {
+    const resolvedSession = yield* SynchronizedRef.modifyEffect(sessionsRef, (sessions) => {
       const existing = sessions.get(partition);
       if (existing) return Effect.succeed([existing, sessions] as const);
       return Effect.try({
@@ -155,12 +169,22 @@ export const make = Effect.gen(function* BrowserSessionMake() {
           }),
       });
     });
+    yield* notifySessionCreated(resolvedSession);
+    return resolvedSession;
   });
 
   return BrowserSession.of({
     getPartition,
     isPartition: (partition) => partition.startsWith(PREVIEW_PARTITION_PREFIX),
     getSession,
+    onSessionCreated: (handler) =>
+      Effect.gen(function* () {
+        yield* Ref.update(sessionCreatedHandlersRef, (handlers) => [...handlers, handler]);
+        const sessions = yield* SynchronizedRef.get(sessionsRef);
+        for (const existing of sessions.values()) {
+          handler(existing);
+        }
+      }),
     clearCookies: Effect.fn("BrowserSession.clearCookies")(function* () {
       const sessions = yield* SynchronizedRef.get(sessionsRef);
       yield* Effect.all(

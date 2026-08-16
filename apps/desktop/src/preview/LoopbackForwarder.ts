@@ -2,6 +2,8 @@ import { EnvironmentId } from "@t3tools/contracts";
 import {
   decideLoopbackForward,
   parseLoopbackPreviewTarget,
+  previewRequestUrlToLoopbackTarget,
+  rewritePreviewTunnelPort,
 } from "@t3tools/shared/previewLoopbackForward";
 import * as NodeNet from "node:net";
 import * as Context from "effect/Context";
@@ -142,16 +144,35 @@ export class PreviewLoopbackForwarder extends Context.Service<
       readonly environmentIsLoopback: boolean;
       readonly tunnelWebsocketUrl: string;
     }) => Effect.Effect<PreviewLoopbackForwardResult, PreviewLoopbackForwardError>;
+    readonly ensureRelated: (
+      rawUrl: string,
+    ) => Effect.Effect<PreviewLoopbackForwardResult, PreviewLoopbackForwardError>;
   }
 >()("@t3tools/desktop/preview/LoopbackForwarder/PreviewLoopbackForwarder") {}
 
+type StoredTunnelAuth = {
+  readonly environmentId: EnvironmentId;
+  readonly environmentIsLoopback: boolean;
+  readonly tunnelWebsocketUrl: string;
+};
+
 export const make = Effect.sync(() => {
   const tunnels = new Map<string, TunnelEntry>();
+  const authByEnvironment = new Map<EnvironmentId, StoredTunnelAuth>();
+  let lastRemoteEnvironmentId: EnvironmentId | undefined;
 
   const ensure: PreviewLoopbackForwarder["Service"]["ensure"] = Effect.fn(
     "desktop.preview.loopbackForward.ensure",
   )(function* (input) {
     const target = parseLoopbackPreviewTarget(input.url);
+    if (target !== null && !input.environmentIsLoopback) {
+      authByEnvironment.set(input.environmentId, {
+        environmentId: input.environmentId,
+        environmentIsLoopback: input.environmentIsLoopback,
+        tunnelWebsocketUrl: input.tunnelWebsocketUrl,
+      });
+      lastRemoteEnvironmentId = input.environmentId;
+    }
     const key = target ? tunnelKey(input.environmentId, target.port) : "";
     const hasOurTunnel = target !== null && tunnels.has(key);
     const localPortHasListener =
@@ -194,7 +215,30 @@ export const make = Effect.sync(() => {
     return { navigateUrl: input.url, kind: "start-tunnel" };
   });
 
-  return PreviewLoopbackForwarder.of({ ensure });
+  const ensureRelated: PreviewLoopbackForwarder["Service"]["ensureRelated"] = Effect.fn(
+    "desktop.preview.loopbackForward.ensureRelated",
+  )(function* (rawUrl) {
+    const target = parseLoopbackPreviewTarget(previewRequestUrlToLoopbackTarget(rawUrl));
+    if (target === null || lastRemoteEnvironmentId === undefined) {
+      return { navigateUrl: rawUrl, kind: "not-applicable" };
+    }
+    const auth = authByEnvironment.get(lastRemoteEnvironmentId);
+    if (auth === undefined) {
+      return { navigateUrl: rawUrl, kind: "not-applicable" };
+    }
+    const tunnelWebsocketUrl = rewritePreviewTunnelPort(auth.tunnelWebsocketUrl, target.port);
+    if (tunnelWebsocketUrl === null) {
+      return { navigateUrl: rawUrl, kind: "not-applicable" };
+    }
+    return yield* ensure({
+      environmentId: auth.environmentId,
+      url: target.href,
+      environmentIsLoopback: auth.environmentIsLoopback,
+      tunnelWebsocketUrl,
+    });
+  });
+
+  return PreviewLoopbackForwarder.of({ ensure, ensureRelated });
 });
 
 export const layer = Layer.effect(PreviewLoopbackForwarder, make);
