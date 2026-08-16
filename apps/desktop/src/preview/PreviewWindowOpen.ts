@@ -119,38 +119,30 @@ export function decidePreviewWindowOpen(input: PreviewWindowOpenInput): PreviewW
   return { kind: "deny" };
 }
 
-export function previewPopupBrowserWindowOptions(input: {
+export function previewPopupWindowBounds(input: {
   readonly width: number;
   readonly height: number;
-  readonly partition: string | undefined;
 }): {
   readonly width: number;
   readonly height: number;
   readonly autoHideMenuBar: true;
-  readonly webPreferences: {
-    readonly partition?: string;
-    readonly preload: string;
-    readonly nodeIntegration: false;
-    readonly contextIsolation: true;
-    readonly sandbox: true;
-    readonly webviewTag: false;
-  };
 } {
   return {
     width: input.width,
     height: input.height,
     autoHideMenuBar: true,
-    webPreferences: {
-      ...(input.partition !== undefined && input.partition.length > 0
-        ? { partition: input.partition }
-        : {}),
-      // Clear the preview pick preload so Google/OAuth pages do not inherit
-      // contextIsolation=false + ipc from the guest webview.
-      preload: "",
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-      webviewTag: false,
-    },
   };
 }
+
+/**
+ * Guest webviews often omit `webPreferences.partition`. Passing only these
+ * flags without the opener's `session` makes Electron use the default
+ * session, which has no preview PAC — localhost then hits the laptop.
+ */
+export const PREVIEW_POPUP_WEB_PREFERENCES = {
+  preload: "",
+  nodeIntegration: false,
+  contextIsolation: true,
+  sandbox: true,
+  webviewTag: false,
+} as const;

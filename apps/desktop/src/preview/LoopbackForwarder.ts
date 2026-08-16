@@ -260,6 +260,12 @@ export const make = Effect.gen(function* () {
           pipeLocalSocketToTunnel(socket, tunnelUrl, undefined, rest);
           return;
         }
+        // A remote preview PAC always sends localhost here. Connecting to the
+        // laptop port produces "connection refused" when the app is remote.
+        if (lastRemoteEnvironmentId !== undefined) {
+          socket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
+          return;
+        }
         const dest = await connectLocal(destination.port);
         socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
         if (rest.length > 0) dest.write(rest);
@@ -273,6 +279,10 @@ export const make = Effect.gen(function* () {
       ]);
       if (tunnelUrl !== null) {
         pipeLocalSocketToTunnel(socket, tunnelUrl, undefined, rewritten);
+        return;
+      }
+      if (lastRemoteEnvironmentId !== undefined) {
+        socket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
         return;
       }
       const dest = await connectLocal(destination.port);
