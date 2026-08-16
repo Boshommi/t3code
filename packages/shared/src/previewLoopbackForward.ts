@@ -11,7 +11,6 @@ export type LoopbackPreviewTarget = {
 export type LoopbackForwardDecision =
   | { readonly kind: "not-applicable" }
   | { readonly kind: "reuse-tunnel"; readonly port: number }
-  | { readonly kind: "prefer-local"; readonly port: number }
   | { readonly kind: "start-tunnel"; readonly port: number };
 
 export function parseLoopbackPreviewTarget(rawUrl: string): LoopbackPreviewTarget | null {
@@ -106,16 +105,12 @@ export function decideLoopbackForward(input: {
   readonly environmentIsLoopback: boolean;
   readonly target: LoopbackPreviewTarget | null;
   readonly hasOurTunnel: boolean;
-  readonly localPortHasListener: boolean;
 }): LoopbackForwardDecision {
   if (input.target === null || input.environmentIsLoopback) {
     return { kind: "not-applicable" };
   }
   if (input.hasOurTunnel) {
     return { kind: "reuse-tunnel", port: input.target.port };
-  }
-  if (input.localPortHasListener) {
-    return { kind: "prefer-local", port: input.target.port };
   }
   return { kind: "start-tunnel", port: input.target.port };
 }

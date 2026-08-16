@@ -23,7 +23,7 @@ const listen = (port: number) =>
   });
 
 describe("PreviewLoopbackForwarder", () => {
-  effectIt.effect("prefers a local listener instead of remapping the port", () =>
+  effectIt.effect("tunnels to the remote port even when the same local port is busy", () =>
     Effect.gen(function* () {
       const occupied = yield* listen(0);
       const address = occupied.address();
@@ -37,7 +37,7 @@ describe("PreviewLoopbackForwarder", () => {
       });
       expect(result).toEqual({
         navigateUrl: `http://localhost:${String(port)}/app`,
-        kind: "prefer-local",
+        kind: "start-tunnel",
       });
       occupied.close();
     }),
@@ -106,15 +106,14 @@ describe("PreviewLoopbackForwarder", () => {
     }),
   );
 
-  it("keeps prefer-local ahead of remapping in the decision table", () => {
+  it("always starts a remote tunnel from the in-app preview", () => {
     expect(
       decideLoopbackForward({
         environmentIsLoopback: false,
         target: { href: "http://localhost:4000/", port: 4000, protocol: "http:" },
         hasOurTunnel: false,
-        localPortHasListener: true,
       }).kind,
-    ).toBe("prefer-local");
+    ).toBe("start-tunnel");
   });
 
   effectIt.effect("does not occupy the preview port for the default browser", () =>

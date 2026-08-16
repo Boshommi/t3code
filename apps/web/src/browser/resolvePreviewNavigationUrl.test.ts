@@ -23,7 +23,7 @@ describe("resolvePreviewNavigationUrl", () => {
     });
     ensureLoopbackForward.mockResolvedValue({
       navigateUrl: "http://localhost:4000/",
-      kind: "prefer-local",
+      kind: "start-tunnel",
     });
     vi.stubGlobal(
       "fetch",
