@@ -4,6 +4,7 @@ import { isPreviewableUrl } from "@t3tools/shared/preview";
 import * as Schema from "effect/Schema";
 
 import type { OpenPreviewMutation } from "~/browser/openFileInPreview";
+import { resolvePreviewNavigationUrl } from "~/browser/resolvePreviewNavigationUrl";
 import { recordVisitForThread } from "~/browserHistoryStore";
 import { applyPreviewServerSnapshot, isPreviewSupportedInRuntime } from "~/previewStateStore";
 import { useRightPanelStore } from "~/rightPanelStore";
@@ -82,9 +83,10 @@ export async function openTerminalLinkInPreview<E>(
   }
 
   if (choice === "open-in-preview") {
+    const url = await resolvePreviewNavigationUrl(input.threadRef.environmentId, input.url);
     const result = await input.openPreview({
       environmentId: input.threadRef.environmentId,
-      input: { threadId: input.threadRef.threadId, url: input.url },
+      input: { threadId: input.threadRef.threadId, url },
     });
     if (result._tag === "Failure") {
       if (isAtomCommandInterrupted(result)) {
