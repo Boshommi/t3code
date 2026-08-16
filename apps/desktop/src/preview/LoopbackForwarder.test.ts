@@ -7,6 +7,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { decideLoopbackForward } from "@t3tools/shared/previewLoopbackForward";
 
 import {
+  absoluteProxyUrlToOriginPath,
   make,
   parsePreviewProxyDestination,
   pipeLocalSocketToTunnel,
@@ -171,6 +172,73 @@ describe("PreviewLoopbackForwarder", () => {
     expect(
       rewriteHttpProxyRequest("GET http://localhost:3000/app?x=1 HTTP/1.1\r\nHost: localhost:3000"),
     ).toBe("GET /app?x=1 HTTP/1.1\r\nHost: localhost:3000");
+  });
+
+  it("keeps percent-encoding so Next.js does not redirect-loop", () => {
+    const encoded = "/_next/static/chunks/%5Broot-of-the-server%5D__04oy0md._.js";
+    expect(absoluteProxyUrlToOriginPath(`http://localhost:3000${encoded}`)).toBe(encoded);
+    expect(new URL(`http://localhost:3000${encoded}`).pathname.includes("%5B")).toBe(true);
+    expect(
+      rewriteHttpProxyRequest(
+        `GET http://localhost:3000${encoded} HTTP/1.1\r\nHost: localhost:3000`,
+      ),
+    ).toBe(`GET ${encoded} HTTP/1.1\r\nHost: localhost:3000`);
+  });
+
+  effectIt.effect("forwards encoded static paths without decoding them", () =>
+    Effect.gen(function* () {
+      const seen: string[] = [];
+      const origin = yield* Effect.callback<NodeNet.Server>((resume) => {
+        const server = NodeNet.createServer((socket) => {
+          let buffer = "";
+          socket.on("data", (chunk) => {
+            buffer += chunk.toString("utf8");
+            if (!buffer.includes("\r\n\r\n")) return;
+            seen.push(buffer.split("\r\n")[0] ?? "");
+            socket.end("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok");
+          });
+        });
+        server.listen({ host: "127.0.0.1", port: 0 }, () => resume(Effect.succeed(server)));
+        return Effect.sync(() => {
+          server.close();
+        });
+      });
+      const address = origin.address();
+      const originPort = typeof address === "object" && address !== null ? address.port : 0;
+      const forwarder = yield* make;
+      const encoded = `/_next/static/chunks/%5Broot-of-the-server%5D__04oy0md._.js`;
+      yield* Effect.tryPromise(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            const socket = NodeNet.createConnection(
+              { host: "127.0.0.1", port: forwarder.proxyPort },
+              () => {
+                socket.write(
+                  [
+                    `GET http://127.0.0.1:${String(originPort)}${encoded} HTTP/1.1`,
+                    `Host: 127.0.0.1:${String(originPort)}`,
+                    "Connection: close",
+                    "",
+                    "",
+                  ].join("\r\n"),
+                );
+              },
+            );
+            socket.on("data", () => {
+              socket.end();
+              resolve();
+            });
+            socket.on("error", reject);
+          }),
+      );
+      expect(seen[0]).toBe(`GET ${encoded} HTTP/1.1`);
+    }),
+  );
+
+  it("reads origin-form destinations from the Host header", () => {
+    expect(
+      parsePreviewProxyDestination("GET /_next/static/foo.js HTTP/1.1", "localhost:3000"),
+    ).toEqual({ host: "localhost", port: 3000 });
   });
 
   it("closes both sides when the tunnel websocket errors", () => {
