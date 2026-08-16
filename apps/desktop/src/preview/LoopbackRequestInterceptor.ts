@@ -1,4 +1,3 @@
-import { buildPreviewLoopbackPacScript } from "@t3tools/shared/previewLoopbackForward";
 import type { Session } from "electron";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -6,19 +5,21 @@ import * as Layer from "effect/Layer";
 import * as BrowserSession from "./BrowserSession.ts";
 import * as PreviewLoopbackForwarder from "./LoopbackForwarder.ts";
 
-export const previewLoopbackPacDataUrl = (proxyPort: number): string =>
-  `data:application/x-ns-proxy-autoconfig;base64,${Buffer.from(
-    buildPreviewLoopbackPacScript(proxyPort),
-  ).toString("base64")}`;
+export const previewLoopbackProxyRules = (proxyPort: number): string =>
+  `http=127.0.0.1:${String(proxyPort)};https=127.0.0.1:${String(proxyPort)}`;
 
 export const applyPreviewLoopbackProxy = (session: Session, proxyPort: number): Promise<void> =>
   session
     .setProxy({
-      mode: "pac_script",
-      pacScript: previewLoopbackPacDataUrl(proxyPort),
+      // Electron 41 ignores data: PAC URLs and never asks a proxy about
+      // localhost unless <-loopback> is set. fixed_servers + that bypass is
+      // what resolveProxy honors; the Node proxy still only tunnels loopback.
+      mode: "fixed_servers",
+      proxyRules: previewLoopbackProxyRules(proxyPort),
+      proxyBypassRules: "<-loopback>",
     })
     .catch((error: unknown) => {
-      console.warn("Failed to apply the preview loopback PAC", error);
+      console.warn("Failed to apply the preview loopback proxy", error);
     });
 
 export const attachPreviewLoopbackRequestInterceptor = (session: Session, proxyPort: number) => {

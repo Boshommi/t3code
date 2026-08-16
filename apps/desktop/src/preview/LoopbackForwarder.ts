@@ -1,11 +1,15 @@
 import { EnvironmentId } from "@t3tools/contracts";
 import { isLoopbackHost } from "@t3tools/shared/preview";
 import {
+  buildPreviewLoopbackPacScript,
   decideLoopbackForward,
   parseLoopbackPreviewTarget,
+  PREVIEW_LOOPBACK_PAC_PATH,
+  previewLoopbackPacScriptUrl,
   previewRequestUrlToLoopbackTarget,
   rewritePreviewTunnelPort,
 } from "@t3tools/shared/previewLoopbackForward";
+import * as NodeHttp from "node:http";
 import * as NodeNet from "node:net";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -210,10 +214,18 @@ const connectLocal = (port: number) =>
     dest.once("error", reject);
   });
 
+const connectRemote = (host: string, port: number) =>
+  new Promise<NodeNet.Socket>((resolve, reject) => {
+    const dest = NodeNet.createConnection({ host, port });
+    dest.once("connect", () => resolve(dest));
+    dest.once("error", reject);
+  });
+
 export class PreviewLoopbackForwarder extends Context.Service<
   PreviewLoopbackForwarder,
   {
     readonly proxyPort: number;
+    readonly pacScriptUrl: string;
     readonly ensure: (input: {
       readonly environmentId: EnvironmentId;
       readonly url: string;
@@ -249,8 +261,24 @@ export const make = Effect.gen(function* () {
       const { header, rest } = await readHttpHead(socket);
       const firstLine = header.split("\r\n")[0] ?? "";
       const destination = parsePreviewProxyDestination(firstLine);
-      if (destination === null || !isLoopbackHost(destination.host)) {
+      if (destination === null) {
         socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+        return;
+      }
+      if (!isLoopbackHost(destination.host)) {
+        const dest = await connectRemote(destination.host, destination.port);
+        if (firstLine.toUpperCase().startsWith("CONNECT ")) {
+          socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+          if (rest.length > 0) dest.write(rest);
+          socket.pipe(dest);
+          dest.pipe(socket);
+          return;
+        }
+        dest.write(
+          Buffer.concat([Buffer.from(`${rewriteHttpProxyRequest(header)}\r\n\r\n`), rest]),
+        );
+        socket.pipe(dest);
+        dest.pipe(socket);
         return;
       }
       const tunnelUrl = resolveTunnelUrl(destination.port);
@@ -303,6 +331,59 @@ export const make = Effect.gen(function* () {
       detail: "Could not listen for the preview-only loopback proxy.",
     });
   }
+
+  // Chromium 141+ ignores data: PAC URLs ("request PAC script but do not
+  // specify its URL") and falls back to DIRECT — the Mac connection-refused
+  // failure. Serve the PAC over loopback HTTP so setProxy has a real URL.
+  const pacServer = yield* Effect.callback<NodeHttp.Server, PreviewLoopbackForwardError>(
+    (resume) => {
+      const server = NodeHttp.createServer((request, response) => {
+        const path = request.url === undefined ? "" : (request.url.split("?")[0] ?? "");
+        if (request.method !== "GET" || path !== PREVIEW_LOOPBACK_PAC_PATH) {
+          response.writeHead(404);
+          response.end();
+          return;
+        }
+        const address = server.address();
+        const pacPort = typeof address === "object" && address !== null ? address.port : 0;
+        const body = buildPreviewLoopbackPacScript(proxyPort, previewLoopbackPacScriptUrl(pacPort));
+        response.writeHead(200, {
+          "cache-control": "no-store",
+          "content-type": "application/x-ns-proxy-autoconfig",
+        });
+        response.end(body);
+      });
+      let settled = false;
+      server.once("error", (cause) => {
+        if (settled) return;
+        settled = true;
+        resume(
+          Effect.fail(
+            new PreviewLoopbackForwardError({
+              detail: "Could not listen for the preview PAC script.",
+              cause,
+            }),
+          ),
+        );
+      });
+      server.listen({ host: "127.0.0.1", port: 0 }, () => {
+        if (settled) return;
+        settled = true;
+        resume(Effect.succeed(server));
+      });
+      return Effect.sync(() => {
+        server.close();
+      });
+    },
+  );
+  const pacAddress = pacServer.address();
+  const pacPort = typeof pacAddress === "object" && pacAddress !== null ? pacAddress.port : 0;
+  if (pacPort === 0) {
+    return yield* new PreviewLoopbackForwardError({
+      detail: "Could not listen for the preview PAC script.",
+    });
+  }
+  const pacScriptUrl = previewLoopbackPacScriptUrl(pacPort);
 
   const ensure: PreviewLoopbackForwarder["Service"]["ensure"] = Effect.fn(
     "desktop.preview.loopbackForward.ensure",
@@ -360,7 +441,7 @@ export const make = Effect.gen(function* () {
     });
   });
 
-  return PreviewLoopbackForwarder.of({ proxyPort, ensure, ensureRelated });
+  return PreviewLoopbackForwarder.of({ proxyPort, pacScriptUrl, ensure, ensureRelated });
 });
 
 export const layer = Layer.effect(PreviewLoopbackForwarder, make);

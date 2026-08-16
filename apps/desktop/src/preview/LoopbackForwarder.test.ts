@@ -23,6 +23,18 @@ const listen = (port: number) =>
   });
 
 describe("PreviewLoopbackForwarder", () => {
+  effectIt.effect("serves the PAC over HTTP so Chromium receives a real PAC URL", () =>
+    Effect.gen(function* () {
+      const forwarder = yield* make;
+      expect(forwarder.pacScriptUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/t3-preview\.pac$/);
+      const response = yield* Effect.tryPromise(() => fetch(forwarder.pacScriptUrl));
+      expect(response.ok).toBe(true);
+      const body = yield* Effect.tryPromise(() => response.text());
+      expect(body).toContain(`PROXY 127.0.0.1:${String(forwarder.proxyPort)}`);
+      expect(body).toContain(forwarder.pacScriptUrl);
+    }),
+  );
+
   effectIt.effect("tunnels to the remote port even when the same local port is busy", () =>
     Effect.gen(function* () {
       const occupied = yield* listen(0);
