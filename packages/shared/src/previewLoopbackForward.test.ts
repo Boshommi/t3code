@@ -82,40 +82,26 @@ describe("decideLoopbackForward", () => {
         environmentIsLoopback: true,
         target,
         hasOurTunnel: false,
-        localPortHasListener: false,
       }),
     ).toEqual({ kind: "not-applicable" });
   });
 
-  it("reuses an existing T3 tunnel before probing the local app", () => {
+  it("reuses an existing T3 tunnel", () => {
     expect(
       decideLoopbackForward({
         environmentIsLoopback: false,
         target,
         hasOurTunnel: true,
-        localPortHasListener: true,
       }),
     ).toEqual({ kind: "reuse-tunnel", port: 4000 });
   });
 
-  it("prefers a local listener when both machines have the same port", () => {
+  it("starts a remote tunnel even if the same local port is busy", () => {
     expect(
       decideLoopbackForward({
         environmentIsLoopback: false,
         target,
         hasOurTunnel: false,
-        localPortHasListener: true,
-      }),
-    ).toEqual({ kind: "prefer-local", port: 4000 });
-  });
-
-  it("starts a same-port tunnel when the local port is free", () => {
-    expect(
-      decideLoopbackForward({
-        environmentIsLoopback: false,
-        target,
-        hasOurTunnel: false,
-        localPortHasListener: false,
       }),
     ).toEqual({ kind: "start-tunnel", port: 4000 });
   });

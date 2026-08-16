@@ -1008,7 +1008,7 @@ export const DesktopPreviewLoopbackForwardInputSchema = Schema.Struct({
 
 export const DesktopPreviewLoopbackForwardResultSchema = Schema.Struct({
   navigateUrl: Schema.String,
-  kind: Schema.Literals(["not-applicable", "reuse-tunnel", "prefer-local", "start-tunnel"]),
+  kind: Schema.Literals(["not-applicable", "reuse-tunnel", "start-tunnel"]),
 });
 export type DesktopPreviewLoopbackForwardResult =
   typeof DesktopPreviewLoopbackForwardResultSchema.Type;
@@ -1166,8 +1166,7 @@ export interface DesktopPreviewBridge {
   registerWebview: (tabId: string, webContentsId: number) => Promise<void>;
   navigate: (tabId: string, url: string) => Promise<void>;
   /**
-   * Prefer a local loopback port when it is already taken. Otherwise bind that
-   * same port and forward it to the remote environment's 127.0.0.1.
+   * Forward in-app localhost preview traffic to the remote environment.
    * Optional: older desktop builds lack it and skip forwarding.
    */
   ensureLoopbackForward?: (

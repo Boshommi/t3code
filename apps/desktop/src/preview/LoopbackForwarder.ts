@@ -26,7 +26,7 @@ export class PreviewLoopbackForwardError extends Schema.TaggedErrorClass<Preview
 
 export type PreviewLoopbackForwardResult = {
   readonly navigateUrl: string;
-  readonly kind: "not-applicable" | "reuse-tunnel" | "prefer-local" | "start-tunnel";
+  readonly kind: "not-applicable" | "reuse-tunnel" | "start-tunnel";
 };
 
 type TunnelEntry = {
@@ -43,25 +43,6 @@ const toSendableBytes = (buffer: Buffer): Uint8Array<ArrayBuffer> => {
   payload.set(buffer);
   return payload;
 };
-
-const probeListenerOnLoopback = (port: number) =>
-  new Promise<boolean>((resolve) => {
-    const socket = NodeNet.createConnection({ host: "127.0.0.1", port });
-    let settled = false;
-    const settle = (value: boolean) => {
-      if (settled) return;
-      settled = true;
-      socket.destroy();
-      resolve(value);
-    };
-    socket.setTimeout(250);
-    socket.once("connect", () => settle(true));
-    socket.once("error", () => settle(false));
-    socket.once("timeout", () => settle(false));
-  });
-
-const hasListenerOnLoopback = (port: number): Effect.Effect<boolean> =>
-  Effect.promise(() => probeListenerOnLoopback(port));
 
 export const pipeLocalSocketToTunnel = (
   local: NodeNet.Socket,
@@ -272,8 +253,7 @@ export const make = Effect.gen(function* () {
         socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
         return;
       }
-      const localListening = await probeListenerOnLoopback(destination.port);
-      const tunnelUrl = localListening ? null : resolveTunnelUrl(destination.port);
+      const tunnelUrl = resolveTunnelUrl(destination.port);
       if (firstLine.toUpperCase().startsWith("CONNECT ")) {
         if (tunnelUrl !== null) {
           socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
@@ -328,15 +308,12 @@ export const make = Effect.gen(function* () {
     }
     const key = target ? tunnelKey(input.environmentId, target.port) : "";
     const hasOurTunnel = target !== null && tunnels.has(key);
-    const localPortHasListener =
-      target === null ? false : yield* hasListenerOnLoopback(target.port);
     const decision = decideLoopbackForward({
       environmentIsLoopback: input.environmentIsLoopback,
       target,
       hasOurTunnel,
-      localPortHasListener,
     });
-    if (decision.kind === "not-applicable" || decision.kind === "prefer-local") {
+    if (decision.kind === "not-applicable") {
       return { navigateUrl: input.url, kind: decision.kind };
     }
     if (decision.kind === "reuse-tunnel") {
