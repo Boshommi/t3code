@@ -39,6 +39,48 @@ export function parseLoopbackPreviewTarget(rawUrl: string): LoopbackPreviewTarge
   return { href, port, protocol: parsed.protocol };
 }
 
+export function rewritePreviewTunnelPort(tunnelWebsocketUrl: string, port: number): string | null {
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(tunnelWebsocketUrl);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") return null;
+  if (parsed.pathname !== PREVIEW_LOOPBACK_TUNNEL_PATH) return null;
+  if ((parsed.searchParams.get("wsTicket") ?? "").length === 0) return null;
+  parsed.searchParams.set("port", String(port));
+  return parsed.toString();
+}
+
+export const PREVIEW_LOOPBACK_REQUEST_URL_PATTERNS = [
+  "http://localhost/*",
+  "http://127.0.0.1/*",
+  "http://[::1]/*",
+  "https://localhost/*",
+  "https://127.0.0.1/*",
+  "https://[::1]/*",
+  "ws://localhost/*",
+  "ws://127.0.0.1/*",
+  "ws://[::1]/*",
+  "wss://localhost/*",
+  "wss://127.0.0.1/*",
+  "wss://[::1]/*",
+] as const;
+
+export function previewRequestUrlToLoopbackTarget(rawUrl: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return rawUrl;
+  }
+  if (parsed.protocol === "ws:") parsed.protocol = "http:";
+  if (parsed.protocol === "wss:") parsed.protocol = "https:";
+  return parsed.toString();
+}
+
 export function parsePreviewTunnelPort(rawUrl: URL): number | null {
   const raw = rawUrl.searchParams.get("port");
   if (raw === null || raw.trim().length === 0) return null;

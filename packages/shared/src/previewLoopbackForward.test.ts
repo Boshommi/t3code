@@ -4,6 +4,8 @@ import {
   decideLoopbackForward,
   parseLoopbackPreviewTarget,
   parsePreviewTunnelPort,
+  previewRequestUrlToLoopbackTarget,
+  rewritePreviewTunnelPort,
 } from "./previewLoopbackForward.ts";
 
 describe("parseLoopbackPreviewTarget", () => {
@@ -21,6 +23,31 @@ describe("parseLoopbackPreviewTarget", () => {
 
   it("rejects a public host", () => {
     expect(parseLoopbackPreviewTarget("https://example.com:4000")).toBeNull();
+  });
+});
+
+describe("rewritePreviewTunnelPort", () => {
+  it("keeps the ticket and swaps only the tunneled port", () => {
+    expect(
+      rewritePreviewTunnelPort(
+        "wss://nuc.example.ts.net/preview-tunnel?wsTicket=abc&port=3000",
+        5173,
+      ),
+    ).toBe("wss://nuc.example.ts.net/preview-tunnel?wsTicket=abc&port=5173");
+  });
+
+  it("rejects a URL that is not the preview tunnel", () => {
+    expect(
+      rewritePreviewTunnelPort("wss://nuc.example.ts.net/ws?wsTicket=abc&port=3000", 5173),
+    ).toBe(null);
+  });
+});
+
+describe("previewRequestUrlToLoopbackTarget", () => {
+  it("maps a websocket iframe/HMR URL onto the same loopback port", () => {
+    expect(previewRequestUrlToLoopbackTarget("ws://localhost:5173/@vite/client")).toBe(
+      "http://localhost:5173/@vite/client",
+    );
   });
 });
 

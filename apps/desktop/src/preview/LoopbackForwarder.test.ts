@@ -28,7 +28,7 @@ describe("PreviewLoopbackForwarder", () => {
         environmentId: EnvironmentId.make("env-1"),
         url: `http://localhost:${String(port)}/app`,
         environmentIsLoopback: false,
-        tunnelWebsocketUrl: "ws://127.0.0.1:9/preview-tunnel?port=1",
+        tunnelWebsocketUrl: "ws://127.0.0.1:9/preview-tunnel?wsTicket=ticket&port=1",
       });
       expect(result).toEqual({
         navigateUrl: `http://localhost:${String(port)}/app`,
@@ -49,16 +49,52 @@ describe("PreviewLoopbackForwarder", () => {
         environmentId: EnvironmentId.make("env-1"),
         url: `http://localhost:${String(port)}/`,
         environmentIsLoopback: false,
-        tunnelWebsocketUrl: "ws://127.0.0.1:9/preview-tunnel?port=1",
+        tunnelWebsocketUrl: "ws://127.0.0.1:9/preview-tunnel?wsTicket=ticket&port=1",
       });
       expect(result.kind).toBe("start-tunnel");
       const reuse = yield* forwarder.ensure({
         environmentId: EnvironmentId.make("env-1"),
         url: `http://localhost:${String(port)}/`,
         environmentIsLoopback: false,
-        tunnelWebsocketUrl: "ws://127.0.0.1:9/preview-tunnel?port=1",
+        tunnelWebsocketUrl: "ws://127.0.0.1:9/preview-tunnel?wsTicket=ticket&port=1",
       });
       expect(reuse.kind).toBe("reuse-tunnel");
+    }),
+  );
+
+  effectIt.effect("opens a second same-port tunnel for an iframe localhost URL", () =>
+    Effect.gen(function* () {
+      const firstProbe = yield* listen(0);
+      const firstAddress = firstProbe.address();
+      const firstPort =
+        typeof firstAddress === "object" && firstAddress !== null ? firstAddress.port : 0;
+      firstProbe.close();
+      const secondProbe = yield* listen(0);
+      const secondAddress = secondProbe.address();
+      const secondPort =
+        typeof secondAddress === "object" && secondAddress !== null ? secondAddress.port : 0;
+      secondProbe.close();
+      const forwarder = yield* make;
+      yield* forwarder.ensure({
+        environmentId: EnvironmentId.make("env-1"),
+        url: `http://localhost:${String(firstPort)}/`,
+        environmentIsLoopback: false,
+        tunnelWebsocketUrl: `ws://127.0.0.1:9/preview-tunnel?wsTicket=ticket&port=${String(firstPort)}`,
+      });
+      const related = yield* forwarder.ensureRelated(`http://localhost:${String(secondPort)}/app`);
+      expect(related.kind).toBe("start-tunnel");
+      const websocket = yield* forwarder.ensureRelated(
+        `ws://localhost:${String(secondPort)}/@vite/client`,
+      );
+      expect(websocket.kind).toBe("reuse-tunnel");
+    }),
+  );
+
+  effectIt.effect("ignores related localhost requests before any remote tunnel exists", () =>
+    Effect.gen(function* () {
+      const forwarder = yield* make;
+      const result = yield* forwarder.ensureRelated("http://localhost:5173/");
+      expect(result.kind).toBe("not-applicable");
     }),
   );
 

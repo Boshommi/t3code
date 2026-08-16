@@ -63,6 +63,19 @@ describe("BrowserSession", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("notifies session listeners for existing and new sessions", () =>
+    Effect.gen(function* () {
+      const browserSessions = yield* BrowserSession.BrowserSession;
+      const first = yield* browserSessions.getSession("scope-a");
+      const seen: unknown[] = [];
+      yield* browserSessions.onSessionCreated((session) => {
+        seen.push(session);
+      });
+      const second = yield* browserSessions.getSession("scope-b");
+      assert.deepStrictEqual(seen, [first, second]);
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("grants clipboard-sanitized-write through both the request and check handlers", () =>
     Effect.gen(function* () {
       const browserSessions = yield* BrowserSession.BrowserSession;
