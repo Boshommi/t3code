@@ -511,12 +511,12 @@ describe("AcpSessionRuntime", () => {
     );
   });
 
-  it.effect("fails session startup when session/load returns an error", () =>
+  it.effect("starts a fresh session when session/load returns an error", () =>
     Effect.gen(function* () {
       const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
-      const error = yield* runtime.start().pipe(Effect.flip);
+      const started = yield* runtime.start();
 
-      expect(error._tag).toBe("AcpRequestError");
+      expect(started.sessionId).toBe("mock-session-1");
     }).pipe(
       Effect.provide(
         AcpSessionRuntime.layer({
@@ -535,6 +535,39 @@ describe("AcpSessionRuntime", () => {
       ),
       Effect.scoped,
       Effect.provide(NodeServices.layer),
+    ),
+  );
+
+  it.effect("times out a hung initialize handshake", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      const error = yield* runtime.start().pipe(Effect.flip);
+
+      expect(error._tag).toBe("AcpTransportError");
+      if (error._tag === "AcpTransportError") {
+        expect(error.method).toBe("initialize");
+        expect(error.detail).toContain("timed out");
+      }
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          authMethodId: "test",
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              T3_ACP_HANG_INITIALIZE: "1",
+              T3_ACP_HANDSHAKE_DELAY_MS: "10000",
+            },
+          },
+          cwd: process.cwd(),
+          sessionRpcTimeout: "200 millis",
+          clientInfo: { name: "t3-test", version: "0.0.0" },
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+      TestClock.withLive,
     ),
   );
 
