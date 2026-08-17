@@ -2,6 +2,37 @@ import { isLoopbackHost, normalizePreviewUrl } from "./preview.ts";
 
 export const PREVIEW_LOOPBACK_TUNNEL_PATH = "/preview-tunnel";
 
+/**
+ * Public name that resolves to 127.0.0.1 but is not in Chromium's implicit
+ * localhost proxy-bypass list. Same trick cmux uses (`cmux-loopback.localtest.me`):
+ * the in-app browser visits this host, SOCKS CONNECT goes to the alias, and
+ * we map it back to 127.0.0.1 on the remote. Staying on the name `localhost`
+ * is what made Chromium send HTTP-proxy absolute-form GETs / skip the proxy.
+ */
+export const PREVIEW_LOOPBACK_ALIAS_HOST = "t3-loopback.localtest.me";
+
+export const isPreviewLoopbackAliasHost = (host: string): boolean => {
+  const normalized = host
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/gu, "");
+  return (
+    normalized === PREVIEW_LOOPBACK_ALIAS_HOST ||
+    normalized.endsWith(`.${PREVIEW_LOOPBACK_ALIAS_HOST}`)
+  );
+};
+
+export const rewritePreviewUrlToAlias = (rawUrl: string): string => {
+  try {
+    const url = new URL(rawUrl);
+    if (!isLoopbackHost(url.hostname)) return rawUrl;
+    url.hostname = PREVIEW_LOOPBACK_ALIAS_HOST;
+    return url.href;
+  } catch {
+    return rawUrl;
+  }
+};
+
 export type LoopbackPreviewTarget = {
   readonly href: string;
   readonly port: number;
@@ -27,7 +58,9 @@ export function parseLoopbackPreviewTarget(rawUrl: string): LoopbackPreviewTarge
     return null;
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-  if (!isLoopbackHost(parsed.hostname)) return null;
+  if (!isLoopbackHost(parsed.hostname) && !isPreviewLoopbackAliasHost(parsed.hostname)) {
+    return null;
+  }
   const port =
     parsed.port.length > 0
       ? Number.parseInt(parsed.port, 10)
@@ -57,15 +90,19 @@ export const PREVIEW_LOOPBACK_REQUEST_URL_PATTERNS = [
   "http://localhost/*",
   "http://127.0.0.1/*",
   "http://[::1]/*",
+  `http://${PREVIEW_LOOPBACK_ALIAS_HOST}/*`,
   "https://localhost/*",
   "https://127.0.0.1/*",
   "https://[::1]/*",
+  `https://${PREVIEW_LOOPBACK_ALIAS_HOST}/*`,
   "ws://localhost/*",
   "ws://127.0.0.1/*",
   "ws://[::1]/*",
+  `ws://${PREVIEW_LOOPBACK_ALIAS_HOST}/*`,
   "wss://localhost/*",
   "wss://127.0.0.1/*",
   "wss://[::1]/*",
+  `wss://${PREVIEW_LOOPBACK_ALIAS_HOST}/*`,
 ] as const;
 
 export function previewRequestUrlToLoopbackTarget(rawUrl: string): string {

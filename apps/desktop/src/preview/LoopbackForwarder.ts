@@ -1,9 +1,11 @@
 import { EnvironmentId } from "@t3tools/contracts";
 import {
   decideLoopbackForward,
+  isPreviewLoopbackAliasHost,
   parseLoopbackPreviewTarget,
   previewRequestUrlToLoopbackTarget,
   rewritePreviewTunnelPort,
+  rewritePreviewUrlToAlias,
 } from "@t3tools/shared/previewLoopbackForward";
 import * as NodeNet from "node:net";
 import * as NodeStream from "node:stream";
@@ -17,6 +19,7 @@ import {
   pipeByteSources,
   runHttpForwardSession,
 } from "./previewHttp.ts";
+import { pipeWithPreviewLoopbackAliasRewrite } from "./previewLoopbackAlias.ts";
 import { acceptSocks5Connect, SOCKS5_REP, SOCKS5_VERSION, socks5Reply } from "./socks5.ts";
 
 export class PreviewLoopbackForwardError extends Schema.TaggedErrorClass<PreviewLoopbackForwardError>()(
@@ -248,6 +251,10 @@ export const make = Effect.gen(function* () {
         const target = await acceptSocks5Connect(socket, first);
         const dest = await connectDestination(target.host, target.port);
         socket.write(socks5Reply(SOCKS5_REP.succeeded));
+        if (isPreviewLoopbackAliasHost(target.host)) {
+          pipeWithPreviewLoopbackAliasRewrite(socket, dest, target.leftover);
+          return;
+        }
         pipeByteSources(socket, dest, target.leftover);
         return;
       }
@@ -291,15 +298,16 @@ export const make = Effect.gen(function* () {
     if (decision.kind === "not-applicable") {
       return { navigateUrl: input.url, kind: decision.kind };
     }
+    const navigateUrl = rewritePreviewUrlToAlias(input.url);
     if (decision.kind === "reuse-tunnel") {
-      return { navigateUrl: input.url, kind: decision.kind };
+      return { navigateUrl, kind: decision.kind };
     }
     tunnels.set(key, {
       environmentId: input.environmentId,
       port: decision.port,
       tunnelWebsocketUrl: input.tunnelWebsocketUrl,
     });
-    return { navigateUrl: input.url, kind: "start-tunnel" };
+    return { navigateUrl, kind: "start-tunnel" };
   });
 
   const ensureRelated: PreviewLoopbackForwarder["Service"]["ensureRelated"] = Effect.fn(

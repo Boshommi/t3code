@@ -71,6 +71,7 @@ describe("socks5", () => {
     expect(isSocks5LoopbackHost("::1")).toBe(true);
     expect(isSocks5LoopbackHost("0:0:0:0:0:0:0:1")).toBe(true);
     expect(isSocks5LoopbackHost("::ffff:127.0.0.1")).toBe(true);
+    expect(isSocks5LoopbackHost("t3-loopback.localtest.me")).toBe(true);
     expect(isSocks5LoopbackHost("accounts.google.com")).toBe(false);
     const mapped = Buffer.alloc(16);
     mapped[10] = 0xff;

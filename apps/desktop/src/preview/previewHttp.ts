@@ -1,4 +1,5 @@
 import { isLoopbackHost } from "@t3tools/shared/preview";
+import { isPreviewLoopbackAliasHost } from "@t3tools/shared/previewLoopbackForward";
 import * as NodeNet from "node:net";
 import * as NodeStream from "node:stream";
 
@@ -118,7 +119,7 @@ export const rewriteHttpProxyRequest = (header: string): string => {
 };
 
 export const isPreviewLoopbackDestination = (host: string): boolean => {
-  if (isLoopbackHost(host)) return true;
+  if (isLoopbackHost(host) || isPreviewLoopbackAliasHost(host)) return true;
   const lower = host.toLowerCase();
   return lower === "::1" || lower === "0:0:0:0:0:0:0:1" || lower.startsWith("::ffff:127.");
 };
