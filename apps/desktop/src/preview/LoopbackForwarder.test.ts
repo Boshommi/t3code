@@ -313,6 +313,55 @@ describe("PreviewLoopbackForwarder", () => {
     }),
   );
 
+  effectIt.effect("rewrites keep-alive absolute-form HTTP so Next :3000 does not 308", () =>
+    Effect.gen(function* () {
+      const forwarder = yield* make;
+      const absoluteGet = (path: string, connection: string) =>
+        [
+          `GET http://localhost:3000${path} HTTP/1.1`,
+          "Host: localhost:3000",
+          `Connection: ${connection}`,
+          "",
+          "",
+        ].join("\r\n");
+      const socket = yield* Effect.tryPromise(
+        () =>
+          new Promise<NodeNet.Socket>((resolve, reject) => {
+            const next = NodeNet.createConnection(
+              { host: "127.0.0.1", port: forwarder.proxyPort },
+              () => resolve(next),
+            );
+            next.once("error", reject);
+          }),
+      );
+      socket.write(absoluteGet("/", "keep-alive"));
+      const page = yield* Effect.tryPromise(() => readHttpResponse(socket));
+      expect(page.status).toBe("HTTP/1.1 200 OK");
+      expect(page.headers).not.toMatch(/308/);
+      expect(page.body.includes(Buffer.from("</html>"))).toBe(true);
+      expect(page.body.byteLength).toBeGreaterThan(1_000);
+
+      socket.write(
+        absoluteGet(
+          "/_next/static/chunks/src_lib_ui_suisseintl_fb5dd8da_module_1mdjsv5.css",
+          "keep-alive",
+        ),
+      );
+      const css = yield* Effect.tryPromise(() => readHttpResponse(socket));
+      expect(css.status).toBe("HTTP/1.1 200 OK");
+      expect(css.headers).not.toMatch(/308/);
+
+      socket.write(
+        absoluteGet("/_next/static/chunks/%5Broot-of-the-server%5D__04oy0md._.js", "close"),
+      );
+      const js = yield* Effect.tryPromise(() => readHttpResponse(socket));
+      socket.end();
+      expect(js.status).toBe("HTTP/1.1 200 OK");
+      expect(js.headers).not.toMatch(/308/);
+      expect(js.body.byteLength).toBeGreaterThan(0);
+    }),
+  );
+
   effectIt.effect("keeps Next :3000 HTML and keep-alive /_next assets complete", () =>
     Effect.gen(function* () {
       const forwarder = yield* make;

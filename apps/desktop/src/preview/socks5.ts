@@ -148,8 +148,11 @@ const readUntil = <T extends { readonly kind: string }>(
     socket.once("error", onError);
   });
 
-export const acceptSocks5Connect = async (socket: NodeNet.Socket): Promise<Socks5ConnectTarget> => {
-  const buffer = { current: Buffer.alloc(0) };
+export const acceptSocks5Connect = async (
+  socket: NodeNet.Socket,
+  initial: Buffer = Buffer.alloc(0),
+): Promise<Socks5ConnectTarget> => {
+  const buffer = { current: initial };
   const greeting = await readUntil(
     socket,
     buffer,
