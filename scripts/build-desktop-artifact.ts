@@ -1119,6 +1119,10 @@ export function renderMacPasskeyEntitlements(
     <string>${escapeXml(`${configuration.teamId}.${configuration.appId}`)}</string>
     <key>com.apple.developer.team-identifier</key>
     <string>${escapeXml(configuration.teamId)}</string>
+    <key>keychain-access-groups</key>
+    <array>
+      <string>${escapeXml(`${configuration.teamId}.${configuration.appId}.webauthn`)}</string>
+    </array>
     <key>com.apple.developer.associated-domains</key>
     <array>
 ${associatedDomains}

@@ -30,6 +30,7 @@ const MAX_POPUP_SIZE = 2_000;
 
 const OAUTH_POPUP_HOSTS = new Set([
   "accounts.google.com",
+  "passkeys.google.com",
   "accounts.youtube.com",
   "appleid.apple.com",
   "login.microsoftonline.com",

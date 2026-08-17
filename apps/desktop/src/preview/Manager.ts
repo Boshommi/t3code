@@ -1884,6 +1884,11 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         void attachPreviewLoopbackSession(child.webContents.session, loopbackForwarder.value);
       }
       attachPreviewWindowOpenHandler(child.webContents);
+      // Touch ID / the system passkey sheet attach to the focused window.
+      if (!child.isDestroyed()) {
+        child.show();
+        child.focus();
+      }
     };
     yield* Scope.addFinalizer(
       scope,
