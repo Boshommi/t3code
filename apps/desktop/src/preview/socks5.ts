@@ -1,4 +1,5 @@
 import { isLoopbackHost } from "@t3tools/shared/preview";
+import { isPreviewLoopbackAliasHost } from "@t3tools/shared/previewLoopbackForward";
 import * as NodeNet from "node:net";
 
 export const SOCKS5_VERSION = 0x05;
@@ -29,7 +30,7 @@ export const socks5Reply = (reply: number): Buffer =>
   Buffer.from([SOCKS5_VERSION, reply, 0x00, SOCKS5_ATYP_IPV4, 0, 0, 0, 0, 0, 0]);
 
 export const isSocks5LoopbackHost = (host: string): boolean => {
-  if (isLoopbackHost(host)) return true;
+  if (isLoopbackHost(host) || isPreviewLoopbackAliasHost(host)) return true;
   const lower = host.toLowerCase();
   if (lower === "::1" || lower === "0:0:0:0:0:0:0:1") return true;
   if (lower.startsWith("::ffff:")) {

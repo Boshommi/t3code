@@ -4,7 +4,10 @@ import * as Effect from "effect/Effect";
 import * as NodeNet from "node:net";
 import { describe, expect, it } from "vite-plus/test";
 
-import { decideLoopbackForward } from "@t3tools/shared/previewLoopbackForward";
+import {
+  decideLoopbackForward,
+  PREVIEW_LOOPBACK_ALIAS_HOST,
+} from "@t3tools/shared/previewLoopbackForward";
 
 import { make, pipeLocalSocketToTunnel } from "./LoopbackForwarder.ts";
 
@@ -171,7 +174,7 @@ describe("PreviewLoopbackForwarder", () => {
         tunnelWebsocketUrl: "ws://127.0.0.1:9/preview-tunnel?wsTicket=ticket&port=1",
       });
       expect(result).toEqual({
-        navigateUrl: `http://localhost:${String(port)}/app`,
+        navigateUrl: `http://t3-loopback.localtest.me:${String(port)}/app`,
         kind: "start-tunnel",
       });
       occupied.close();
@@ -377,6 +380,30 @@ describe("PreviewLoopbackForwarder", () => {
       expect(framed).toContain("101 Switching Protocols");
       expect(framed).toContain("Upgrade: websocket");
       expect(framed).toContain("echo:ping");
+    }),
+  );
+
+  effectIt.effect("serves Next :3000 through the cmux-style loopback alias over SOCKS", () =>
+    Effect.gen(function* () {
+      const forwarder = yield* make;
+      const socket = yield* Effect.tryPromise(() =>
+        socksConnect(forwarder.proxyPort, PREVIEW_LOOPBACK_ALIAS_HOST, 3000),
+      );
+      httpGet(socket, `${PREVIEW_LOOPBACK_ALIAS_HOST}:3000`, "/", "keep-alive");
+      const page = yield* Effect.tryPromise(() => readHttpResponse(socket));
+      expect(page.status).toBe("HTTP/1.1 200 OK");
+      expect(page.headers).not.toMatch(/308/);
+      expect(page.body.includes(Buffer.from("</html>"))).toBe(true);
+      httpGet(
+        socket,
+        `${PREVIEW_LOOPBACK_ALIAS_HOST}:3000`,
+        "/_next/static/chunks/%5Broot-of-the-server%5D__04oy0md._.js",
+        "close",
+      );
+      const js = yield* Effect.tryPromise(() => readHttpResponse(socket));
+      socket.end();
+      expect(js.status).toBe("HTTP/1.1 200 OK");
+      expect(js.headers).not.toMatch(/308/);
     }),
   );
 

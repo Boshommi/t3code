@@ -2,10 +2,13 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   decideLoopbackForward,
+  isPreviewLoopbackAliasHost,
   parseLoopbackPreviewTarget,
   parsePreviewTunnelPort,
+  PREVIEW_LOOPBACK_ALIAS_HOST,
   previewRequestUrlToLoopbackTarget,
   rewritePreviewTunnelPort,
+  rewritePreviewUrlToAlias,
 } from "./previewLoopbackForward.ts";
 
 describe("parseLoopbackPreviewTarget", () => {
@@ -23,6 +26,24 @@ describe("parseLoopbackPreviewTarget", () => {
 
   it("rejects a public host", () => {
     expect(parseLoopbackPreviewTarget("https://example.com:4000")).toBeNull();
+  });
+
+  it("treats the preview loopback alias as a tunnel target", () => {
+    expect(parseLoopbackPreviewTarget(`http://${PREVIEW_LOOPBACK_ALIAS_HOST}:3000/`)).toEqual({
+      href: `http://${PREVIEW_LOOPBACK_ALIAS_HOST}:3000/`,
+      port: 3000,
+      protocol: "http:",
+    });
+  });
+});
+
+describe("preview loopback alias", () => {
+  it("rewrites localhost URLs onto the alias host", () => {
+    expect(rewritePreviewUrlToAlias("http://localhost:3000/app")).toBe(
+      `http://${PREVIEW_LOOPBACK_ALIAS_HOST}:3000/app`,
+    );
+    expect(isPreviewLoopbackAliasHost(PREVIEW_LOOPBACK_ALIAS_HOST)).toBe(true);
+    expect(isPreviewLoopbackAliasHost("example.com")).toBe(false);
   });
 });
 
