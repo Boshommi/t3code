@@ -193,6 +193,13 @@ export class PreviewLoopbackForwarder extends Context.Service<
   PreviewLoopbackForwarder,
   {
     readonly proxyPort: number;
+    /**
+     * Opens a byte stream to a preview destination using the same routing as
+     * the SOCKS listener: the remote tunnel when one is registered, a direct
+     * local connection otherwise. The preview http interceptor dials through
+     * this instead of Chromium's proxy stack.
+     */
+    readonly connect: (host: string, port: number) => Promise<NodeStream.Duplex>;
     readonly ensure: (input: {
       readonly environmentId: EnvironmentId;
       readonly url: string;
@@ -333,7 +340,12 @@ export const make = Effect.gen(function* () {
     });
   });
 
-  return PreviewLoopbackForwarder.of({ proxyPort, ensure, ensureRelated });
+  return PreviewLoopbackForwarder.of({
+    proxyPort,
+    connect: connectDestination,
+    ensure,
+    ensureRelated,
+  });
 });
 
 export const layer = Layer.effect(PreviewLoopbackForwarder, make);
