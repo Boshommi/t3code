@@ -6,12 +6,19 @@ import {
   rewritePreviewTunnelPort,
 } from "@t3tools/shared/previewLoopbackForward";
 import * as NodeNet from "node:net";
+import * as NodeStream from "node:stream";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
-import { acceptSocks5Connect, isSocks5LoopbackHost, SOCKS5_REP, socks5Reply } from "./socks5.ts";
+import {
+  isPreviewLoopbackDestination,
+  isTlsHandshake,
+  pipeByteSources,
+  runHttpForwardSession,
+} from "./previewHttp.ts";
+import { acceptSocks5Connect, SOCKS5_REP, socks5Reply } from "./socks5.ts";
 
 export class PreviewLoopbackForwardError extends Schema.TaggedErrorClass<PreviewLoopbackForwardError>()(
   "PreviewLoopbackForwardError",
@@ -45,55 +52,85 @@ const toSendableBytes = (buffer: Buffer): Uint8Array<ArrayBuffer> => {
   return payload;
 };
 
+export const createWebSocketDuplex = (
+  tunnelWebsocketUrl: string,
+  openWebSocket: (url: string) => WebSocket = (url) => new WebSocket(url),
+): NodeStream.Duplex => {
+  const websocket = openWebSocket(tunnelWebsocketUrl);
+  websocket.binaryType = "arraybuffer";
+  const pending: Buffer[] = [];
+  let opened = false;
+  let closed = false;
+  const duplex = new NodeStream.Duplex({
+    write(chunk, _encoding, callback) {
+      const payload = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      if (opened && websocket.readyState === WebSocket.OPEN) {
+        websocket.send(toSendableBytes(payload));
+        callback();
+        return;
+      }
+      if (
+        websocket.readyState !== WebSocket.CONNECTING &&
+        websocket.readyState !== WebSocket.OPEN
+      ) {
+        callback(new Error("Preview tunnel websocket is closed."));
+        return;
+      }
+      pending.push(payload);
+      callback();
+    },
+    read() {},
+  });
+  const closeBoth = () => {
+    if (closed) return;
+    closed = true;
+    duplex.destroy();
+    if (websocket.readyState === WebSocket.OPEN || websocket.readyState === WebSocket.CONNECTING) {
+      websocket.close();
+    }
+  };
+  websocket.addEventListener("open", () => {
+    opened = true;
+    for (const queued of pending.splice(0)) {
+      websocket.send(toSendableBytes(queued));
+    }
+  });
+  websocket.addEventListener("message", (event) => {
+    const payload = event.data;
+    if (payload instanceof ArrayBuffer) {
+      duplex.push(Buffer.from(payload));
+      return;
+    }
+    if (typeof payload === "string") {
+      duplex.push(Buffer.from(payload));
+    }
+  });
+  websocket.addEventListener("error", closeBoth);
+  websocket.addEventListener("close", () => duplex.push(null));
+  duplex.on("close", closeBoth);
+  duplex.on("finish", () => {
+    if (websocket.readyState === WebSocket.OPEN || websocket.readyState === WebSocket.CONNECTING) {
+      websocket.close();
+    }
+  });
+  return duplex;
+};
+
 export const pipeLocalSocketToTunnel = (
   local: NodeNet.Socket,
   tunnelWebsocketUrl: string,
   openWebSocket: (url: string) => WebSocket = (url) => new WebSocket(url),
   initial?: Uint8Array,
 ) => {
-  const websocket = openWebSocket(tunnelWebsocketUrl);
-  websocket.binaryType = "arraybuffer";
-  const pending: Uint8Array<ArrayBuffer>[] = [];
-  if (initial !== undefined && initial.byteLength > 0) {
-    pending.push(toSendableBytes(Buffer.from(initial)));
-  }
-  let opened = false;
-  const closeBoth = () => {
-    local.destroy();
-    if (websocket.readyState === WebSocket.OPEN || websocket.readyState === WebSocket.CONNECTING) {
-      websocket.close();
-    }
+  const duplex = createWebSocketDuplex(tunnelWebsocketUrl, openWebSocket);
+  pipeByteSources(local, duplex, initial === undefined ? undefined : Buffer.from(initial));
+  return {
+    websocket: undefined,
+    close: () => {
+      local.destroy();
+      duplex.destroy();
+    },
   };
-  local.on("data", (buffer: Buffer) => {
-    const payload = toSendableBytes(buffer);
-    if (opened && websocket.readyState === WebSocket.OPEN) {
-      websocket.send(payload);
-      return;
-    }
-    pending.push(payload);
-  });
-  local.on("error", closeBoth);
-  local.on("close", closeBoth);
-  websocket.addEventListener("open", () => {
-    opened = true;
-    for (const payload of pending) {
-      websocket.send(payload);
-    }
-    pending.length = 0;
-  });
-  websocket.addEventListener("message", (event) => {
-    const payload = event.data;
-    if (payload instanceof ArrayBuffer) {
-      local.write(Buffer.from(payload));
-      return;
-    }
-    if (typeof payload === "string") {
-      local.write(payload);
-    }
-  });
-  websocket.addEventListener("error", closeBoth);
-  websocket.addEventListener("close", () => local.destroy());
-  return { websocket, close: closeBoth };
 };
 
 const listenOnLoopback = (port: number, onConnection: (socket: NodeNet.Socket) => void) =>
@@ -137,13 +174,19 @@ const connectRemote = (host: string, port: number) =>
     dest.once("error", reject);
   });
 
-const pipeSockets = (left: NodeNet.Socket, right: NodeNet.Socket, initial?: Buffer) => {
-  if (initial !== undefined && initial.byteLength > 0) {
-    right.write(initial);
-  }
-  left.pipe(right);
-  right.pipe(left);
-};
+const readFirstChunk = (socket: NodeNet.Socket) =>
+  new Promise<Buffer>((resolve, reject) => {
+    const onData = (chunk: Buffer) => {
+      socket.off("error", onError);
+      resolve(chunk);
+    };
+    const onError = (cause: Error) => {
+      socket.off("data", onData);
+      reject(cause);
+    };
+    socket.once("data", onData);
+    socket.once("error", onError);
+  });
 
 export class PreviewLoopbackForwarder extends Context.Service<
   PreviewLoopbackForwarder,
@@ -179,36 +222,43 @@ export const make = Effect.gen(function* () {
     return rewritePreviewTunnelPort(auth.tunnelWebsocketUrl, port);
   };
 
-  const routeSocksSocket = (socket: NodeNet.Socket) => {
+  const connectDestination = async (host: string, port: number) => {
+    if (!isPreviewLoopbackDestination(host)) {
+      return connectRemote(host, port);
+    }
+    const tunnelUrl = resolveTunnelUrl(port);
+    if (tunnelUrl !== null) {
+      return createWebSocketDuplex(tunnelUrl);
+    }
+    if (lastRemoteEnvironmentId !== undefined) {
+      throw new Error("Remote preview tunnel is not available for this port.");
+    }
+    return connectLocal(port);
+  };
+
+  const routeProxySocket = (socket: NodeNet.Socket) => {
     void (async () => {
-      const target = await acceptSocks5Connect(socket);
-      if (!isSocks5LoopbackHost(target.host)) {
-        const dest = await connectRemote(target.host, target.port);
+      const first = await readFirstChunk(socket);
+      if (first[0] === 0x05) {
+        const target = await acceptSocks5Connect(socket, first);
+        const dest = await connectDestination(target.host, target.port);
         socket.write(socks5Reply(SOCKS5_REP.succeeded));
-        pipeSockets(socket, dest, target.leftover);
+        if (!isPreviewLoopbackDestination(target.host) || isTlsHandshake(target.leftover)) {
+          pipeByteSources(socket, dest, target.leftover);
+          return;
+        }
+        await runHttpForwardSession(socket, target.leftover, async () => dest);
         return;
       }
-      const tunnelUrl = resolveTunnelUrl(target.port);
-      if (tunnelUrl !== null) {
-        socket.write(socks5Reply(SOCKS5_REP.succeeded));
-        pipeLocalSocketToTunnel(socket, tunnelUrl, undefined, target.leftover);
-        return;
-      }
-      if (lastRemoteEnvironmentId !== undefined) {
-        socket.end(socks5Reply(SOCKS5_REP.hostUnreachable));
-        return;
-      }
-      const dest = await connectLocal(target.port);
-      socket.write(socks5Reply(SOCKS5_REP.succeeded));
-      pipeSockets(socket, dest, target.leftover);
+      await runHttpForwardSession(socket, first, connectDestination);
     })().catch(() => {
       if (!socket.destroyed) {
-        socket.end(socks5Reply(SOCKS5_REP.generalFailure));
+        socket.destroy();
       }
     });
   };
 
-  const proxyServer = yield* listenOnLoopback(0, routeSocksSocket);
+  const proxyServer = yield* listenOnLoopback(0, routeProxySocket);
   const proxyAddress = proxyServer.address();
   const proxyPort =
     typeof proxyAddress === "object" && proxyAddress !== null ? proxyAddress.port : 0;
