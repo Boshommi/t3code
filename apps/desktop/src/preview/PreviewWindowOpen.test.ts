@@ -34,6 +34,17 @@ describe("decidePreviewWindowOpen", () => {
     ).toEqual({ kind: "allow-popup", width: 420, height: 720 });
   });
 
+  it("allows the GIS OAuth feature string that omits the popup= token", () => {
+    expect(
+      decidePreviewWindowOpen({
+        url: "https://accounts.google.com/o/oauth2/v2/auth?client_id=1",
+        disposition: "new-window",
+        features:
+          "toolbar=no,location=no,directories=no,status=no,menubar=no,scrollbars=no,resizable=no,copyhistory=no,width=500,height=550",
+      }),
+    ).toEqual({ kind: "allow-popup", width: 500, height: 550 });
+  });
+
   it("allows about:blank OAuth bootstrap popups", () => {
     expect(
       decidePreviewWindowOpen({
@@ -87,6 +98,7 @@ describe("previewPopupWindowBounds", () => {
       width: 420,
       height: 720,
       autoHideMenuBar: true,
+      show: true,
     });
     expect(PREVIEW_POPUP_WEB_PREFERENCES).toMatchObject({
       preload: "",

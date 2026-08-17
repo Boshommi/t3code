@@ -24,6 +24,10 @@ const ALLOWED_PREVIEW_PERMISSIONS: ReadonlySet<string> = new Set([
   "clipboard-sanitized-write",
   "notifications",
   "geolocation",
+  // Google Identity's button iframe (accounts.google.com inside the guest)
+  // asks for storage access so it can render the signup / account picker.
+  "storage-access",
+  "top-level-storage-access",
   // Deliberately NOT local-fonts: preview sessions run untrusted web content,
   // and silently granting it would hand every page the user's installed-font
   // fingerprint (and font file bytes via FontData.blob()). The app's own font

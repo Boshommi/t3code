@@ -104,6 +104,8 @@ describe("BrowserSession", () => {
         "clipboard-sanitized-write",
         "notifications",
         "geolocation",
+        "storage-access",
+        "top-level-storage-access",
       ]) {
         assert.isTrue(requestAllows(permission), `request handler should allow ${permission}`);
         assert.isTrue(

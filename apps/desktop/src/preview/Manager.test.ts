@@ -358,6 +358,7 @@ const makeFaviconWebContents = (options?: {
   const loadURL = vi.fn(async (url: string) => {
     currentUrl = url;
   });
+  const setWindowOpenHandler = vi.fn();
   const off = vi.fn();
   const debuggerOff = vi.fn();
   const webContents = {
@@ -383,7 +384,7 @@ const makeFaviconWebContents = (options?: {
     send: webviewSend,
     session: { fetch },
     navigationHistory: { canGoBack: () => false, canGoForward: () => false },
-    setWindowOpenHandler: vi.fn(),
+    setWindowOpenHandler,
     executeJavaScriptInIsolatedWorld,
     debugger: {
       isAttached: () => false,
@@ -401,6 +402,7 @@ const makeFaviconWebContents = (options?: {
     loadURL,
     off,
     reload,
+    setWindowOpenHandler,
     setDestroyed: (value: boolean) => {
       destroyed = value;
     },
@@ -3643,6 +3645,34 @@ describe("PreviewManager", () => {
           detailKind: "exception-text",
           detailLength: text.length,
           cause: exceptionDetails,
+        });
+      }),
+    ),
+  );
+
+  effectIt.effect("opens the Google Identity popup instead of navigating the preview tab", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const guest = makeFaviconWebContents({ url: "http://localhost:3000/" });
+        fromId.mockReturnValue(guest.webContents);
+        yield* manager.createTab("tab_google_popup");
+        yield* manager.registerWebview("tab_google_popup", 42);
+        const handler = guest.setWindowOpenHandler.mock.calls.at(0)?.at(0);
+        expect(handler).toEqual(expect.any(Function));
+        const decision = handler?.({
+          url: "https://accounts.google.com/o/oauth2/v2/auth?client_id=1",
+          disposition: "new-window",
+          features:
+            "toolbar=no,location=no,directories=no,status=no,menubar=no,scrollbars=no,resizable=no,copyhistory=no,width=500,height=550",
+        });
+        expect(decision).toMatchObject({
+          action: "allow",
+          overrideBrowserWindowOptions: {
+            width: 500,
+            height: 550,
+            show: true,
+            autoHideMenuBar: true,
+          },
         });
       }),
     ),
