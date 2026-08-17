@@ -313,6 +313,73 @@ describe("PreviewLoopbackForwarder", () => {
     }),
   );
 
+  // The SOCKS circuit must stay a byte pipe. Parsing it as HTTP dropped the
+  // Upgrade header, so Vite/Next HMR handshakes came back as plain responses.
+  effectIt.effect("carries a websocket upgrade over SOCKS untouched", () =>
+    Effect.gen(function* () {
+      const originSaw: string[] = [];
+      const origin = yield* Effect.callback<NodeNet.Server>((resume) => {
+        const server = NodeNet.createServer((socket) => {
+          let handshaken = false;
+          socket.on("data", (chunk) => {
+            if (handshaken) {
+              socket.write(Buffer.concat([Buffer.from("echo:"), chunk]));
+              return;
+            }
+            if (!chunk.toString("utf8").includes("\r\n\r\n")) return;
+            originSaw.push(chunk.toString("utf8"));
+            handshaken = true;
+            socket.write(
+              "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
+            );
+          });
+        });
+        server.listen({ host: "127.0.0.1", port: 0 }, () => resume(Effect.succeed(server)));
+        return Effect.sync(() => {
+          server.close();
+        });
+      });
+      const address = origin.address();
+      const originPort = typeof address === "object" && address !== null ? address.port : 0;
+      const forwarder = yield* make;
+      const socket = yield* Effect.tryPromise(() =>
+        socksConnect(forwarder.proxyPort, "127.0.0.1", originPort),
+      );
+      socket.write(
+        [
+          "GET /_next/hmr HTTP/1.1",
+          `Host: 127.0.0.1:${String(originPort)}`,
+          "Connection: Upgrade",
+          "Upgrade: websocket",
+          "",
+          "",
+        ].join("\r\n"),
+      );
+      const framed = yield* Effect.tryPromise(
+        () =>
+          new Promise<string>((resolve, reject) => {
+            let seen = "";
+            const onData = (chunk: Buffer) => {
+              seen += chunk.toString("utf8");
+              if (!seen.includes("echo:")) {
+                if (seen.includes("\r\n\r\n")) socket.write("ping");
+                return;
+              }
+              socket.off("data", onData);
+              resolve(seen);
+            };
+            socket.on("data", onData);
+            socket.once("error", reject);
+          }),
+      );
+      socket.end();
+      expect(originSaw.at(0)).toContain("Upgrade: websocket");
+      expect(framed).toContain("101 Switching Protocols");
+      expect(framed).toContain("Upgrade: websocket");
+      expect(framed).toContain("echo:ping");
+    }),
+  );
+
   effectIt.effect("rewrites keep-alive absolute-form HTTP so Next :3000 does not 308", () =>
     Effect.gen(function* () {
       const forwarder = yield* make;
