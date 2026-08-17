@@ -14,6 +14,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
 import {
+  ignoreBenignPreviewSocketErrors,
   isPreviewLoopbackDestination,
   pipeByteSources,
   runHttpForwardSession,
@@ -84,6 +85,7 @@ export const createWebSocketDuplex = (
     },
     read() {},
   });
+  ignoreBenignPreviewSocketErrors(duplex);
   const closeBoth = () => {
     if (closed) return;
     closed = true;
@@ -197,14 +199,20 @@ const listenOnLoopback = (port: number, onConnection: (socket: NodeNet.Socket) =
 const connectLocal = (port: number) =>
   new Promise<NodeNet.Socket>((resolve, reject) => {
     const dest = NodeNet.createConnection({ host: "127.0.0.1", port });
-    dest.once("connect", () => resolve(dest));
+    dest.once("connect", () => {
+      ignoreBenignPreviewSocketErrors(dest);
+      resolve(dest);
+    });
     dest.once("error", reject);
   });
 
 const connectRemote = (host: string, port: number) =>
   new Promise<NodeNet.Socket>((resolve, reject) => {
     const dest = NodeNet.createConnection({ host, port });
-    dest.once("connect", () => resolve(dest));
+    dest.once("connect", () => {
+      ignoreBenignPreviewSocketErrors(dest);
+      resolve(dest);
+    });
     dest.once("error", reject);
   });
 
@@ -284,6 +292,7 @@ export const make = Effect.gen(function* () {
   // branch stays as a fallback for a Chromium build that ignores socks5 rules
   // and speaks proxy protocol at us anyway.
   const routeProxySocket = (socket: NodeNet.Socket) => {
+    ignoreBenignPreviewSocketErrors(socket);
     void (async () => {
       const first = await readFirstChunk(socket);
       if (first[0] === SOCKS5_VERSION) {

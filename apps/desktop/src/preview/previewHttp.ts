@@ -394,7 +394,29 @@ export const runHttpForwardSession = async (
   }
 };
 
+const BENIGN_SOCKET_CODES = new Set([
+  "ECONNRESET",
+  "EPIPE",
+  "ECONNABORTED",
+  "ERR_STREAM_DESTROYED",
+  "ERR_STREAM_PREMATURE_CLOSE",
+]);
+
+/** Peer reset / half-close. Without a listener these become Electron error dialogs. */
+export const isBenignPreviewSocketError = (error: unknown): boolean => {
+  if (typeof error !== "object" || error === null || !("code" in error)) return false;
+  return BENIGN_SOCKET_CODES.has(String(error.code));
+};
+
+export const ignoreBenignPreviewSocketErrors = (emitter: NodeJS.EventEmitter) => {
+  emitter.on("error", (error: unknown) => {
+    if (isBenignPreviewSocketError(error)) return;
+  });
+};
+
 export const pipeByteSources = (left: ByteSource, right: ByteSource, initial?: Buffer) => {
+  ignoreBenignPreviewSocketErrors(left);
+  ignoreBenignPreviewSocketErrors(right);
   if (initial !== undefined && initial.byteLength > 0) {
     right.write(initial);
   }

@@ -4,7 +4,11 @@ import * as NodeNet from "node:net";
 import * as NodeStream from "node:stream";
 import * as NodeZlib from "node:zlib";
 
-import { absoluteProxyUrlToOriginPath, isPreviewLoopbackDestination } from "./previewHttp.ts";
+import {
+  absoluteProxyUrlToOriginPath,
+  ignoreBenignPreviewSocketErrors,
+  isPreviewLoopbackDestination,
+} from "./previewHttp.ts";
 
 /**
  * Plain-http requests to loopback hosts are answered by the preview session's
@@ -256,7 +260,11 @@ export class PreviewLoopbackAgent extends NodeHttp.Agent {
       typeof options.host === "string" && options.host.length > 0 ? options.host : "127.0.0.1";
     const port = Number(options.port ?? 80);
     Promise.resolve(this.connectDestination(host, port)).then(
-      (duplex) => callback?.(null, asAgentSocket(duplex)),
+      (duplex) => {
+        const socket = asAgentSocket(duplex);
+        ignoreBenignPreviewSocketErrors(socket);
+        callback?.(null, socket);
+      },
       (cause: unknown) => {
         callback?.(
           cause instanceof Error ? cause : new Error(String(cause)),
@@ -318,6 +326,7 @@ const finishResponse = (
   const status = res.statusCode ?? 502;
   const statusText = res.statusMessage ?? "";
   const setCookies = res.headers["set-cookie"] ?? [];
+  ignoreBenignPreviewSocketErrors(res);
   if (isNullBodyResponse(method, status)) {
     res.resume();
     return {
@@ -347,6 +356,7 @@ const finishResponse = (
       : encoding === "deflate"
         ? NodeZlib.createInflate()
         : NodeZlib.createGunzip();
+  ignoreBenignPreviewSocketErrors(inflate);
   NodeStream.pipeline(res, inflate, () => {});
   return {
     status,
@@ -373,6 +383,9 @@ const requestOnce = (input: PreviewLoopbackFetchInput): Promise<PreviewLoopbackF
     );
     req.on("error", (cause) => {
       reject(Object.assign(cause, { reusedSocket: req.reusedSocket }));
+    });
+    req.on("socket", (socket) => {
+      ignoreBenignPreviewSocketErrors(socket);
     });
     input.signal?.addEventListener(
       "abort",

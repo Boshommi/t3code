@@ -1,12 +1,33 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { EventEmitter } from "node:events";
+
 import {
   absoluteProxyUrlToOriginPath,
+  ignoreBenignPreviewSocketErrors,
+  isBenignPreviewSocketError,
   parsePreviewProxyDestination,
   rewriteHttpProxyRequest,
 } from "./previewHttp.ts";
 
 describe("previewHttp", () => {
+  it("treats peer resets as benign so Electron does not show a dialog", () => {
+    expect(
+      isBenignPreviewSocketError(
+        Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }),
+      ),
+    ).toBe(true);
+    expect(
+      isBenignPreviewSocketError(Object.assign(new Error("write EPIPE"), { code: "EPIPE" })),
+    ).toBe(true);
+    expect(isBenignPreviewSocketError(new Error("boom"))).toBe(false);
+    const emitter = new EventEmitter();
+    ignoreBenignPreviewSocketErrors(emitter);
+    expect(() =>
+      emitter.emit("error", Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" })),
+    ).not.toThrow();
+  });
+
   it("parses CONNECT and absolute-form destinations", () => {
     expect(parsePreviewProxyDestination("CONNECT localhost:5173 HTTP/1.1")).toEqual({
       host: "localhost",
