@@ -6,14 +6,15 @@ import * as BrowserSession from "./BrowserSession.ts";
 import * as PreviewLoopbackForwarder from "./LoopbackForwarder.ts";
 
 export const previewLoopbackProxyRules = (proxyPort: number): string =>
-  `http=127.0.0.1:${String(proxyPort)};https=127.0.0.1:${String(proxyPort)}`;
+  `socks5://127.0.0.1:${String(proxyPort)}`;
 
 export const applyPreviewLoopbackProxy = (session: Session, proxyPort: number): Promise<void> =>
   session
     .setProxy({
-      // Electron 41 ignores data: PAC URLs and never asks a proxy about
-      // localhost unless <-loopback> is set. fixed_servers + that bypass is
-      // what resolveProxy honors; the Node proxy still only tunnels loopback.
+      // SOCKS5 is a TCP circuit: Chromium speaks origin-form HTTP/WS to the
+      // target. An HTTP forward proxy sent absolute-form GETs, which Next 308s,
+      // and keep-alive/chunked then had to be rewritten. Electron 41 still
+      // needs <-loopback> or localhost never reaches any proxy.
       mode: "fixed_servers",
       proxyRules: previewLoopbackProxyRules(proxyPort),
       proxyBypassRules: "<-loopback>",
