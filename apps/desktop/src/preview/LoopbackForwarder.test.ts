@@ -171,7 +171,7 @@ describe("PreviewLoopbackForwarder", () => {
   it("rewrites absolute-form preview proxy requests", () => {
     expect(
       rewriteHttpProxyRequest("GET http://localhost:3000/app?x=1 HTTP/1.1\r\nHost: localhost:3000"),
-    ).toBe("GET /app?x=1 HTTP/1.1\r\nHost: localhost:3000");
+    ).toBe("GET /app?x=1 HTTP/1.1\r\nHost: localhost:3000\r\nConnection: close");
   });
 
   it("keeps percent-encoding so Next.js does not redirect-loop", () => {
@@ -182,7 +182,7 @@ describe("PreviewLoopbackForwarder", () => {
       rewriteHttpProxyRequest(
         `GET http://localhost:3000${encoded} HTTP/1.1\r\nHost: localhost:3000`,
       ),
-    ).toBe(`GET ${encoded} HTTP/1.1\r\nHost: localhost:3000`);
+    ).toBe(`GET ${encoded} HTTP/1.1\r\nHost: localhost:3000\r\nConnection: close`);
   });
 
   effectIt.effect("forwards encoded static paths without decoding them", () =>
@@ -232,6 +232,83 @@ describe("PreviewLoopbackForwarder", () => {
           }),
       );
       expect(seen[0]).toBe(`GET ${encoded} HTTP/1.1`);
+    }),
+  );
+
+  effectIt.effect("does not 308 the next keep-alive GET to Next on :3000", () =>
+    Effect.gen(function* () {
+      const forwarder = yield* make;
+      const request = (path: string, connection: string) =>
+        [
+          `GET http://localhost:3000${path} HTTP/1.1`,
+          "Host: localhost:3000",
+          `Connection: ${connection}`,
+          "",
+          "",
+        ].join("\r\n");
+      const readStatus = (socket: NodeNet.Socket) =>
+        new Promise<string>((resolve, reject) => {
+          let buffer = Buffer.alloc(0);
+          const onData = (chunk: Buffer) => {
+            buffer = Buffer.concat([buffer, chunk]);
+            const split = buffer.indexOf("\r\n\r\n");
+            if (split === -1) return;
+            const headers = buffer.subarray(0, split).toString("utf8");
+            const lengthMatch = /content-length:\s*(\d+)/iu.exec(headers);
+            const length = lengthMatch ? Number(lengthMatch[1]) : 0;
+            if (buffer.length < split + 4 + length) return;
+            socket.off("data", onData);
+            resolve(headers.split("\r\n")[0] ?? "");
+          };
+          socket.on("data", onData);
+          socket.once("error", reject);
+        });
+      const first = yield* Effect.tryPromise(
+        () =>
+          new Promise<{ status: string; socket: NodeNet.Socket }>((resolve, reject) => {
+            const socket = NodeNet.createConnection(
+              { host: "127.0.0.1", port: forwarder.proxyPort },
+              () => {
+                socket.write(
+                  request(
+                    "/_next/static/chunks/src_lib_ui_suisseintl_fb5dd8da_module_1mdjsv5.css",
+                    "keep-alive",
+                  ),
+                );
+              },
+            );
+            readStatus(socket).then((status) => resolve({ status, socket }), reject);
+            socket.once("error", reject);
+          }),
+      );
+      expect(first.status).toBe("HTTP/1.1 200 OK");
+      first.socket.write(
+        request("/_next/static/chunks/%5Broot-of-the-server%5D__04oy0md._.js", "close"),
+      );
+      const reused = yield* Effect.tryPromise(() =>
+        Promise.race([
+          readStatus(first.socket),
+          new Promise<string>((resolve) => setTimeout(() => resolve("NO_SECOND_RESPONSE"), 400)),
+        ]),
+      );
+      first.socket.end();
+      expect(reused).not.toMatch(/308/);
+      const fresh = yield* Effect.tryPromise(
+        () =>
+          new Promise<string>((resolve, reject) => {
+            const socket = NodeNet.createConnection(
+              { host: "127.0.0.1", port: forwarder.proxyPort },
+              () => {
+                socket.write(
+                  request("/_next/static/chunks/%5Broot-of-the-server%5D__04oy0md._.js", "close"),
+                );
+              },
+            );
+            readStatus(socket).then(resolve, reject);
+            socket.once("error", reject);
+          }),
+      );
+      expect(fresh).toBe("HTTP/1.1 200 OK");
     }),
   );
 

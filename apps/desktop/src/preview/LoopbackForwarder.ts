@@ -53,6 +53,7 @@ export const pipeLocalSocketToTunnel = (
   tunnelWebsocketUrl: string,
   openWebSocket: (url: string) => WebSocket = (url) => new WebSocket(url),
   initial?: Uint8Array,
+  options?: { readonly forwardClientData?: boolean },
 ) => {
   const websocket = openWebSocket(tunnelWebsocketUrl);
   websocket.binaryType = "arraybuffer";
@@ -67,14 +68,16 @@ export const pipeLocalSocketToTunnel = (
       websocket.close();
     }
   };
-  local.on("data", (buffer: Buffer) => {
-    const payload = toSendableBytes(buffer);
-    if (opened && websocket.readyState === WebSocket.OPEN) {
-      websocket.send(payload);
-      return;
-    }
-    pending.push(payload);
-  });
+  if (options?.forwardClientData !== false) {
+    local.on("data", (buffer: Buffer) => {
+      const payload = toSendableBytes(buffer);
+      if (opened && websocket.readyState === WebSocket.OPEN) {
+        websocket.send(payload);
+        return;
+      }
+      pending.push(payload);
+    });
+  }
   local.on("error", closeBoth);
   local.on("close", closeBoth);
   websocket.addEventListener("open", () => {
@@ -203,12 +206,45 @@ export const rewriteHttpProxyRequest = (header: string): string => {
       lines[0] = `${match[1]} ${originPath} ${match[3]}`;
     }
   }
-  return lines
-    .filter(
-      (line, index) =>
-        index === 0 || line.length === 0 || !HOP_BY_HOP_HEADER.test(line.split(":", 1)[0] ?? ""),
-    )
-    .join("\r\n");
+  const forwarded = lines.filter(
+    (line, index) =>
+      index === 0 ||
+      line.length === 0 ||
+      !HOP_BY_HOP_HEADER.test((line.split(":", 1)[0] ?? "").trim()),
+  );
+  const withoutEmpty = forwarded.filter((line) => line.length > 0);
+  withoutEmpty.push("Connection: close");
+  return withoutEmpty.join("\r\n");
+};
+
+const contentLengthOf = (header: string): number => {
+  const raw = readHeaderValue(header, "content-length");
+  if (raw === undefined) return 0;
+  const length = Number.parseInt(raw, 10);
+  return Number.isInteger(length) && length > 0 ? length : 0;
+};
+
+const writeHttpProxyRequest = (
+  dest: NodeNet.Socket,
+  client: NodeNet.Socket,
+  header: string,
+  rest: Buffer,
+) => {
+  dest.write(Buffer.concat([Buffer.from(`${rewriteHttpProxyRequest(header)}\r\n\r\n`), rest]));
+  dest.pipe(client);
+  let remaining = Math.max(0, contentLengthOf(header) - rest.length);
+  if (remaining === 0) {
+    return;
+  }
+  const onData = (chunk: Buffer) => {
+    const take = chunk.subarray(0, remaining);
+    dest.write(take);
+    remaining -= take.byteLength;
+    if (remaining === 0) {
+      client.off("data", onData);
+    }
+  };
+  client.on("data", onData);
 };
 
 const readHttpHead = (socket: NodeNet.Socket) =>
@@ -306,18 +342,16 @@ export const make = Effect.gen(function* () {
           dest.pipe(socket);
           return;
         }
-        dest.write(
-          Buffer.concat([Buffer.from(`${rewriteHttpProxyRequest(header)}\r\n\r\n`), rest]),
-        );
-        socket.pipe(dest);
-        dest.pipe(socket);
+        writeHttpProxyRequest(dest, socket, header, rest);
         return;
       }
       const tunnelUrl = resolveTunnelUrl(destination.port);
       if (firstLine.toUpperCase().startsWith("CONNECT ")) {
         if (tunnelUrl !== null) {
           socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-          pipeLocalSocketToTunnel(socket, tunnelUrl, undefined, rest);
+          pipeLocalSocketToTunnel(socket, tunnelUrl, undefined, rest, {
+            forwardClientData: true,
+          });
           return;
         }
         // A remote preview PAC always sends localhost here. Connecting to the
@@ -338,7 +372,9 @@ export const make = Effect.gen(function* () {
         rest,
       ]);
       if (tunnelUrl !== null) {
-        pipeLocalSocketToTunnel(socket, tunnelUrl, undefined, rewritten);
+        pipeLocalSocketToTunnel(socket, tunnelUrl, undefined, rewritten, {
+          forwardClientData: false,
+        });
         return;
       }
       if (lastRemoteEnvironmentId !== undefined) {
@@ -346,9 +382,7 @@ export const make = Effect.gen(function* () {
         return;
       }
       const dest = await connectLocal(destination.port);
-      dest.write(rewritten);
-      socket.pipe(dest);
-      dest.pipe(socket);
+      writeHttpProxyRequest(dest, socket, header, rest);
     })().catch(() => {
       socket.destroy();
     });
