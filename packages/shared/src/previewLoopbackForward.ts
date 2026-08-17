@@ -89,33 +89,6 @@ export function parsePreviewTunnelPort(rawUrl: URL): number | null {
   return port;
 }
 
-export const PREVIEW_LOOPBACK_PAC_PATH = "/t3-preview.pac";
-
-export function previewLoopbackPacScriptUrl(pacPort: number): string {
-  return `http://127.0.0.1:${String(pacPort)}${PREVIEW_LOOPBACK_PAC_PATH}`;
-}
-
-export function buildPreviewLoopbackPacScript(proxyPort: number, pacScriptUrl?: string): string {
-  const directPacFetch =
-    pacScriptUrl !== undefined && pacScriptUrl.length > 0
-      ? [
-          `  if (url.indexOf(${JSON.stringify(pacScriptUrl)}) === 0) {`,
-          '    return "DIRECT";',
-          "  }",
-        ]
-      : [];
-  return [
-    "function FindProxyForURL(url, host) {",
-    ...directPacFetch,
-    '  if (host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1" || host === "0.0.0.0") {',
-    `    return "PROXY 127.0.0.1:${String(proxyPort)}";`,
-    "  }",
-    '  return "DIRECT";',
-    "}",
-    "",
-  ].join("\n");
-}
-
 export function decideLoopbackForward(input: {
   readonly environmentIsLoopback: boolean;
   readonly target: LoopbackPreviewTarget | null;

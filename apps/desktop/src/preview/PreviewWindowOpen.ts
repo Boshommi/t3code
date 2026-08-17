@@ -137,7 +137,7 @@ export function previewPopupWindowBounds(input: {
 /**
  * Guest webviews often omit `webPreferences.partition`. Passing only these
  * flags without the opener's `session` makes Electron use the default
- * session, which has no preview PAC — localhost then hits the laptop.
+ * session, which has no preview SOCKS tunnel — localhost then hits the laptop.
  */
 export const PREVIEW_POPUP_WEB_PREFERENCES = {
   preload: "",

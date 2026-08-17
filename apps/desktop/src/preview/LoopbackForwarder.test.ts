@@ -6,13 +6,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { decideLoopbackForward } from "@t3tools/shared/previewLoopbackForward";
 
-import {
-  absoluteProxyUrlToOriginPath,
-  make,
-  parsePreviewProxyDestination,
-  pipeLocalSocketToTunnel,
-  rewriteHttpProxyRequest,
-} from "./LoopbackForwarder.ts";
+import { make, pipeLocalSocketToTunnel } from "./LoopbackForwarder.ts";
 
 const listen = (port: number) =>
   Effect.callback<NodeNet.Server>((resume) => {
@@ -23,16 +17,144 @@ const listen = (port: number) =>
     });
   });
 
+const socksConnect = (proxyPort: number, host: string, port: number) =>
+  new Promise<NodeNet.Socket>((resolve, reject) => {
+    const socket = NodeNet.createConnection({ host: "127.0.0.1", port: proxyPort }, () => {
+      socket.write(Buffer.from([0x05, 0x01, 0x00]));
+    });
+    let phase: "greeting" | "reply" = "greeting";
+    let buffer = Buffer.alloc(0);
+    const onData = (chunk: Buffer) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      if (phase === "greeting") {
+        if (buffer.length < 2) return;
+        if (buffer[0] !== 0x05 || buffer[1] !== 0x00) {
+          socket.off("data", onData);
+          reject(new Error("SOCKS5 greeting was rejected."));
+          socket.destroy();
+          return;
+        }
+        buffer = buffer.subarray(2);
+        phase = "reply";
+        const name = Buffer.from(host, "utf8");
+        const request = Buffer.alloc(7 + name.length);
+        request[0] = 0x05;
+        request[1] = 0x01;
+        request[3] = 0x03;
+        request[4] = name.length;
+        name.copy(request, 5);
+        request.writeUInt16BE(port, 5 + name.length);
+        socket.write(request);
+      }
+      if (phase === "reply") {
+        if (buffer.length < 10) return;
+        if (buffer[1] !== 0x00) {
+          socket.off("data", onData);
+          reject(new Error(`SOCKS5 CONNECT failed: ${String(buffer[1])}`));
+          socket.destroy();
+          return;
+        }
+        buffer = buffer.subarray(10);
+        socket.off("data", onData);
+        if (buffer.length > 0) {
+          socket.unshift(buffer);
+        }
+        resolve(socket);
+      }
+    };
+    socket.on("data", onData);
+    socket.once("error", reject);
+  });
+
+const httpGet = (socket: NodeNet.Socket, host: string, path: string, connection: string) => {
+  socket.write(
+    [`GET ${path} HTTP/1.1`, `Host: ${host}`, `Connection: ${connection}`, "", ""].join("\r\n"),
+  );
+};
+
+const readHttpResponse = (socket: NodeNet.Socket) =>
+  new Promise<{ readonly status: string; readonly headers: string; readonly body: Buffer }>(
+    (resolve, reject) => {
+      let buffer = Buffer.alloc(0);
+      const onData = (chunk: Buffer) => {
+        buffer = Buffer.concat([buffer, chunk]);
+        const split = buffer.indexOf("\r\n\r\n");
+        if (split === -1) return;
+        const headers = buffer.subarray(0, split).toString("utf8");
+        const bodyStart = buffer.subarray(split + 4);
+        const lengthMatch = /content-length:\s*(\d+)/iu.exec(headers);
+        if (lengthMatch) {
+          const length = Number(lengthMatch[1]);
+          if (bodyStart.length < length) return;
+          socket.off("data", onData);
+          socket.off("error", onError);
+          resolve({
+            status: headers.split("\r\n")[0] ?? "",
+            headers,
+            body: bodyStart.subarray(0, length),
+          });
+          return;
+        }
+        if (/transfer-encoding:\s*chunked/iu.test(headers)) {
+          if (!chunkedComplete(bodyStart)) return;
+          socket.off("data", onData);
+          socket.off("error", onError);
+          resolve({
+            status: headers.split("\r\n")[0] ?? "",
+            headers,
+            body: decodeChunked(bodyStart),
+          });
+        }
+      };
+      const onError = (cause: Error) => {
+        socket.off("data", onData);
+        reject(cause);
+      };
+      socket.on("data", onData);
+      socket.once("error", onError);
+    },
+  );
+
+const chunkedComplete = (body: Buffer): boolean => {
+  let offset = 0;
+  while (offset < body.length) {
+    const lineEnd = body.indexOf("\r\n", offset);
+    if (lineEnd === -1) return false;
+    const size = Number.parseInt(body.subarray(offset, lineEnd).toString("utf8"), 16);
+    if (!Number.isInteger(size)) return false;
+    if (size === 0) {
+      return (
+        body.indexOf("\r\n\r\n", lineEnd) !== -1 ||
+        body.subarray(lineEnd).equals(Buffer.from("\r\n\r\n"))
+      );
+    }
+    const dataStart = lineEnd + 2;
+    const dataEnd = dataStart + size + 2;
+    if (body.length < dataEnd) return false;
+    offset = dataEnd;
+  }
+  return false;
+};
+
+const decodeChunked = (body: Buffer): Buffer => {
+  const parts: Buffer[] = [];
+  let offset = 0;
+  while (offset < body.length) {
+    const lineEnd = body.indexOf("\r\n", offset);
+    const size = Number.parseInt(body.subarray(offset, lineEnd).toString("utf8"), 16);
+    if (size === 0) break;
+    const dataStart = lineEnd + 2;
+    parts.push(body.subarray(dataStart, dataStart + size));
+    offset = dataStart + size + 2;
+  }
+  return Buffer.concat(parts);
+};
+
 describe("PreviewLoopbackForwarder", () => {
-  effectIt.effect("serves the PAC over HTTP so Chromium receives a real PAC URL", () =>
+  effectIt.effect("listens for a SOCKS5 preview proxy", () =>
     Effect.gen(function* () {
       const forwarder = yield* make;
-      expect(forwarder.pacScriptUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/t3-preview\.pac$/);
-      const response = yield* Effect.tryPromise(() => fetch(forwarder.pacScriptUrl));
-      expect(response.ok).toBe(true);
-      const body = yield* Effect.tryPromise(() => response.text());
-      expect(body).toContain(`PROXY 127.0.0.1:${String(forwarder.proxyPort)}`);
-      expect(body).toContain(forwarder.pacScriptUrl);
+      expect(forwarder.proxyPort).toBeGreaterThan(0);
     }),
   );
 
@@ -157,35 +279,7 @@ describe("PreviewLoopbackForwarder", () => {
     }),
   );
 
-  it("parses CONNECT and absolute-form proxy destinations", () => {
-    expect(parsePreviewProxyDestination("CONNECT localhost:5173 HTTP/1.1")).toEqual({
-      host: "localhost",
-      port: 5173,
-    });
-    expect(parsePreviewProxyDestination("GET http://127.0.0.1:3000/app HTTP/1.1")).toEqual({
-      host: "127.0.0.1",
-      port: 3000,
-    });
-  });
-
-  it("rewrites absolute-form preview proxy requests", () => {
-    expect(
-      rewriteHttpProxyRequest("GET http://localhost:3000/app?x=1 HTTP/1.1\r\nHost: localhost:3000"),
-    ).toBe("GET /app?x=1 HTTP/1.1\r\nHost: localhost:3000\r\nConnection: close");
-  });
-
-  it("keeps percent-encoding so Next.js does not redirect-loop", () => {
-    const encoded = "/_next/static/chunks/%5Broot-of-the-server%5D__04oy0md._.js";
-    expect(absoluteProxyUrlToOriginPath(`http://localhost:3000${encoded}`)).toBe(encoded);
-    expect(new URL(`http://localhost:3000${encoded}`).pathname.includes("%5B")).toBe(true);
-    expect(
-      rewriteHttpProxyRequest(
-        `GET http://localhost:3000${encoded} HTTP/1.1\r\nHost: localhost:3000`,
-      ),
-    ).toBe(`GET ${encoded} HTTP/1.1\r\nHost: localhost:3000\r\nConnection: close`);
-  });
-
-  effectIt.effect("forwards encoded static paths without decoding them", () =>
+  effectIt.effect("forwards origin-form HTTP through SOCKS without rewriting paths", () =>
     Effect.gen(function* () {
       const seen: string[] = [];
       const origin = yield* Effect.callback<NodeNet.Server>((resume) => {
@@ -207,116 +301,54 @@ describe("PreviewLoopbackForwarder", () => {
       const originPort = typeof address === "object" && address !== null ? address.port : 0;
       const forwarder = yield* make;
       const encoded = `/_next/static/chunks/%5Broot-of-the-server%5D__04oy0md._.js`;
-      yield* Effect.tryPromise(
-        () =>
-          new Promise<void>((resolve, reject) => {
-            const socket = NodeNet.createConnection(
-              { host: "127.0.0.1", port: forwarder.proxyPort },
-              () => {
-                socket.write(
-                  [
-                    `GET http://127.0.0.1:${String(originPort)}${encoded} HTTP/1.1`,
-                    `Host: 127.0.0.1:${String(originPort)}`,
-                    "Connection: close",
-                    "",
-                    "",
-                  ].join("\r\n"),
-                );
-              },
-            );
-            socket.on("data", () => {
-              socket.end();
-              resolve();
-            });
-            socket.on("error", reject);
-          }),
+      const socket = yield* Effect.tryPromise(() =>
+        socksConnect(forwarder.proxyPort, "127.0.0.1", originPort),
       );
+      httpGet(socket, `127.0.0.1:${String(originPort)}`, encoded, "close");
+      const response = yield* Effect.tryPromise(() => readHttpResponse(socket));
+      socket.end();
       expect(seen[0]).toBe(`GET ${encoded} HTTP/1.1`);
+      expect(response.status).toBe("HTTP/1.1 200 OK");
+      expect(response.body.toString("utf8")).toBe("ok");
     }),
   );
 
-  effectIt.effect("does not 308 the next keep-alive GET to Next on :3000", () =>
+  effectIt.effect("keeps Next :3000 HTML and keep-alive /_next assets complete", () =>
     Effect.gen(function* () {
       const forwarder = yield* make;
-      const request = (path: string, connection: string) =>
-        [
-          `GET http://localhost:3000${path} HTTP/1.1`,
-          "Host: localhost:3000",
-          `Connection: ${connection}`,
-          "",
-          "",
-        ].join("\r\n");
-      const readStatus = (socket: NodeNet.Socket) =>
-        new Promise<string>((resolve, reject) => {
-          let buffer = Buffer.alloc(0);
-          const onData = (chunk: Buffer) => {
-            buffer = Buffer.concat([buffer, chunk]);
-            const split = buffer.indexOf("\r\n\r\n");
-            if (split === -1) return;
-            const headers = buffer.subarray(0, split).toString("utf8");
-            const lengthMatch = /content-length:\s*(\d+)/iu.exec(headers);
-            const length = lengthMatch ? Number(lengthMatch[1]) : 0;
-            if (buffer.length < split + 4 + length) return;
-            socket.off("data", onData);
-            resolve(headers.split("\r\n")[0] ?? "");
-          };
-          socket.on("data", onData);
-          socket.once("error", reject);
-        });
-      const first = yield* Effect.tryPromise(
-        () =>
-          new Promise<{ status: string; socket: NodeNet.Socket }>((resolve, reject) => {
-            const socket = NodeNet.createConnection(
-              { host: "127.0.0.1", port: forwarder.proxyPort },
-              () => {
-                socket.write(
-                  request(
-                    "/_next/static/chunks/src_lib_ui_suisseintl_fb5dd8da_module_1mdjsv5.css",
-                    "keep-alive",
-                  ),
-                );
-              },
-            );
-            readStatus(socket).then((status) => resolve({ status, socket }), reject);
-            socket.once("error", reject);
-          }),
+      const socket = yield* Effect.tryPromise(() =>
+        socksConnect(forwarder.proxyPort, "localhost", 3000),
       );
-      expect(first.status).toBe("HTTP/1.1 200 OK");
-      first.socket.write(
-        request("/_next/static/chunks/%5Broot-of-the-server%5D__04oy0md._.js", "close"),
+      httpGet(socket, "localhost:3000", "/", "keep-alive");
+      const page = yield* Effect.tryPromise(() => readHttpResponse(socket));
+      expect(page.status).toBe("HTTP/1.1 200 OK");
+      expect(page.headers).not.toMatch(/308/);
+      expect(page.body.includes(Buffer.from("</html>"))).toBe(true);
+      expect(page.body.byteLength).toBeGreaterThan(1_000);
+
+      httpGet(
+        socket,
+        "localhost:3000",
+        "/_next/static/chunks/src_lib_ui_suisseintl_fb5dd8da_module_1mdjsv5.css",
+        "keep-alive",
       );
-      const reused = yield* Effect.tryPromise(() =>
-        Promise.race([
-          readStatus(first.socket),
-          new Promise<string>((resolve) => setTimeout(() => resolve("NO_SECOND_RESPONSE"), 400)),
-        ]),
+      const css = yield* Effect.tryPromise(() => readHttpResponse(socket));
+      expect(css.status).toBe("HTTP/1.1 200 OK");
+      expect(css.headers).not.toMatch(/308/);
+
+      httpGet(
+        socket,
+        "localhost:3000",
+        "/_next/static/chunks/%5Broot-of-the-server%5D__04oy0md._.js",
+        "close",
       );
-      first.socket.end();
-      expect(reused).not.toMatch(/308/);
-      const fresh = yield* Effect.tryPromise(
-        () =>
-          new Promise<string>((resolve, reject) => {
-            const socket = NodeNet.createConnection(
-              { host: "127.0.0.1", port: forwarder.proxyPort },
-              () => {
-                socket.write(
-                  request("/_next/static/chunks/%5Broot-of-the-server%5D__04oy0md._.js", "close"),
-                );
-              },
-            );
-            readStatus(socket).then(resolve, reject);
-            socket.once("error", reject);
-          }),
-      );
-      expect(fresh).toBe("HTTP/1.1 200 OK");
+      const js = yield* Effect.tryPromise(() => readHttpResponse(socket));
+      socket.end();
+      expect(js.status).toBe("HTTP/1.1 200 OK");
+      expect(js.headers).not.toMatch(/308/);
+      expect(js.body.byteLength).toBeGreaterThan(0);
     }),
   );
-
-  it("reads origin-form destinations from the Host header", () => {
-    expect(
-      parsePreviewProxyDestination("GET /_next/static/foo.js HTTP/1.1", "localhost:3000"),
-    ).toEqual({ host: "localhost", port: 3000 });
-  });
 
   it("closes both sides when the tunnel websocket errors", () => {
     const local = new NodeNet.Socket();

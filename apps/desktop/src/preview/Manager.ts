@@ -1702,7 +1702,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
             overrideBrowserWindowOptions: {
               ...previewPopupWindowBounds(decision),
               // Must reuse the opener session. Guest webviews often have no
-              // partition string; a new default session has no PAC and
+              // partition string; a new default session has no SOCKS tunnel and
               // localhost is refused on the laptop instead of tunneled.
               webPreferences: {
                 ...PREVIEW_POPUP_WEB_PREFERENCES,

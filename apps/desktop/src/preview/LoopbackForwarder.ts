@@ -1,20 +1,17 @@
 import { EnvironmentId } from "@t3tools/contracts";
-import { isLoopbackHost } from "@t3tools/shared/preview";
 import {
-  buildPreviewLoopbackPacScript,
   decideLoopbackForward,
   parseLoopbackPreviewTarget,
-  PREVIEW_LOOPBACK_PAC_PATH,
-  previewLoopbackPacScriptUrl,
   previewRequestUrlToLoopbackTarget,
   rewritePreviewTunnelPort,
 } from "@t3tools/shared/previewLoopbackForward";
-import * as NodeHttp from "node:http";
 import * as NodeNet from "node:net";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+
+import { acceptSocks5Connect, isSocks5LoopbackHost, SOCKS5_REP, socks5Reply } from "./socks5.ts";
 
 export class PreviewLoopbackForwardError extends Schema.TaggedErrorClass<PreviewLoopbackForwardError>()(
   "PreviewLoopbackForwardError",
@@ -53,7 +50,6 @@ export const pipeLocalSocketToTunnel = (
   tunnelWebsocketUrl: string,
   openWebSocket: (url: string) => WebSocket = (url) => new WebSocket(url),
   initial?: Uint8Array,
-  options?: { readonly forwardClientData?: boolean },
 ) => {
   const websocket = openWebSocket(tunnelWebsocketUrl);
   websocket.binaryType = "arraybuffer";
@@ -68,16 +64,14 @@ export const pipeLocalSocketToTunnel = (
       websocket.close();
     }
   };
-  if (options?.forwardClientData !== false) {
-    local.on("data", (buffer: Buffer) => {
-      const payload = toSendableBytes(buffer);
-      if (opened && websocket.readyState === WebSocket.OPEN) {
-        websocket.send(payload);
-        return;
-      }
-      pending.push(payload);
-    });
-  }
+  local.on("data", (buffer: Buffer) => {
+    const payload = toSendableBytes(buffer);
+    if (opened && websocket.readyState === WebSocket.OPEN) {
+      websocket.send(payload);
+      return;
+    }
+    pending.push(payload);
+  });
   local.on("error", closeBoth);
   local.on("close", closeBoth);
   websocket.addEventListener("open", () => {
@@ -129,152 +123,6 @@ const listenOnLoopback = (port: number, onConnection: (socket: NodeNet.Socket) =
     });
   });
 
-export const parsePreviewProxyDestination = (
-  firstLine: string,
-  hostHeader?: string,
-): { readonly host: string; readonly port: number } | null => {
-  const connect = /^CONNECT\s+(\S+)\s+HTTP\//iu.exec(firstLine);
-  if (connect?.[1] !== undefined) {
-    return parseHostPort(connect[1]);
-  }
-  const absolute = /^[A-Z]+\s+(https?:\/\/\S+)\s+HTTP\//iu.exec(firstLine);
-  if (absolute?.[1] !== undefined) {
-    try {
-      const url = new URL(absolute[1]);
-      const port =
-        url.port.length > 0 ? Number.parseInt(url.port, 10) : url.protocol === "https:" ? 443 : 80;
-      if (!Number.isInteger(port) || port < 1 || port > 65_535) return null;
-      return { host: url.hostname, port };
-    } catch {
-      return null;
-    }
-  }
-  const originForm = /^[A-Z]+\s+(\/[^ ]*)\s+HTTP\//iu.exec(firstLine);
-  if (originForm !== null && hostHeader !== undefined && hostHeader.length > 0) {
-    return parseHostPort(hostHeader) ?? parseHostPort(`${hostHeader}:80`);
-  }
-  return null;
-};
-
-const readHeaderValue = (header: string, name: string): string | undefined => {
-  const match = new RegExp(`(?:^|\\r\\n)${name}\\s*:\\s*([^\\r\\n]+)`, "iu").exec(header);
-  const value = match?.[1]?.trim();
-  return value !== undefined && value.length > 0 ? value : undefined;
-};
-
-/** Keep %XX encoding. `URL.pathname` decodes and Next.js then 3xx-loops. */
-export const absoluteProxyUrlToOriginPath = (absoluteUrl: string): string | null => {
-  const stripped = absoluteUrl.replace(/^https?:\/\//iu, "");
-  if (stripped === absoluteUrl) return null;
-  const pathStart = stripped.indexOf("/");
-  if (pathStart === -1) {
-    const queryStart = stripped.indexOf("?");
-    return queryStart === -1 ? "/" : `/${stripped.slice(queryStart)}`;
-  }
-  return stripped.slice(pathStart);
-};
-
-const parseHostPort = (value: string): { readonly host: string; readonly port: number } | null => {
-  if (value.startsWith("[")) {
-    const end = value.indexOf("]");
-    if (end <= 1) return null;
-    const host = value.slice(1, end);
-    const portPart = value.slice(end + 1);
-    if (!portPart.startsWith(":")) return null;
-    const port = Number.parseInt(portPart.slice(1), 10);
-    if (!Number.isInteger(port) || port < 1 || port > 65_535) return null;
-    return { host, port };
-  }
-  const separator = value.lastIndexOf(":");
-  if (separator <= 0) return null;
-  const port = Number.parseInt(value.slice(separator + 1), 10);
-  if (!Number.isInteger(port) || port < 1 || port > 65_535) return null;
-  return { host: value.slice(0, separator), port };
-};
-
-const HOP_BY_HOP_HEADER =
-  /^(proxy-connection|proxy-authorization|connection|keep-alive|te|trailer|transfer-encoding|upgrade)$/iu;
-
-export const rewriteHttpProxyRequest = (header: string): string => {
-  const lines = header.split("\r\n");
-  const requestLine = lines[0];
-  if (requestLine === undefined) return header;
-  const match = /^([A-Z]+)\s+(https?:\/\/\S+)\s+(HTTP\/\d(?:\.\d)?)$/iu.exec(requestLine);
-  if (match !== null) {
-    const originPath = absoluteProxyUrlToOriginPath(match[2] ?? "");
-    if (originPath !== null) {
-      lines[0] = `${match[1]} ${originPath} ${match[3]}`;
-    }
-  }
-  const forwarded = lines.filter(
-    (line, index) =>
-      index === 0 ||
-      line.length === 0 ||
-      !HOP_BY_HOP_HEADER.test((line.split(":", 1)[0] ?? "").trim()),
-  );
-  const withoutEmpty = forwarded.filter((line) => line.length > 0);
-  withoutEmpty.push("Connection: close");
-  return withoutEmpty.join("\r\n");
-};
-
-const contentLengthOf = (header: string): number => {
-  const raw = readHeaderValue(header, "content-length");
-  if (raw === undefined) return 0;
-  const length = Number.parseInt(raw, 10);
-  return Number.isInteger(length) && length > 0 ? length : 0;
-};
-
-const writeHttpProxyRequest = (
-  dest: NodeNet.Socket,
-  client: NodeNet.Socket,
-  header: string,
-  rest: Buffer,
-) => {
-  dest.write(Buffer.concat([Buffer.from(`${rewriteHttpProxyRequest(header)}\r\n\r\n`), rest]));
-  dest.pipe(client);
-  let remaining = Math.max(0, contentLengthOf(header) - rest.length);
-  if (remaining === 0) {
-    return;
-  }
-  const onData = (chunk: Buffer) => {
-    const take = chunk.subarray(0, remaining);
-    dest.write(take);
-    remaining -= take.byteLength;
-    if (remaining === 0) {
-      client.off("data", onData);
-    }
-  };
-  client.on("data", onData);
-};
-
-const readHttpHead = (socket: NodeNet.Socket) =>
-  new Promise<{ readonly header: string; readonly rest: Buffer }>((resolve, reject) => {
-    let buffer = Buffer.alloc(0);
-    const onData = (chunk: Buffer) => {
-      buffer = Buffer.concat([buffer, chunk]);
-      const end = buffer.indexOf("\r\n\r\n");
-      if (end === -1) {
-        if (buffer.length > 65_536) {
-          socket.off("data", onData);
-          reject(new Error("Proxy request headers too large."));
-        }
-        return;
-      }
-      socket.off("data", onData);
-      socket.off("error", onError);
-      resolve({
-        header: buffer.subarray(0, end).toString("utf8"),
-        rest: buffer.subarray(end + 4),
-      });
-    };
-    const onError = (cause: Error) => {
-      socket.off("data", onData);
-      reject(cause);
-    };
-    socket.on("data", onData);
-    socket.once("error", onError);
-  });
-
 const connectLocal = (port: number) =>
   new Promise<NodeNet.Socket>((resolve, reject) => {
     const dest = NodeNet.createConnection({ host: "127.0.0.1", port });
@@ -289,11 +137,18 @@ const connectRemote = (host: string, port: number) =>
     dest.once("error", reject);
   });
 
+const pipeSockets = (left: NodeNet.Socket, right: NodeNet.Socket, initial?: Buffer) => {
+  if (initial !== undefined && initial.byteLength > 0) {
+    right.write(initial);
+  }
+  left.pipe(right);
+  right.pipe(left);
+};
+
 export class PreviewLoopbackForwarder extends Context.Service<
   PreviewLoopbackForwarder,
   {
     readonly proxyPort: number;
-    readonly pacScriptUrl: string;
     readonly ensure: (input: {
       readonly environmentId: EnvironmentId;
       readonly url: string;
@@ -324,71 +179,36 @@ export const make = Effect.gen(function* () {
     return rewritePreviewTunnelPort(auth.tunnelWebsocketUrl, port);
   };
 
-  const routeProxySocket = (socket: NodeNet.Socket) => {
+  const routeSocksSocket = (socket: NodeNet.Socket) => {
     void (async () => {
-      const { header, rest } = await readHttpHead(socket);
-      const firstLine = header.split("\r\n")[0] ?? "";
-      const destination = parsePreviewProxyDestination(firstLine, readHeaderValue(header, "host"));
-      if (destination === null) {
-        socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+      const target = await acceptSocks5Connect(socket);
+      if (!isSocks5LoopbackHost(target.host)) {
+        const dest = await connectRemote(target.host, target.port);
+        socket.write(socks5Reply(SOCKS5_REP.succeeded));
+        pipeSockets(socket, dest, target.leftover);
         return;
       }
-      if (!isLoopbackHost(destination.host)) {
-        const dest = await connectRemote(destination.host, destination.port);
-        if (firstLine.toUpperCase().startsWith("CONNECT ")) {
-          socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-          if (rest.length > 0) dest.write(rest);
-          socket.pipe(dest);
-          dest.pipe(socket);
-          return;
-        }
-        writeHttpProxyRequest(dest, socket, header, rest);
-        return;
-      }
-      const tunnelUrl = resolveTunnelUrl(destination.port);
-      if (firstLine.toUpperCase().startsWith("CONNECT ")) {
-        if (tunnelUrl !== null) {
-          socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-          pipeLocalSocketToTunnel(socket, tunnelUrl, undefined, rest, {
-            forwardClientData: true,
-          });
-          return;
-        }
-        // A remote preview PAC always sends localhost here. Connecting to the
-        // laptop port produces "connection refused" when the app is remote.
-        if (lastRemoteEnvironmentId !== undefined) {
-          socket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
-          return;
-        }
-        const dest = await connectLocal(destination.port);
-        socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-        if (rest.length > 0) dest.write(rest);
-        socket.pipe(dest);
-        dest.pipe(socket);
-        return;
-      }
-      const rewritten = Buffer.concat([
-        Buffer.from(`${rewriteHttpProxyRequest(header)}\r\n\r\n`),
-        rest,
-      ]);
+      const tunnelUrl = resolveTunnelUrl(target.port);
       if (tunnelUrl !== null) {
-        pipeLocalSocketToTunnel(socket, tunnelUrl, undefined, rewritten, {
-          forwardClientData: false,
-        });
+        socket.write(socks5Reply(SOCKS5_REP.succeeded));
+        pipeLocalSocketToTunnel(socket, tunnelUrl, undefined, target.leftover);
         return;
       }
       if (lastRemoteEnvironmentId !== undefined) {
-        socket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
+        socket.end(socks5Reply(SOCKS5_REP.hostUnreachable));
         return;
       }
-      const dest = await connectLocal(destination.port);
-      writeHttpProxyRequest(dest, socket, header, rest);
+      const dest = await connectLocal(target.port);
+      socket.write(socks5Reply(SOCKS5_REP.succeeded));
+      pipeSockets(socket, dest, target.leftover);
     })().catch(() => {
-      socket.destroy();
+      if (!socket.destroyed) {
+        socket.end(socks5Reply(SOCKS5_REP.generalFailure));
+      }
     });
   };
 
-  const proxyServer = yield* listenOnLoopback(0, routeProxySocket);
+  const proxyServer = yield* listenOnLoopback(0, routeSocksSocket);
   const proxyAddress = proxyServer.address();
   const proxyPort =
     typeof proxyAddress === "object" && proxyAddress !== null ? proxyAddress.port : 0;
@@ -397,59 +217,6 @@ export const make = Effect.gen(function* () {
       detail: "Could not listen for the preview-only loopback proxy.",
     });
   }
-
-  // Chromium 141+ ignores data: PAC URLs ("request PAC script but do not
-  // specify its URL") and falls back to DIRECT — the Mac connection-refused
-  // failure. Serve the PAC over loopback HTTP so setProxy has a real URL.
-  const pacServer = yield* Effect.callback<NodeHttp.Server, PreviewLoopbackForwardError>(
-    (resume) => {
-      const server = NodeHttp.createServer((request, response) => {
-        const path = request.url === undefined ? "" : (request.url.split("?")[0] ?? "");
-        if (request.method !== "GET" || path !== PREVIEW_LOOPBACK_PAC_PATH) {
-          response.writeHead(404);
-          response.end();
-          return;
-        }
-        const address = server.address();
-        const pacPort = typeof address === "object" && address !== null ? address.port : 0;
-        const body = buildPreviewLoopbackPacScript(proxyPort, previewLoopbackPacScriptUrl(pacPort));
-        response.writeHead(200, {
-          "cache-control": "no-store",
-          "content-type": "application/x-ns-proxy-autoconfig",
-        });
-        response.end(body);
-      });
-      let settled = false;
-      server.once("error", (cause) => {
-        if (settled) return;
-        settled = true;
-        resume(
-          Effect.fail(
-            new PreviewLoopbackForwardError({
-              detail: "Could not listen for the preview PAC script.",
-              cause,
-            }),
-          ),
-        );
-      });
-      server.listen({ host: "127.0.0.1", port: 0 }, () => {
-        if (settled) return;
-        settled = true;
-        resume(Effect.succeed(server));
-      });
-      return Effect.sync(() => {
-        server.close();
-      });
-    },
-  );
-  const pacAddress = pacServer.address();
-  const pacPort = typeof pacAddress === "object" && pacAddress !== null ? pacAddress.port : 0;
-  if (pacPort === 0) {
-    return yield* new PreviewLoopbackForwardError({
-      detail: "Could not listen for the preview PAC script.",
-    });
-  }
-  const pacScriptUrl = previewLoopbackPacScriptUrl(pacPort);
 
   const ensure: PreviewLoopbackForwarder["Service"]["ensure"] = Effect.fn(
     "desktop.preview.loopbackForward.ensure",
@@ -507,7 +274,7 @@ export const make = Effect.gen(function* () {
     });
   });
 
-  return PreviewLoopbackForwarder.of({ proxyPort, pacScriptUrl, ensure, ensureRelated });
+  return PreviewLoopbackForwarder.of({ proxyPort, ensure, ensureRelated });
 });
 
 export const layer = Layer.effect(PreviewLoopbackForwarder, make);
