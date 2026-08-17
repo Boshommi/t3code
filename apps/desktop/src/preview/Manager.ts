@@ -55,7 +55,7 @@ import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import { PREVIEW_PICTURE_IN_PICTURE_FRAME_CHANNEL } from "../ipc/channels.ts";
 import * as BrowserSession from "./BrowserSession.ts";
 import * as PreviewLoopbackForwarder from "./LoopbackForwarder.ts";
-import { applyPreviewLoopbackProxy } from "./LoopbackRequestInterceptor.ts";
+import { attachPreviewLoopbackSession } from "./LoopbackRequestInterceptor.ts";
 import {
   ANNOTATION_CAPTURED_CHANNEL,
   ANNOTATION_THEME_CHANNEL,
@@ -1578,7 +1578,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       PreviewLoopbackForwarder.PreviewLoopbackForwarder,
     );
     if (Option.isSome(loopbackForwarder)) {
-      applyPreviewLoopbackProxy(wc.session, loopbackForwarder.value.proxyPort);
+      void attachPreviewLoopbackSession(wc.session, loopbackForwarder.value);
     }
     const scope = yield* Scope.fork(parentScope, "sequential");
     const attachmentId = Symbol();
@@ -1881,7 +1881,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     };
     const handlePreviewPopupCreated = (child: BrowserWindow): void => {
       if (Option.isSome(loopbackForwarder)) {
-        applyPreviewLoopbackProxy(child.webContents.session, loopbackForwarder.value.proxyPort);
+        void attachPreviewLoopbackSession(child.webContents.session, loopbackForwarder.value);
       }
       attachPreviewWindowOpenHandler(child.webContents);
     };
@@ -2092,7 +2092,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         return;
       }
       yield* Effect.promise(() =>
-        applyPreviewLoopbackProxy(wc.session, loopbackForwarder.value.proxyPort),
+        attachPreviewLoopbackSession(wc.session, loopbackForwarder.value),
       );
       const targetUrl = relatedUrl ?? wc.getURL();
       if (targetUrl.length > 0) {
@@ -2135,7 +2135,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         PreviewLoopbackForwarder.PreviewLoopbackForwarder,
       );
       if (Option.isSome(loopbackForwarder)) {
-        applyPreviewLoopbackProxy(wc.session, loopbackForwarder.value.proxyPort);
+        void attachPreviewLoopbackSession(wc.session, loopbackForwarder.value);
       }
       yield* assertTabZoom(tabId);
       yield* attempt({ operation: "registerWebview.sendTheme", tabId, webContentsId }, () =>
