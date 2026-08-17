@@ -56,6 +56,19 @@ describe("decidePreviewWindowOpen", () => {
     expect(isAboutBlankUrl("about:blank#")).toBe(true);
   });
 
+  it("allows Google passkey windows as popups", () => {
+    expect(
+      decidePreviewWindowOpen({
+        url: "https://passkeys.google.com/hello",
+        disposition: "foreground-tab",
+      }),
+    ).toEqual({
+      kind: "allow-popup",
+      width: DEFAULT_PREVIEW_POPUP_WIDTH,
+      height: DEFAULT_PREVIEW_POPUP_HEIGHT,
+    });
+  });
+
   it("allows accounts.google.com even when Chromium reports a tab disposition", () => {
     expect(
       decidePreviewWindowOpen({

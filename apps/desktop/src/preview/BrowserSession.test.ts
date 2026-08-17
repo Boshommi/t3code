@@ -16,7 +16,9 @@ const { fromPartition, sessions } = vi.hoisted(() => ({
       readonly getUserAgent: ReturnType<typeof vi.fn>;
       readonly setPermissionRequestHandler: ReturnType<typeof vi.fn>;
       readonly setPermissionCheckHandler: ReturnType<typeof vi.fn>;
+      readonly setDevicePermissionHandler: ReturnType<typeof vi.fn>;
       readonly setUserAgent: ReturnType<typeof vi.fn>;
+      readonly on: ReturnType<typeof vi.fn>;
     }
   >(),
 }));
@@ -24,6 +26,18 @@ const { fromPartition, sessions } = vi.hoisted(() => ({
 vi.mock("electron", () => ({
   session: {
     fromPartition,
+  },
+  app: {
+    configureWebAuthn: vi.fn(),
+  },
+  dialog: {
+    showMessageBox: vi.fn(),
+  },
+  BrowserWindow: {
+    fromWebContents: vi.fn(),
+  },
+  webContents: {
+    fromFrame: vi.fn(),
   },
 }));
 
@@ -42,7 +56,9 @@ describe("BrowserSession", () => {
         getUserAgent: vi.fn(() => "Mozilla/5.0 Electron/41.5.0 t3code/0.0.27"),
         setPermissionRequestHandler: vi.fn(),
         setPermissionCheckHandler: vi.fn(),
+        setDevicePermissionHandler: vi.fn(),
         setUserAgent: vi.fn(),
+        on: vi.fn(),
       };
       sessions.set(partition, browserSession);
       return browserSession;
@@ -124,6 +140,12 @@ describe("BrowserSession", () => {
           `check handler should deny ${permission}`,
         );
       }
+
+      assert.isFunction(browserSession.setDevicePermissionHandler);
+      assert.isTrue(
+        browserSession.on.mock.calls.some((call) => call[0] === "select-webauthn-account"),
+        "preview sessions must listen for WebAuthn account selection or Electron cancels the OS prompt",
+      );
     }).pipe(Effect.provide(layer)),
   );
 

@@ -10,6 +10,8 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
+import { attachPreviewWebAuthn } from "./previewWebAuthnSession.ts";
+
 const PREVIEW_PARTITION_PREFIX = "persist:t3code-preview-";
 
 // Permissions granted to preview web content. `clipboard-sanitized-write` is the
@@ -161,6 +163,7 @@ export const make = Effect.gen(function* BrowserSessionMake() {
           browserSession.setPermissionCheckHandler((_webContents, permission) =>
             ALLOWED_PREVIEW_PERMISSIONS.has(permission),
           );
+          attachPreviewWebAuthn(browserSession);
           const next = new Map(sessions);
           next.set(partition, browserSession);
           return [browserSession, next] as const;
