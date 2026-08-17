@@ -18,4 +18,10 @@ describe("attachPreviewLoopbackRequestInterceptor", () => {
       proxyBypassRules: "<-loopback>",
     });
   });
+
+  // An http= rule makes Chromium write absolute-form request lines, which Next
+  // answers with a 308 back to the same URL. SOCKS5 keeps it origin-form.
+  it("asks Chromium for a SOCKS5 circuit, not an HTTP forward proxy", () => {
+    expect(previewLoopbackProxyRules(43210)).toBe("socks5://127.0.0.1:43210");
+  });
 });

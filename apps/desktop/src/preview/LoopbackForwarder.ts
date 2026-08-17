@@ -14,11 +14,10 @@ import * as Schema from "effect/Schema";
 
 import {
   isPreviewLoopbackDestination,
-  isTlsHandshake,
   pipeByteSources,
   runHttpForwardSession,
 } from "./previewHttp.ts";
-import { acceptSocks5Connect, SOCKS5_REP, socks5Reply } from "./socks5.ts";
+import { acceptSocks5Connect, SOCKS5_REP, SOCKS5_VERSION, socks5Reply } from "./socks5.ts";
 
 export class PreviewLoopbackForwardError extends Schema.TaggedErrorClass<PreviewLoopbackForwardError>()(
   "PreviewLoopbackForwardError",
@@ -236,18 +235,20 @@ export const make = Effect.gen(function* () {
     return connectLocal(port);
   };
 
+  // Chromium is pointed at this listener with socks5:// rules, so the SOCKS
+  // branch is the path every preview request takes: once the circuit is up we
+  // copy bytes and never parse them, which is what keeps keep-alive, chunked
+  // HTML, percent-encoded paths, TLS, and websocket upgrades intact. The HTTP
+  // branch stays as a fallback for a Chromium build that ignores socks5 rules
+  // and speaks proxy protocol at us anyway.
   const routeProxySocket = (socket: NodeNet.Socket) => {
     void (async () => {
       const first = await readFirstChunk(socket);
-      if (first[0] === 0x05) {
+      if (first[0] === SOCKS5_VERSION) {
         const target = await acceptSocks5Connect(socket, first);
         const dest = await connectDestination(target.host, target.port);
         socket.write(socks5Reply(SOCKS5_REP.succeeded));
-        if (!isPreviewLoopbackDestination(target.host) || isTlsHandshake(target.leftover)) {
-          pipeByteSources(socket, dest, target.leftover);
-          return;
-        }
-        await runHttpForwardSession(socket, target.leftover, async () => dest);
+        pipeByteSources(socket, dest, target.leftover);
         return;
       }
       await runHttpForwardSession(socket, first, connectDestination);

@@ -12,8 +12,14 @@ export type PreviewProxyDestination = {
   readonly port: number;
 };
 
-const HOP_BY_HOP_HEADER =
-  /^(proxy-connection|proxy-authorization|te|trailer|transfer-encoding|upgrade|keep-alive)$/iu;
+// Only the headers that are addressed to us as a proxy. Connection, Upgrade,
+// and Transfer-Encoding are forwarded verbatim: they carry the framing and the
+// websocket handshake Chromium chose, and dropping them turned HMR upgrades
+// into plain 200s and truncated chunked bodies.
+const PROXY_ONLY_HEADER = /^(proxy-connection|proxy-authorization)$/iu;
+
+const isChunkedBody = (header: string): boolean =>
+  /(?:^|\r\n)transfer-encoding\s*:[^\r\n]*\bchunked\b/iu.test(header);
 
 export const readHeaderValue = (header: string, name: string): string | undefined => {
   const match = new RegExp(`(?:^|\\r\\n)${name}\\s*:\\s*([^\\r\\n]+)`, "iu").exec(header);
@@ -33,8 +39,6 @@ export const headerIndicatesClose = (header: string): boolean =>
 
 export const isHttpConnect = (firstLine: string): boolean =>
   firstLine.toUpperCase().startsWith("CONNECT ");
-
-export const isTlsHandshake = (buffer: Buffer): boolean => buffer.length > 0 && buffer[0] === 0x16;
 
 export const parsePreviewProxyDestination = (
   firstLine: string,
@@ -104,13 +108,13 @@ export const rewriteHttpProxyRequest = (header: string): string => {
       lines[0] = `${match[1]} ${originPath} ${match[3]}`;
     }
   }
-  const forwarded = lines.filter(
-    (line, index) =>
-      index === 0 ||
-      line.length === 0 ||
-      !HOP_BY_HOP_HEADER.test((line.split(":", 1)[0] ?? "").trim()),
-  );
-  return forwarded.filter((line) => line.length > 0).join("\r\n");
+  return lines
+    .filter(
+      (line, index) =>
+        index === 0 ||
+        (line.length > 0 && !PROXY_ONLY_HEADER.test((line.split(":", 1)[0] ?? "").trim())),
+    )
+    .join("\r\n");
 };
 
 export const isPreviewLoopbackDestination = (host: string): boolean => {
@@ -137,6 +141,10 @@ class ByteReader {
     this.source.on("error", this.onError);
     this.source.once("end", this.onEnd);
     this.source.once("close", this.onEnd);
+    // Attaching "data" only resumes a stream that was never explicitly paused,
+    // and detach() pauses. Without this the second keep-alive message on a
+    // connection would wait forever for bytes that are sitting in the buffer.
+    this.source.resume();
   }
 
   private readonly onData = (chunk: Buffer) => {
@@ -164,6 +172,10 @@ class ByteReader {
     this.source.off("error", this.onError);
     this.source.off("end", this.onEnd);
     this.source.off("close", this.onEnd);
+    // Removing the last "data" listener does not leave flowing mode, so
+    // anything the peer sends before the next reader attaches would be emitted
+    // to nobody and lost. Pausing buffers it instead; pipe() resumes.
+    this.source.pause();
     const leftover = this.buffer;
     this.buffer = Buffer.alloc(0);
     return leftover;
@@ -282,7 +294,7 @@ export const forwardHttpResponse = async (
       return { upgraded: false, close: headerIndicatesClose(header), leftover: reader.detach() };
     }
     reader.unread(rest);
-    if (/transfer-encoding:\s*chunked/iu.test(header)) {
+    if (isChunkedBody(header)) {
       await forwardChunked(reader, client);
     } else {
       const length = contentLengthOf(header);
@@ -297,17 +309,21 @@ export const forwardHttpResponse = async (
   }
 };
 
-const readRequestBody = async (
+const forwardRequestBody = async (
   reader: ByteReader,
   header: string,
   rest: Buffer,
-): Promise<Buffer> => {
+  dest: ByteSource,
+): Promise<void> => {
   reader.unread(rest);
-  const length = contentLengthOf(header);
-  if (length === 0) {
-    return Buffer.alloc(0);
+  if (isChunkedBody(header)) {
+    await forwardChunked(reader, dest);
+    return;
   }
-  return reader.readExact(length);
+  const length = contentLengthOf(header);
+  if (length > 0) {
+    writeAll(dest, await reader.readExact(length));
+  }
 };
 
 export type ConnectPreviewDestination = (host: string, port: number) => Promise<ByteSource>;
@@ -348,8 +364,8 @@ export const runHttpForwardSession = async (
         destPort = destination.port;
         destLeftover = Buffer.alloc(0);
       }
-      const body = await readRequestBody(clientReader, header, rest);
-      dest.write(Buffer.concat([Buffer.from(`${rewriteHttpProxyRequest(header)}\r\n\r\n`), body]));
+      writeAll(dest, Buffer.from(`${rewriteHttpProxyRequest(header)}\r\n\r\n`));
+      await forwardRequestBody(clientReader, header, rest, dest);
       const forwarded = await forwardHttpResponse(
         dest,
         client,
