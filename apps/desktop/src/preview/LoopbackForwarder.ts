@@ -5,7 +5,6 @@ import {
   parseLoopbackPreviewTarget,
   previewRequestUrlToLoopbackTarget,
   rewritePreviewTunnelPort,
-  rewritePreviewUrlToAlias,
 } from "@t3tools/shared/previewLoopbackForward";
 import * as NodeNet from "node:net";
 import * as NodeStream from "node:stream";
@@ -298,16 +297,17 @@ export const make = Effect.gen(function* () {
     if (decision.kind === "not-applicable") {
       return { navigateUrl: input.url, kind: decision.kind };
     }
-    const navigateUrl = rewritePreviewUrlToAlias(input.url);
+    // Stay on localhost so the page origin matches CORS allowlists. The
+    // cmux-style localtest.me alias would change origin and break APIs.
     if (decision.kind === "reuse-tunnel") {
-      return { navigateUrl, kind: decision.kind };
+      return { navigateUrl: input.url, kind: decision.kind };
     }
     tunnels.set(key, {
       environmentId: input.environmentId,
       port: decision.port,
       tunnelWebsocketUrl: input.tunnelWebsocketUrl,
     });
-    return { navigateUrl, kind: "start-tunnel" };
+    return { navigateUrl: input.url, kind: "start-tunnel" };
   });
 
   const ensureRelated: PreviewLoopbackForwarder["Service"]["ensureRelated"] = Effect.fn(

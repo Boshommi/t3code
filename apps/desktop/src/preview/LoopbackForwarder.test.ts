@@ -174,7 +174,7 @@ describe("PreviewLoopbackForwarder", () => {
         tunnelWebsocketUrl: "ws://127.0.0.1:9/preview-tunnel?wsTicket=ticket&port=1",
       });
       expect(result).toEqual({
-        navigateUrl: `http://t3-loopback.localtest.me:${String(port)}/app`,
+        navigateUrl: `http://localhost:${String(port)}/app`,
         kind: "start-tunnel",
       });
       occupied.close();
