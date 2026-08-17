@@ -31,6 +31,7 @@ interface ElectronWebview extends HTMLElement {
   partition: string;
   preload?: string;
   webpreferences?: string;
+  allowpopups?: boolean | string;
   getWebContentsId: () => number;
   executeJavaScript: (code: string, userGesture?: boolean) => Promise<unknown>;
 }
@@ -262,6 +263,7 @@ export function HostedBrowserWebview(props: {
           src={webviewGeneration === 0 ? initialSrc : recoverySrc}
           partition={config.partition}
           webpreferences={config.webPreferences}
+          allowpopups="true"
           {...(config.preloadUrl ? { preload: config.preloadUrl } : {})}
           data-preview-tab={runtimeTabId}
           data-preview-server-tab={tabId}

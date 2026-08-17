@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
   attachPreviewLoopbackSession,
+  previewLoopbackProxyBypassRules,
   previewLoopbackProxyRules,
 } from "./LoopbackRequestInterceptor.ts";
 
@@ -23,10 +24,12 @@ const makeSessionMock = (cookies: Array<{ name: string; value: string }> = []) =
   const fetch = vi.fn(async () => new Response("passthrough"));
   const cookiesSet = vi.fn(async () => undefined);
   const cookiesRemove = vi.fn(async () => undefined);
+  const onBeforeSendHeaders = vi.fn();
   const session = {
     setProxy,
     fetch,
     protocol: { handle },
+    webRequest: { onBeforeSendHeaders },
     cookies: {
       get: vi.fn(async () => cookies),
       set: cookiesSet,
@@ -40,6 +43,7 @@ const makeSessionMock = (cookies: Array<{ name: string; value: string }> = []) =
     fetch,
     cookiesSet,
     cookiesRemove,
+    onBeforeSendHeaders,
   };
 };
 
@@ -62,18 +66,46 @@ describe("attachPreviewLoopbackSession", () => {
     expect(setProxy.mock.calls.at(0)?.at(0)).toEqual({
       mode: "fixed_servers",
       proxyRules: previewLoopbackProxyRules(43_210),
-      proxyBypassRules: "<-loopback>",
+      proxyBypassRules: previewLoopbackProxyBypassRules(),
     });
     expect(handle).toHaveBeenCalledTimes(1);
     expect(handle.mock.calls.at(0)?.at(0)).toBe("http");
   });
 
+  it("keeps Google Identity off the loopback SOCKS hop", () => {
+    const rules = previewLoopbackProxyBypassRules();
+    expect(rules.startsWith("<-loopback>,")).toBe(true);
+    expect(rules).toContain("*.google.com");
+    expect(rules).toContain("*.gstatic.com");
+  });
+
+  it("strips the Electron Client Hint brand on the way to Google", () => {
+    const mock = makeSessionMock();
+    void attachPreviewLoopbackSession(mock.session, services);
+    expect(mock.onBeforeSendHeaders).toHaveBeenCalledTimes(1);
+    const listener = mock.onBeforeSendHeaders.mock.calls.at(0)?.at(0);
+    if (typeof listener !== "function") throw new Error("client-hint listener was not registered");
+    let rewritten: Record<string, string> | undefined;
+    listener(
+      {
+        requestHeaders: {
+          "Sec-CH-UA": `"Chromium";v="142", "Electron";v="41"`,
+        },
+      },
+      (result: { requestHeaders: Record<string, string> }) => {
+        rewritten = result.requestHeaders;
+      },
+    );
+    expect(rewritten?.["Sec-CH-UA"]).toBe(`"Chromium";v="142", "Google Chrome";v="142"`);
+  });
+
   it("registers the http handler once per session, re-applying only the proxy", () => {
-    const { session, handle, setProxy } = makeSessionMock();
+    const { session, handle, setProxy, onBeforeSendHeaders } = makeSessionMock();
     void attachPreviewLoopbackSession(session, services);
     void attachPreviewLoopbackSession(session, services);
     expect(handle).toHaveBeenCalledTimes(1);
     expect(setProxy).toHaveBeenCalledTimes(2);
+    expect(onBeforeSendHeaders).toHaveBeenCalledTimes(1);
   });
 
   // An http= rule makes Chromium write absolute-form request lines, which Next
@@ -155,6 +187,16 @@ describe("preview loopback http handler", () => {
     } finally {
       server.close();
     }
+  });
+
+  it("serves the live Click auth iframe so Google Identity can boot", async () => {
+    const mock = makeSessionMock();
+    const handler = registeredHandler(mock);
+    const response = await handler(new Request("http://127.0.0.1:5173/iframe"));
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Click Auth Surface");
+    expect(html).toContain("https://accounts.google.com");
   });
 
   it("returns a 502 with detail when the destination is unreachable", async () => {

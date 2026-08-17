@@ -8,6 +8,7 @@ import * as Layer from "effect/Layer";
 
 import * as BrowserSession from "./BrowserSession.ts";
 import * as PreviewLoopbackForwarder from "./LoopbackForwarder.ts";
+import { rewritePreviewSecChUa } from "./previewClientHints.ts";
 import {
   buildPreviewLoopbackRequestHeaders,
   fetchPreviewLoopback,
@@ -26,6 +27,30 @@ export type PreviewLoopbackSessionServices = {
 export const previewLoopbackProxyRules = (proxyPort: number): string =>
   `socks5://127.0.0.1:${String(proxyPort)}`;
 
+/**
+ * `<-loopback>` removes Chromium's implicit localhost DIRECT bypass so
+ * ws://localhost can still use SOCKS. Public identity hosts stay DIRECT —
+ * they are not on the remote machine, and Google Identity should reach
+ * accounts.google.com the way a normal browser would.
+ */
+export const PREVIEW_PUBLIC_PROXY_BYPASS_HOSTS = [
+  "*.google.com",
+  "*.gstatic.com",
+  "*.googleapis.com",
+  "*.googleusercontent.com",
+  "*.ggpht.com",
+  "accounts.youtube.com",
+  "appleid.apple.com",
+  "*.microsoftonline.com",
+  "*.msauth.net",
+  "login.live.com",
+  "*.live.com",
+  "oauth.telegram.org",
+] as const;
+
+export const previewLoopbackProxyBypassRules = (): string =>
+  `<-loopback>,${PREVIEW_PUBLIC_PROXY_BYPASS_HOSTS.join(",")}`;
+
 export const applyPreviewLoopbackProxy = (session: Session, proxyPort: number): Promise<void> =>
   session
     .setProxy({
@@ -37,11 +62,33 @@ export const applyPreviewLoopbackProxy = (session: Session, proxyPort: number): 
       // localhost at all.
       mode: "fixed_servers",
       proxyRules: previewLoopbackProxyRules(proxyPort),
-      proxyBypassRules: "<-loopback>",
+      proxyBypassRules: previewLoopbackProxyBypassRules(),
     })
     .catch((error: unknown) => {
       console.warn("Failed to apply the preview loopback proxy", error);
     });
+
+const clientHintSessions = new WeakSet<Session>();
+
+export const attachPreviewClientHintOverrides = (session: Session): void => {
+  if (clientHintSessions.has(session)) return;
+  const webRequest = session.webRequest;
+  if (webRequest === undefined) return;
+  clientHintSessions.add(session);
+  webRequest.onBeforeSendHeaders((details, callback) => {
+    const headers = { ...details.requestHeaders };
+    for (const [name, value] of Object.entries(headers)) {
+      const lower = name.toLowerCase();
+      if (
+        (lower === "sec-ch-ua" || lower === "sec-ch-ua-full-version-list") &&
+        typeof value === "string"
+      ) {
+        headers[name] = rewritePreviewSecChUa(value);
+      }
+    }
+    callback({ requestHeaders: headers });
+  });
+};
 
 let cachedAcceptLanguage: string | undefined;
 const previewAcceptLanguage = (): string | undefined => {
@@ -183,6 +230,7 @@ export const attachPreviewLoopbackSession = (
   services: PreviewLoopbackSessionServices,
 ): Promise<void> => {
   attachPreviewLoopbackHttpHandler(session, services.connect);
+  attachPreviewClientHintOverrides(session);
   return applyPreviewLoopbackProxy(session, services.proxyPort);
 };
 
