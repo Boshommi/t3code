@@ -9,7 +9,12 @@ import {
   PREVIEW_LOOPBACK_ALIAS_HOST,
 } from "@t3tools/shared/previewLoopbackForward";
 
-import { make, pipeLocalSocketToTunnel } from "./LoopbackForwarder.ts";
+import {
+  make,
+  openPreviewTunnelDuplex,
+  pipeLocalSocketToTunnel,
+  PREVIEW_TUNNEL_WEBSOCKET_CLOSED,
+} from "./LoopbackForwarder.ts";
 
 const listen = (port: number) =>
   Effect.callback<NodeNet.Server>((resume) => {
@@ -492,6 +497,51 @@ describe("PreviewLoopbackForwarder", () => {
       expect(js.body.byteLength).toBeGreaterThan(0);
     }),
   );
+
+  it("waits for the tunnel websocket to open before handing it to HTTP", async () => {
+    const openListeners: Array<() => void> = [];
+    const fake = {
+      binaryType: "arraybuffer",
+      readyState: 0,
+      send() {},
+      close() {
+        this.readyState = 3;
+      },
+      addEventListener(type: string, listener: () => void) {
+        if (type === "open") openListeners.push(listener);
+      },
+      removeEventListener() {},
+    };
+    const pending = openPreviewTunnelDuplex(
+      "ws://127.0.0.1:9/preview-tunnel",
+      () => fake as unknown as WebSocket,
+    );
+    expect(openListeners.length).toBeGreaterThan(0);
+    fake.readyState = 1;
+    for (const listener of openListeners) listener();
+    await expect(pending).resolves.toBeDefined();
+  });
+
+  it("rejects when the tunnel websocket dies before it opens", async () => {
+    const fake = {
+      binaryType: "arraybuffer",
+      readyState: 0,
+      send() {},
+      close() {
+        this.readyState = 3;
+      },
+      addEventListener(type: string, listener: () => void) {
+        if (type === "error") listener();
+      },
+      removeEventListener() {},
+    };
+    await expect(
+      openPreviewTunnelDuplex(
+        "ws://127.0.0.1:9/preview-tunnel",
+        () => fake as unknown as WebSocket,
+      ),
+    ).rejects.toThrow(PREVIEW_TUNNEL_WEBSOCKET_CLOSED);
+  });
 
   it("closes both sides when the tunnel websocket errors", () => {
     const local = new NodeNet.Socket();
