@@ -397,11 +397,13 @@ export const fetchPreviewLoopback = async (
     return await requestOnce(input);
   } catch (error) {
     const method = input.method.toUpperCase();
+    const message = error instanceof Error ? error.message : String(error);
     const retryable =
       input.body === null &&
       (method === "GET" || method === "HEAD") &&
-      (error as { reusedSocket?: boolean }).reusedSocket === true &&
-      input.signal?.aborted !== true;
+      input.signal?.aborted !== true &&
+      ((error as { reusedSocket?: boolean }).reusedSocket === true ||
+        message.includes("websocket is closed"));
     if (!retryable) throw error;
     return await requestOnce(input);
   }

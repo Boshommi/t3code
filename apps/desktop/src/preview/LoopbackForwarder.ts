@@ -53,6 +53,8 @@ const toSendableBytes = (buffer: Buffer): Uint8Array<ArrayBuffer> => {
   return payload;
 };
 
+export const PREVIEW_TUNNEL_WEBSOCKET_CLOSED = "Preview tunnel websocket is closed.";
+
 export const createWebSocketDuplex = (
   tunnelWebsocketUrl: string,
   openWebSocket: (url: string) => WebSocket = (url) => new WebSocket(url),
@@ -71,10 +73,10 @@ export const createWebSocketDuplex = (
         return;
       }
       if (
-        websocket.readyState !== WebSocket.CONNECTING &&
-        websocket.readyState !== WebSocket.OPEN
+        closed ||
+        (websocket.readyState !== WebSocket.CONNECTING && websocket.readyState !== WebSocket.OPEN)
       ) {
-        callback(new Error("Preview tunnel websocket is closed."));
+        callback(new Error(PREVIEW_TUNNEL_WEBSOCKET_CLOSED));
         return;
       }
       pending.push(payload);
@@ -85,6 +87,7 @@ export const createWebSocketDuplex = (
   const closeBoth = () => {
     if (closed) return;
     closed = true;
+    pending.length = 0;
     duplex.destroy();
     if (websocket.readyState === WebSocket.OPEN || websocket.readyState === WebSocket.CONNECTING) {
       websocket.close();
@@ -93,7 +96,9 @@ export const createWebSocketDuplex = (
   websocket.addEventListener("open", () => {
     opened = true;
     for (const queued of pending.splice(0)) {
-      websocket.send(toSendableBytes(queued));
+      if (websocket.readyState === WebSocket.OPEN) {
+        websocket.send(toSendableBytes(queued));
+      }
     }
   });
   websocket.addEventListener("message", (event) => {
@@ -107,15 +112,43 @@ export const createWebSocketDuplex = (
     }
   });
   websocket.addEventListener("error", closeBoth);
-  websocket.addEventListener("close", () => duplex.push(null));
-  duplex.on("close", closeBoth);
-  duplex.on("finish", () => {
-    if (websocket.readyState === WebSocket.OPEN || websocket.readyState === WebSocket.CONNECTING) {
-      websocket.close();
-    }
+  websocket.addEventListener("close", () => {
+    if (closed) return;
+    if (opened) duplex.push(null);
+    closeBoth();
   });
+  duplex.on("close", closeBoth);
+  // Do not close the websocket on writable finish. Node's HTTP client ends
+  // the request stream after GET; tearing the tunnel down then drops the
+  // iframe response (localhost:5173) with "websocket is closed".
   return duplex;
 };
+
+/** Wait until the preview-tunnel websocket is actually open before HTTP writes. */
+export const openPreviewTunnelDuplex = (
+  tunnelWebsocketUrl: string,
+  openWebSocket: (url: string) => WebSocket = (url) => new WebSocket(url),
+): Promise<NodeStream.Duplex> =>
+  new Promise((resolve, reject) => {
+    const websocket = openWebSocket(tunnelWebsocketUrl);
+    const duplex = createWebSocketDuplex(tunnelWebsocketUrl, () => websocket);
+    const onOpen = () => {
+      websocket.removeEventListener("error", onFail);
+      websocket.removeEventListener("close", onFail);
+      resolve(duplex);
+    };
+    const onFail = () => {
+      websocket.removeEventListener("open", onOpen);
+      reject(new Error(PREVIEW_TUNNEL_WEBSOCKET_CLOSED));
+    };
+    if (websocket.readyState === WebSocket.OPEN) {
+      resolve(duplex);
+      return;
+    }
+    websocket.addEventListener("open", onOpen, { once: true });
+    websocket.addEventListener("error", onFail, { once: true });
+    websocket.addEventListener("close", onFail, { once: true });
+  });
 
 export const pipeLocalSocketToTunnel = (
   local: NodeNet.Socket,
@@ -236,7 +269,7 @@ export const make = Effect.gen(function* () {
     }
     const tunnelUrl = resolveTunnelUrl(port);
     if (tunnelUrl !== null) {
-      return createWebSocketDuplex(tunnelUrl);
+      return openPreviewTunnelDuplex(tunnelUrl);
     }
     if (lastRemoteEnvironmentId !== undefined) {
       throw new Error("Remote preview tunnel is not available for this port.");
