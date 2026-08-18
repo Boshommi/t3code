@@ -711,6 +711,7 @@ export function PreviewView({
           handleResetZoom();
           return;
         case "toggle-panel":
+        case "close-tab":
           return;
       }
     });
