@@ -44,6 +44,7 @@ import {
   SearchIcon,
   ServerIcon,
   SettingsIcon,
+  XIcon,
   SquarePenIcon,
   TextSearchIcon,
 } from "lucide-react";
@@ -61,6 +62,7 @@ import {
 } from "react";
 import { useAtomValue } from "@effect/atom-react";
 
+import { isElectron } from "../env";
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
@@ -1629,6 +1631,20 @@ function OpenCommandPaletteDialog(props: {
       });
     },
   });
+
+  if (isElectron) {
+    actionItems.push({
+      kind: "action",
+      value: "action:close-window",
+      searchTerms: ["close window", "quit window", "close app"],
+      title: "Close window",
+      icon: <XIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "window.close",
+      run: async () => {
+        void window.desktopBridge?.requestWindowClose?.();
+      },
+    });
+  }
 
   actionItems.push({
     kind: "action",

@@ -180,7 +180,20 @@ export const make = Effect.gen(function* () {
                 },
                 { type: "separator" as const },
               ]),
-          { role: environment.platform === "darwin" ? "close" : "quit" },
+          environment.platform === "darwin"
+            ? {
+                label: "Close Window",
+                click: () => {
+                  runMenuEffect(
+                    "close-window",
+                    Effect.gen(function* () {
+                      const desktopWindow = yield* DesktopWindow.DesktopWindow;
+                      yield* desktopWindow.closeMain;
+                    }),
+                  );
+                },
+              }
+            : { role: "quit" as const },
         ],
       },
       { role: "editMenu" },
@@ -210,7 +223,13 @@ export const make = Effect.gen(function* () {
           { role: "togglefullscreen" },
         ],
       },
-      { role: "windowMenu" },
+      {
+        label: "Window",
+        submenu:
+          environment.platform === "darwin"
+            ? [{ role: "minimize" }, { role: "zoom" }, { type: "separator" }, { role: "front" }]
+            : [{ role: "minimize" }, { role: "zoom" }],
+      },
       {
         role: "help",
         submenu: [

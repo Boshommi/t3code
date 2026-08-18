@@ -59,7 +59,8 @@ so add one in **Settings** → **Keybindings** if you want to use it.
 
 `mod+w` closes the thing you are looking at, not the T3 Code window: a focused terminal pane, the
 in-app browser tab, or whichever other right-panel tab has focus. When none of those have focus,
-the desktop app still uses that shortcut to close the window.
+the desktop app asks you to press the shortcut again to close the window. **File → Close Window**
+closes immediately.
 
 The command palette searches active thread titles, projects, branches, user messages, and final
 agent responses across connected environments. Message matches show one labeled excerpt while
