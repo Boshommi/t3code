@@ -51,7 +51,10 @@ import * as Scope from "effect/Scope";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
-import { PREVIEW_PICTURE_IN_PICTURE_FRAME_CHANNEL } from "../ipc/channels.ts";
+import {
+  PREVIEW_PICTURE_IN_PICTURE_FRAME_CHANNEL,
+  PREVIEW_REQUEST_CLOSE_TAB_CHANNEL,
+} from "../ipc/channels.ts";
 import * as BrowserSession from "./BrowserSession.ts";
 import * as PreviewLoopbackForwarder from "./LoopbackForwarder.ts";
 import { attachPreviewLoopbackSession } from "./LoopbackRequestInterceptor.ts";
@@ -437,14 +440,22 @@ const APP_FORWARDED_SHORTCUTS: ReadonlyArray<{
   { key: "k", meta: true, shift: false, control: false },
   // mod+, → settings (macOS convention)
   { key: ",", meta: true, shift: false, control: false },
-  // mod+W → close tab/panel
-  { key: "w", meta: true, shift: false, control: false },
 ]);
 
 export const isPreviewRefreshShortcut = (input: Electron.Input): boolean =>
   input.type === "keyDown" &&
   input.key.toLowerCase() === "r" &&
   (input.meta || input.control) &&
+  !input.shift &&
+  !input.alt;
+
+// Cmd+W on macOS, Ctrl+W elsewhere. Must not be forwarded as a fake
+// key into the main window: Electron's File → Close accelerator would
+// quit the app. The renderer closes the focused tab instead.
+export const isPreviewCloseTabShortcut = (input: Electron.Input): boolean =>
+  input.type === "keyDown" &&
+  input.key.toLowerCase() === "w" &&
+  input.meta !== input.control &&
   !input.shift &&
   !input.alt;
 
@@ -1674,6 +1685,13 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         ],
       });
     });
+    const requestCloseTab = Effect.fn("PreviewManager.requestCloseTab")(function* () {
+      const mainWindow = yield* Ref.get(mainWindowRef);
+      if (Option.isNone(mainWindow) || mainWindow.value.isDestroyed()) {
+        return;
+      }
+      mainWindow.value.webContents.send(PREVIEW_REQUEST_CLOSE_TAB_CHANNEL, { tabId });
+    });
     const beforeInput = (event: Electron.Event, input: Electron.Input): void => {
       if (isPreviewRefreshShortcut(input)) {
         event.preventDefault();
@@ -1682,6 +1700,11 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
             wc.reload(),
           ).pipe(Effect.ignore),
         );
+        return;
+      }
+      if (isPreviewCloseTabShortcut(input)) {
+        event.preventDefault();
+        runFork(requestCloseTab());
         return;
       }
       runFork(forwardShortcut(event, input));

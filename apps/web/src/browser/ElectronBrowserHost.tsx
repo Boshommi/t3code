@@ -4,6 +4,7 @@ import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import { FILL_PREVIEW_VIEWPORT } from "@t3tools/contracts";
 import { useEffect, useMemo } from "react";
 
+import { dispatchPreviewAction } from "~/components/preview/previewActionBus";
 import { isElectron } from "~/env";
 import { useTheme } from "~/hooks/useTheme";
 import { useActivePreviewSessions } from "~/previewStateStore";
@@ -74,6 +75,16 @@ export function ElectronBrowserHost() {
     if (!preview) return;
     return preview.onPointerEvent((event) => {
       useBrowserPointerStore.getState().apply(event);
+    });
+  }, []);
+
+  useEffect(() => {
+    const onCloseTabRequest = window.desktopBridge?.preview?.onCloseTabRequest;
+    if (typeof onCloseTabRequest !== "function") {
+      return;
+    }
+    return onCloseTabRequest(() => {
+      dispatchPreviewAction("close-tab");
     });
   }, []);
 

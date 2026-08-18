@@ -1243,6 +1243,11 @@ export interface DesktopPreviewBridge {
   };
   onStateChange: (listener: (tabId: string, state: DesktopPreviewTabState) => void) => () => void;
   onPointerEvent: (listener: (event: DesktopPreviewPointerEvent) => void) => () => void;
+  /**
+   * Guest Cmd/Ctrl+W while the in-app browser has focus. Optional: older
+   * desktop builds never emit it and keep the native window-close accelerator.
+   */
+  onCloseTabRequest?: (listener: (tabId: string) => void) => () => void;
 }
 
 export type ConfirmDialogVariant = "default" | "destructive";

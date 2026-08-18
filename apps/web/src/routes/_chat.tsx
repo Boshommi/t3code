@@ -126,6 +126,13 @@ function ChatRouteGlobalShortcuts() {
         return;
       }
 
+      if (command === "rightPanel.closeTab") {
+        event.preventDefault();
+        event.stopPropagation();
+        dispatchPreviewAction("close-tab");
+        return;
+      }
+
       // The remaining preview commands only fire when the panel is the
       // currently-focused tenant. The `when: previewFocus` rule already
       // gates this, but defend against the keybinding being misconfigured.

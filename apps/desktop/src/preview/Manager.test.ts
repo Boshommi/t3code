@@ -36,6 +36,31 @@ describe("fitPictureInPictureContentSize", () => {
   });
 });
 
+describe("isPreviewCloseTabShortcut", () => {
+  const input = (overrides: Partial<Electron.Input> = {}) =>
+    ({
+      type: "keyDown",
+      key: "w",
+      meta: true,
+      control: false,
+      shift: false,
+      alt: false,
+      ...overrides,
+    }) as Electron.Input;
+
+  it("matches Cmd+W and Ctrl+W but not both modifiers or repeats with extras", () => {
+    expect(PreviewManager.isPreviewCloseTabShortcut(input())).toBe(true);
+    expect(PreviewManager.isPreviewCloseTabShortcut(input({ meta: false, control: true }))).toBe(
+      true,
+    );
+    expect(PreviewManager.isPreviewCloseTabShortcut(input({ meta: true, control: true }))).toBe(
+      false,
+    );
+    expect(PreviewManager.isPreviewCloseTabShortcut(input({ shift: true }))).toBe(false);
+    expect(PreviewManager.isPreviewCloseTabShortcut(input({ type: "keyUp" }))).toBe(false);
+  });
+});
+
 describe("isPreviewRefreshShortcut", () => {
   const input = (overrides: Partial<Electron.Input> = {}) =>
     ({

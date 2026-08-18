@@ -52,6 +52,10 @@ successful pick; its hover glow and badge preview the element and color family t
 `rightPanel.toggleMaximized` maximizes or restores the open right panel. It has no default shortcut,
 so add one in **Settings** → **Keybindings** if you want to use it.
 
+`mod+w` closes the thing you are looking at, not the T3 Code window: a focused terminal pane, the
+in-app browser tab, or whichever other right-panel tab has focus. When none of those have focus,
+the desktop app still uses that shortcut to close the window.
+
 The command palette searches active thread titles, projects, branches, user messages, and final
 agent responses across connected environments. Message matches show one labeled excerpt while
 keeping the thread's project, branch, and machine context visible. Message search begins after two
@@ -73,7 +77,9 @@ opens a project chooser first.
 
 A `when` expression is evaluated against context keys describing the current UI state. The keys
 the app supplies today are `terminalFocus`, `terminalOpen`, `previewFocus`, `previewOpen`, and
-`modelPickerOpen`. The set is open and grows over time, so treat that as the current list rather
+`modelPickerOpen`. `previewFocus` is true while the right panel (browser chrome, files, diffs, and
+the same tab strip) has keyboard focus in the app. The set is open and grows over time, so treat
+that as the current list rather
 than a fixed one. Any key the running app does not supply evaluates to `false`.
 
 Operators: `!` (not), `&&` (and), `||` (or), and parentheses.
