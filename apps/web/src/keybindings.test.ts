@@ -309,6 +309,30 @@ describe("split/new/close terminal shortcuts", () => {
     );
   });
 
+  it("closes the focused right-panel tab with Cmd+W, not a terminal pane", () => {
+    assert.equal(
+      resolveShortcutCommand(event({ key: "w", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { previewFocus: true, terminalFocus: false },
+      }),
+      "rightPanel.close",
+    );
+    assert.equal(
+      resolveShortcutCommand(event({ key: "w", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { previewFocus: true, terminalFocus: true },
+      }),
+      "terminal.close",
+    );
+    assert.equal(
+      resolveShortcutCommand(event({ key: "w", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { previewFocus: false, terminalFocus: false },
+      }),
+      "rightPanel.close",
+    );
+  });
+
   it("supports when expressions", () => {
     const keybindings = compile([
       {
