@@ -109,6 +109,11 @@ const DEFAULT_BINDINGS = compile([
     whenAst: whenIdentifier("terminalFocus"),
   },
   {
+    shortcut: modShortcut("w"),
+    command: "rightPanel.closeTab",
+    whenAst: whenAnd(whenIdentifier("previewFocus"), whenNot(whenIdentifier("terminalFocus"))),
+  },
+  {
     shortcut: modShortcut("d"),
     command: "diff.toggle",
     whenAst: whenNot(whenIdentifier("terminalFocus")),
@@ -303,6 +308,29 @@ describe("split/new/close terminal shortcuts", () => {
       isTerminalCloseShortcut(event({ key: "w", ctrlKey: true }), DEFAULT_BINDINGS, {
         platform: "Linux",
         context: { terminalFocus: true },
+      }),
+    );
+  });
+
+  it("closes the focused right-panel tab with Cmd+W, not a terminal pane", () => {
+    assert.equal(
+      resolveShortcutCommand(event({ key: "w", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { previewFocus: true, terminalFocus: false },
+      }),
+      "rightPanel.closeTab",
+    );
+    assert.equal(
+      resolveShortcutCommand(event({ key: "w", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { previewFocus: true, terminalFocus: true },
+      }),
+      "terminal.close",
+    );
+    assert.isNull(
+      resolveShortcutCommand(event({ key: "w", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { previewFocus: false, terminalFocus: false },
       }),
     );
   });

@@ -54,6 +54,13 @@ it.effect("parses keybinding rules", () =>
     });
     assert.strictEqual(parsedClose.command, "terminal.close");
 
+    const parsedRightPanelCloseTab = yield* decode(KeybindingRule, {
+      key: "mod+w",
+      command: "rightPanel.closeTab",
+      when: "previewFocus && !terminalFocus",
+    });
+    assert.strictEqual(parsedRightPanelCloseTab.command, "rightPanel.closeTab");
+
     const parsedDiffToggle = yield* decode(KeybindingRule, {
       key: "mod+d",
       command: "diff.toggle",

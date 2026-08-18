@@ -3994,8 +3994,11 @@ function ChatViewContent(props: ChatViewProps) {
     () =>
       subscribePreviewAction((action) => {
         if (action === "toggle-panel") togglePreviewPanel();
+        if (action === "close-tab" && activeRightPanelSurface) {
+          closeRightPanelSurface(activeRightPanelSurface);
+        }
       }),
-    [togglePreviewPanel],
+    [activeRightPanelSurface, closeRightPanelSurface, togglePreviewPanel],
   );
   const persistThreadSettingsForNextTurn = useCallback(
     async (input: {

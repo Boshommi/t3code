@@ -63,6 +63,10 @@ shortcut is `mod+shift+s`, and it does not run while the terminal has focus.
 already pinned. Its default shortcut is `mod+shift+p`, and it does not run while the terminal has
 focus. See [Organizing threads](./thread-sidebar.md) for how pinned threads are ordered.
 
+`mod+w` closes the thing you are looking at, not the T3 Code window: a focused terminal pane, the
+in-app browser tab, or whichever other right-panel tab has focus. When none of those have focus,
+the desktop app still uses that shortcut to close the window.
+
 The command palette searches settings, active thread titles, projects, branches, user messages, and
 final agent responses across connected environments. A setting result opens its exact control or
 section. Message matches show one labeled excerpt while keeping the thread's project, branch, and
@@ -89,7 +93,9 @@ but the new thread does not reuse the worktree created for the thread that just 
 
 A `when` expression is evaluated against context keys describing the current UI state. The keys
 the app supplies today are `terminalFocus`, `terminalOpen`, `previewFocus`, `previewOpen`, and
-`modelPickerOpen`. The set is open and grows over time, so treat that as the current list rather
+`modelPickerOpen`. `previewFocus` is true while the right panel (browser chrome, files, diffs, and
+the same tab strip) has keyboard focus in the app. The set is open and grows over time, so treat
+that as the current list rather
 than a fixed one. Any key the running app does not supply evaluates to `false`.
 
 Operators: `!` (not), `&&` (and), `||` (or), and parentheses.
