@@ -2918,6 +2918,7 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+
         <SettingsRow
           serverScoped
           settingKeys={["addProjectBaseDirectory"]}
