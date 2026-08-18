@@ -1401,6 +1401,47 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.equal(yield* fileSystem.exists(worktreePath), false);
       }),
     );
+
+    it.effect("copies gitignored env files into a new worktree", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        yield* writeTextFile(cwd, ".gitignore", ".env\n.env.*\n!.env.example\n");
+        yield* writeTextFile(cwd, ".env.example", "SECRET=\n");
+        yield* git(cwd, ["add", ".gitignore", ".env.example"]);
+        yield* git(cwd, ["commit", "-m", "ignore env files"]);
+        yield* writeTextFile(cwd, ".env", "SECRET=1\n");
+        yield* writeTextFile(cwd, "apps/web/.env.local", "WEB=1\n");
+        yield* writeTextFile(cwd, ".envrc", "export IGNORE=1\n");
+
+        const pathService = yield* Path.Path;
+        const worktreePath = pathService.join(yield* makeTmpDir("git-worktrees-"), "env-worktree");
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* driver.createWorktree({
+          cwd,
+          path: worktreePath,
+          refName: initialBranch,
+          newRefName: "feature/env-worktree",
+        });
+
+        const fileSystem = yield* FileSystem.FileSystem;
+        assert.equal(
+          yield* fileSystem.readFileString(pathService.join(worktreePath, ".env")),
+          "SECRET=1\n",
+        );
+        assert.equal(
+          yield* fileSystem.readFileString(
+            pathService.join(worktreePath, "apps", "web", ".env.local"),
+          ),
+          "WEB=1\n",
+        );
+        assert.equal(yield* fileSystem.exists(pathService.join(worktreePath, ".envrc")), false);
+        assert.equal(
+          yield* fileSystem.readFileString(pathService.join(worktreePath, ".env.example")),
+          "SECRET=\n",
+        );
+      }),
+    );
   });
 
   describe("remote operations", () => {
