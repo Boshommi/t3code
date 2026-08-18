@@ -120,6 +120,9 @@ import {
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
+import { isPreviewFocused } from "../lib/previewFocus";
+import { ChatFindBar } from "./chat/ChatFindBar";
+import { useChatFind } from "./chat/useChatFind";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
@@ -2589,6 +2592,7 @@ function ChatViewContent(props: ChatViewProps) {
       ),
     [activeThread?.proposedPlans, timelineMessages, turnPlans, workLogEntries],
   );
+  const chatFind = useChatFind(timelineEntries);
   const [dockedDraftHeroThreadKey, setDockedDraftHeroThreadKey] = useState<string | null>(null);
   const draftHeroDockRequested =
     activeThreadKey !== null && dockedDraftHeroThreadKey === activeThreadKey;
@@ -4733,18 +4737,64 @@ function ChatViewContent(props: ChatViewProps) {
         event.stopPropagation();
         return;
       }
-      if (!activeThreadId || isCommandPaletteOpen()) {
+      if (isCommandPaletteOpen()) {
         return;
       }
       const terminalFocusOwner = getTerminalFocusOwner();
-      if (event.defaultPrevented && terminalFocusOwner === null) {
-        return;
-      }
       const shortcutContext = {
         terminalFocus: terminalFocusOwner !== null,
         terminalOpen: Boolean(terminalUiState.terminalOpen),
+        previewFocus: isPreviewFocused(),
+        previewOpen: previewPanelOpen,
         modelPickerOpen: composerRef.current?.isModelPickerOpen() ?? false,
       };
+      const command = resolveShortcutCommand(event, keybindings, {
+        context: shortcutContext,
+      });
+
+      if (command === "chat.find") {
+        event.preventDefault();
+        event.stopPropagation();
+        chatFind.openFind();
+        return;
+      }
+
+      if (chatFind.open && event.key === "Escape") {
+        if (
+          !eventPathContainsSelector(
+            event,
+            "[role='dialog'], [data-slot='dialog'], [data-command-palette]",
+          )
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          chatFind.closeFind();
+          return;
+        }
+      }
+
+      if (chatFind.open) {
+        const isFindNextPrev =
+          event.key === "F3" ||
+          (event.key.toLowerCase() === "g" && (event.metaKey || event.ctrlKey) && !event.altKey);
+        if (isFindNextPrev) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (event.shiftKey) {
+            chatFind.goPrevious();
+          } else {
+            chatFind.goNext();
+          }
+          return;
+        }
+      }
+
+      if (!activeThreadId) {
+        return;
+      }
+      if (event.defaultPrevented && terminalFocusOwner === null) {
+        return;
+      }
 
       if (
         !shortcutContext.terminalFocus &&
@@ -4758,9 +4808,6 @@ function ChatViewContent(props: ChatViewProps) {
         }
       }
 
-      const command = resolveShortcutCommand(event, keybindings, {
-        context: shortcutContext,
-      });
       if (!command) return;
 
       if (command === "terminal.toggle") {
@@ -4882,6 +4929,12 @@ function ChatViewContent(props: ChatViewProps) {
     toggleRightPanelMaximized,
     toggleTerminalVisibility,
     composerRef,
+    chatFind.closeFind,
+    chatFind.goNext,
+    chatFind.goPrevious,
+    chatFind.open,
+    chatFind.openFind,
+    previewPanelOpen,
   ]);
 
   const onRevertToTurnCount = useCallback(
@@ -6355,6 +6408,18 @@ function ChatViewContent(props: ChatViewProps) {
             </div>
             {/* Messages Wrapper */}
             <div className="relative flex min-h-0 flex-1 flex-col">
+              {chatFind.open ? (
+                <ChatFindBar
+                  query={chatFind.query}
+                  onQueryChange={chatFind.setQuery}
+                  matchIndex={chatFind.activeIndex}
+                  matchCount={chatFind.matches.length}
+                  focusToken={chatFind.focusToken}
+                  onClose={chatFind.closeFind}
+                  onNext={chatFind.goNext}
+                  onPrevious={chatFind.goPrevious}
+                />
+              ) : null}
               {/* Messages — LegendList handles virtualization and scrolling internally */}
               <MessagesTimeline
                 agentPanelModel={agentPanelModel}
@@ -6394,6 +6459,7 @@ function ChatViewContent(props: ChatViewProps) {
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
                 topFadeEnabled={!hasTimelineTopBanner}
                 loadEarlier={loadEarlierTurns}
+                findReveal={chatFind.reveal}
               />
 
               {/* scroll to end pill — shown when user has scrolled away from the live edge */}

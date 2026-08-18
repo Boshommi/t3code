@@ -1864,6 +1864,16 @@ code {
 /* Prompt-stash save acknowledgement: the new count fades up from just below
    its resting position, once, then stops. One-shot and event-driven (React
    remounts the element by key on each stash) — no continuous animation. */
+::highlight(t3-chat-find-match) {
+  background-color: color-mix(in srgb, var(--color-amber-300) 72%, transparent);
+  color: inherit;
+}
+
+::highlight(t3-chat-find-current) {
+  background-color: color-mix(in srgb, var(--color-orange-400) 82%, transparent);
+  color: inherit;
+}
+
 @keyframes prompt-stash-count-enter {
   from {
     opacity: 0;
