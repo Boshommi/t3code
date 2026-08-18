@@ -1,6 +1,7 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useAtomValue } from "@effect/atom-react";
 import { LinkIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -12,6 +13,7 @@ import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { useComposerDraftsHydrated } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { primaryServerConfigAtom } from "../state/server";
 import {
   useAllEnvironmentShellsBootstrapped,
   useProjects,
@@ -46,6 +48,7 @@ function IndexDraftLanding() {
   const startingRef = useRef(false);
   const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
   const draftsHydrated = useComposerDraftsHydrated();
+  const primaryServerConfig = useAtomValue(primaryServerConfigAtom);
 
   const mostRecentProject = useMemo(
     () =>
@@ -56,21 +59,32 @@ function IndexDraftLanding() {
   );
 
   useEffect(() => {
-    if (mostRecentProject === null || !draftsHydrated || startingRef.current) {
+    if (
+      mostRecentProject === null ||
+      !draftsHydrated ||
+      primaryServerConfig === null ||
+      startingRef.current
+    ) {
       return;
     }
     startingRef.current = true;
     void handleNewThread(scopeProjectRef(mostRecentProject.environmentId, mostRecentProject.id), {
       replace: true,
       // Reload / cold start lands here, not on the draft URL. Keep the
-      // in-progress workspace (branch, start-from-origin) instead of
-      // treating this as an explicit "new thread".
+      // in-progress workspace (branch, start-from-origin, Current checkout /
+      // New worktree) instead of treating this as an explicit "new thread".
       preserveEmptyDraftWorkspace: true,
     }).catch(() => {
       startingRef.current = false;
       setStartState((state) => ({ ...state, failed: true }));
     });
-  }, [draftsHydrated, handleNewThread, mostRecentProject, startState.retryRequest]);
+  }, [
+    draftsHydrated,
+    handleNewThread,
+    mostRecentProject,
+    primaryServerConfig,
+    startState.retryRequest,
+  ]);
 
   if (!bootstrapped) {
     return null;
