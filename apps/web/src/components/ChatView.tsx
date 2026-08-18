@@ -288,7 +288,9 @@ import {
   preventTerminalCloseShortcut,
 } from "../lib/terminalCloseShortcut";
 import {
+  resolveDefaultThreadEnvModeSettingsPatch,
   resolveNewDraftStartFromOrigin,
+  resolveProjectThreadEnvModePatch,
   resolveStartFromOriginSettingsPatch,
 } from "../lib/chatThreadActions";
 import {
@@ -358,6 +360,7 @@ import {
 } from "@t3tools/client-runtime/state/threads";
 import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
 import { vcsEnvironment } from "../state/vcs";
+import { projectEnvironment } from "../state/projects";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { useProjectClone } from "../state/projectClones";
 import { projectCloneDisplayName, projectCloneProgressSummary } from "@t3tools/contracts";
@@ -1603,6 +1606,7 @@ export default function ChatView(props: ChatViewProps) {
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
   const settings = useEnvironmentSettings(environmentId);
   const updateEnvironmentSettings = useUpdateEnvironmentSettings(environmentId);
+  const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
   );
@@ -9372,10 +9376,7 @@ export default function ChatView(props: ChatViewProps) {
       if (multipleModelSelections !== null) return;
       if (canOverrideServerThreadEnvMode) {
         setPendingServerThreadEnvMode(mode);
-        scheduleComposerFocus();
-        return;
-      }
-      if (isLocalDraftThread) {
+      } else if (isLocalDraftThread) {
         setDraftThreadContext(composerDraftTarget, {
           envMode: mode,
           startFromOrigin: resolveNewDraftStartFromOrigin({
@@ -9385,18 +9386,41 @@ export default function ChatView(props: ChatViewProps) {
           ...(mode === "worktree" && draftThread?.worktreePath ? { worktreePath: null } : {}),
         });
       }
+      const settingsPatch = resolveDefaultThreadEnvModeSettingsPatch({
+        nextEnvMode: mode,
+        currentDefault: activeProjectSettings.settings.defaultThreadEnvMode,
+      });
+      if (settingsPatch) {
+        updateEnvironmentSettings(settingsPatch);
+      }
+      if (activeProject) {
+        const projectPatch = resolveProjectThreadEnvModePatch({
+          nextEnvMode: mode,
+          currentProjectDefault: activeProject.defaultThreadEnvMode,
+        });
+        if (projectPatch) {
+          void updateProject({
+            environmentId: activeProject.environmentId,
+            input: { projectId: activeProject.id, ...projectPatch },
+          });
+        }
+      }
       scheduleComposerFocus();
     },
     [
+      activeProject,
+      activeProjectSettings.settings.defaultThreadEnvMode,
+      activeProjectSettings.settings.newWorktreesStartFromOrigin,
       canOverrideServerThreadEnvMode,
       composerDraftTarget,
       draftThread?.worktreePath,
       isLocalDraftThread,
       multipleModelSelections,
-      activeProjectSettings.settings.newWorktreesStartFromOrigin,
       setPendingServerThreadEnvMode,
       scheduleComposerFocus,
       setDraftThreadContext,
+      updateEnvironmentSettings,
+      updateProject,
     ],
   );
 
