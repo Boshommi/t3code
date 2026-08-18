@@ -1248,6 +1248,12 @@ export interface DesktopPreviewBridge {
    * desktop builds never emit it and keep the native window-close accelerator.
    */
   onCloseTabRequest?: (listener: (tabId: string) => void) => () => void;
+  /**
+   * Guest pointer-down inside the in-app browser. Host popovers use this to
+   * dismiss because those clicks never reach the React document. Optional:
+   * older desktop builds never emit it.
+   */
+  onGuestPointerDown?: (listener: (tabId: string) => void) => () => void;
 }
 
 export type ConfirmDialogVariant = "default" | "destructive";

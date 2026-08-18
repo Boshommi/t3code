@@ -18,6 +18,7 @@ import { BrowserDeviceToolbar } from "./BrowserDeviceToolbar";
 import { BrowserViewportResizeHandles } from "./BrowserViewportResizeHandles";
 import { acquireDesktopTab, type AcquiredDesktopTab } from "./desktopTabLifetime";
 import { resolveHostedBrowserWebviewWrapperStyle } from "./hostedBrowserWebviewStyle";
+import { selectPreviewHostPopupOpen, usePreviewHostPopupStore } from "./previewHostPopupStore";
 import { usePreviewWebviewConfig } from "./previewWebviewConfigState";
 import { useBrowserViewportResize } from "./useBrowserViewportResize";
 import {
@@ -148,6 +149,7 @@ export function HostedBrowserWebview(props: {
   }, [config, initialSrc, runtimeTabId, webviewGeneration]);
 
   const active = presentation.visible && presentation.rect !== null;
+  const passThroughPointerEvents = usePreviewHostPopupStore(selectPreviewHostPopupOpen);
   const lastRect = presentation.rect;
   const normalizedZoomFactor = Number.isFinite(zoomFactor) && zoomFactor > 0 ? zoomFactor : 1;
   const viewportWidth = viewport._tag === "fill" ? null : viewport.width;
@@ -237,6 +239,7 @@ export function HostedBrowserWebview(props: {
     cornerRadius: presentation.cornerRadius,
     rect: lastRect,
     hiddenSize,
+    passThroughPointerEvents,
   });
 
   return (
@@ -295,6 +298,7 @@ export function HostedBrowserWebview(props: {
             height: layout.viewportHeight / layout.viewportScale,
             transform: layout.viewportScale < 1 ? `scale(${layout.viewportScale})` : undefined,
             transformOrigin: "top left",
+            pointerEvents: passThroughPointerEvents ? "none" : undefined,
           }}
         />
         {active && effectiveViewport._tag !== "fill" && !fittedSourceViewport ? (

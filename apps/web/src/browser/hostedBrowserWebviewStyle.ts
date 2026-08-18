@@ -23,8 +23,9 @@ export function resolveHostedBrowserWebviewWrapperStyle(input: {
   readonly cornerRadius?: number;
   readonly rect: BrowserSurfaceRect | null;
   readonly hiddenSize: HostedBrowserWebviewSize;
+  readonly passThroughPointerEvents?: boolean;
 }): HostedBrowserWebviewWrapperStyle {
-  const { active, cornerRadius = 0, hiddenSize, rect } = input;
+  const { active, cornerRadius = 0, hiddenSize, rect, passThroughPointerEvents = false } = input;
   if (active && rect) {
     return {
       left: rect.x,
@@ -32,7 +33,7 @@ export function resolveHostedBrowserWebviewWrapperStyle(input: {
       width: rect.width,
       height: rect.height,
       zIndex: 30,
-      pointerEvents: "auto",
+      pointerEvents: passThroughPointerEvents ? "none" : "auto",
       ...(cornerRadius > 0 ? { borderRadius: cornerRadius } : {}),
     };
   }
