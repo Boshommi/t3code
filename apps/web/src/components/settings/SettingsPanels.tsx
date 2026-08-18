@@ -2561,6 +2561,7 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+
         <SettingsRow
           serverScoped
           {...searchableSetting("add-project-starts-in")}

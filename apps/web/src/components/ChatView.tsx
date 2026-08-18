@@ -231,6 +231,7 @@ import {
   useClientSettings,
   useClientSettingsHydrated,
   useEnvironmentSettings,
+  useUpdatePrimarySettings,
 } from "../hooks/useSettings";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { usePanelAnimationSettings, usePanelPresence } from "../panelAnimations";
@@ -244,7 +245,10 @@ import {
   preventRepeatedTerminalCloseShortcut,
   preventTerminalCloseShortcut,
 } from "../lib/terminalCloseShortcut";
-import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
+import {
+  resolveNewDraftStartFromOrigin,
+  resolveStartFromOriginSettingsPatch,
+} from "../lib/chatThreadActions";
 import {
   derivePhysicalProjectKey,
   deriveLogicalProjectKeyFromSettings,
@@ -1481,6 +1485,7 @@ export default function ChatView(props: ChatViewProps) {
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
   const settings = useEnvironmentSettings(environmentId);
   const primaryServerSettings = useAtomValue(primaryServerSettingsAtom);
+  const updatePrimarySettings = useUpdatePrimarySettings();
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
   );
@@ -7621,12 +7626,17 @@ export default function ChatView(props: ChatViewProps) {
           ? current
           : { ...current, [activeThread.id]: nextStartFromOrigin },
       );
-      return;
-    }
-    if (isLocalDraftThread) {
+    } else if (isLocalDraftThread) {
       setDraftThreadContext(composerDraftTarget, {
         startFromOrigin: nextStartFromOrigin,
       });
+    }
+    const settingsPatch = resolveStartFromOriginSettingsPatch({
+      nextStartFromOrigin,
+      currentDefault: primaryServerSettings.newWorktreesStartFromOrigin,
+    });
+    if (settingsPatch) {
+      updatePrimarySettings(settingsPatch);
     }
   };
 
