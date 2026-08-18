@@ -57,6 +57,11 @@ a shortcut.
 `chat.newLocal` skips that chooser. Both use your
 [new-thread defaults](./thread-sidebar.md#start-a-thread).
 
+`chat.find` searches the open thread and defaults to `mod+f`. It opens a find
+field in the conversation. Enter or `mod+g` goes to the next match, Shift+Enter
+or `mod+shift+g` goes to the previous match, and Escape closes it. The shortcut
+does not fire while a terminal or the in-app preview has focus.
+
 ## Reserved shortcuts
 
 In the desktop app, `mod+w` closes the focused terminal or the active right-panel
