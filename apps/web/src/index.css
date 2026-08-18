@@ -1987,6 +1987,16 @@ code {
   overflow-wrap: anywhere;
 }
 
+::highlight(t3-chat-find-match) {
+  background-color: color-mix(in srgb, var(--color-amber-300) 72%, transparent);
+  color: inherit;
+}
+
+::highlight(t3-chat-find-current) {
+  background-color: color-mix(in srgb, var(--color-orange-400) 82%, transparent);
+  color: inherit;
+}
+
 :root {
   --diff-addition: var(--success);
   --diff-deletion: var(--destructive);
