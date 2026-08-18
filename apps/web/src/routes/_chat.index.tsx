@@ -1,5 +1,6 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { useAtomValue } from "@effect/atom-react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
@@ -20,6 +21,7 @@ import {
   useThreadShells,
 } from "../state/entities";
 import { useEnvironments } from "../state/environments";
+import { primaryServerConfigAtom } from "../state/server";
 
 function ChatIndexRouteView() {
   const { authGateState } = Route.useRouteContext();
@@ -45,6 +47,7 @@ function IndexDraftLanding() {
   const startedAttemptRef = useRef<number | null>(null);
   const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
   const draftsHydrated = useComposerDraftsHydrated();
+  const primaryServerConfig = useAtomValue(primaryServerConfigAtom);
 
   const mostRecentProject =
     sortScopedProjectsForSidebar(projects, threads, "updated_at")[0] ?? null;
@@ -55,6 +58,8 @@ function IndexDraftLanding() {
     if (
       mostRecentProject === null ||
       !draftsHydrated ||
+      // New drafts read their defaults from the server's settings.
+      primaryServerConfig === null ||
       startedAttemptRef.current === attempt ||
       !isStillOnIndex()
     ) {
@@ -76,7 +81,7 @@ function IndexDraftLanding() {
       .catch(() => {
         setStartState((state) => ({ ...state, failed: true }));
       });
-  }, [attempt, draftsHydrated, handleNewThread, mostRecentProject]);
+  }, [attempt, draftsHydrated, handleNewThread, mostRecentProject, primaryServerConfig]);
 
   if (mostRecentProject !== null) {
     return startState.failed ? (

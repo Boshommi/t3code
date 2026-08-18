@@ -801,6 +801,16 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
         ...(draftStartFromOrigin !== undefined ? { startFromOrigin: draftStartFromOrigin } : {}),
       },
     });
+    // Remember the choice for new tasks, unless the project pins its own value.
+    if (
+      projectSettings.sources.defaultThreadEnvMode !== "project" &&
+      projectSettings.settings.defaultThreadEnvMode !== mode
+    ) {
+      void updateServerSettings({
+        environmentId: selectedProject.environmentId,
+        input: { patch: { defaultThreadEnvMode: mode } },
+      });
+    }
   };
 
   useEffect(() => {
@@ -872,7 +882,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     const environmentId = selectedProject?.environmentId;
     if (
       environmentId &&
-      projectSettings.sources.newWorktreesStartFromOrigin === "environment" &&
+      projectSettings.sources.newWorktreesStartFromOrigin !== "project" &&
       projectSettings.settings.newWorktreesStartFromOrigin !== value
     ) {
       void updateServerSettings({

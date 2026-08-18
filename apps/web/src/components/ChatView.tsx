@@ -7802,10 +7802,7 @@ export default function ChatView(props: ChatViewProps) {
     if (multipleModelSelections !== null) return;
     if (canOverrideServerThreadEnvMode) {
       if (activeThread) setPendingServerThreadEnvModeEntry({ threadId: activeThread.id, mode });
-      scheduleComposerFocus();
-      return;
-    }
-    if (isLocalDraftThread) {
+    } else if (isLocalDraftThread) {
       setDraftThreadContext(composerDraftTarget, {
         envMode: mode,
         startFromOrigin: resolveNewDraftStartFromOrigin({
@@ -7814,6 +7811,13 @@ export default function ChatView(props: ChatViewProps) {
         }),
         ...(mode === "worktree" && draftThread?.worktreePath ? { worktreePath: null } : {}),
       });
+    }
+    // Remember the choice for new threads, unless the project pins its own value.
+    if (
+      activeProjectSettings.sources.defaultThreadEnvMode !== "project" &&
+      activeProjectSettings.settings.defaultThreadEnvMode !== mode
+    ) {
+      updateEnvironmentSettings({ defaultThreadEnvMode: mode });
     }
     scheduleComposerFocus();
   };
@@ -7913,7 +7917,7 @@ export default function ChatView(props: ChatViewProps) {
     }
     // Remember the choice for the next worktree, unless the project pins its own value.
     if (
-      activeProjectSettings.sources.newWorktreesStartFromOrigin === "environment" &&
+      activeProjectSettings.sources.newWorktreesStartFromOrigin !== "project" &&
       activeProjectSettings.settings.newWorktreesStartFromOrigin !== nextStartFromOrigin
     ) {
       updateEnvironmentSettings({ newWorktreesStartFromOrigin: nextStartFromOrigin });
