@@ -818,6 +818,27 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-user-message-footer="true"');
   });
 
+  it("expands a long user message when find reveals it", () => {
+    const longText = buildLongUserMessageText();
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        findReveal={{
+          query: "hidden",
+          documentId: "message-1",
+          occurrence: 0,
+          turnId: null,
+          generation: 1,
+        }}
+        timelineEntries={[buildUserTimelineEntry(longText)]}
+      />,
+    );
+
+    expect(markup).toContain('data-chat-find-id="message-1"');
+    expect(markup).toContain('data-user-message-collapsed="false"');
+    expect(markup).toContain("Show less");
+  });
+
   it("does not render collapse controls for short user messages", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline

@@ -146,6 +146,8 @@ import {
   parseReviewCommentMessageSegments,
   type ReviewCommentContext,
 } from "../../reviewCommentContext";
+import { applyChatFindHighlights, clearChatFindHighlights } from "../../lib/chatFindHighlights";
+import type { ChatFindReveal } from "../../lib/chatFind";
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via Context.
@@ -173,6 +175,7 @@ interface TimelineRowSharedState {
   onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
   agentPanelModel: AgentPanelModel;
   onOpenAgents: () => void;
+  findRevealDocumentId: string | null;
 }
 
 interface TimelineRowActivityState {
@@ -272,6 +275,7 @@ interface MessagesTimelineProps {
   topFadeEnabled?: boolean;
   /** Non-null when older turns exist beyond the loaded window. */
   loadEarlier?: { readonly loading: boolean; readonly onLoadEarlier: () => void } | null;
+  findReveal?: ChatFindReveal | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -313,6 +317,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   hideEmptyPlaceholder = false,
   topFadeEnabled = false,
   loadEarlier = null,
+  findReveal = null,
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const [expandedWorkGroupIds, setExpandedWorkGroupIds] = useState<ReadonlySet<string>>(new Set());
@@ -463,6 +468,45 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ],
   );
   const rows = useStableRows(rawRows);
+  const findRevealDocumentId = findReveal?.documentId ?? null;
+  const findRevealTurnId = findReveal?.turnId ?? null;
+  const findRevealGeneration = findReveal?.generation ?? 0;
+
+  useEffect(() => {
+    if (!findRevealTurnId) {
+      return;
+    }
+    setExpandedTurnIds((existing) => {
+      if (existing.has(findRevealTurnId)) {
+        return existing;
+      }
+      const next = new Set(existing);
+      next.add(findRevealTurnId);
+      return next;
+    });
+  }, [findRevealGeneration, findRevealTurnId]);
+
+  useEffect(() => {
+    if (!findRevealDocumentId) {
+      return;
+    }
+    const index = rows.findIndex((row) => {
+      if (row.id === findRevealDocumentId) {
+        return true;
+      }
+      return row.kind === "message" && row.message.id === findRevealDocumentId;
+    });
+    if (index < 0) {
+      return;
+    }
+    onManualNavigation();
+    void listRef.current?.scrollToIndex({
+      index,
+      animated: false,
+      viewPosition: 0.2,
+    });
+  }, [findRevealDocumentId, findRevealGeneration, listRef, onManualNavigation, rows]);
+
   const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
   const [timelineViewportElement, setTimelineViewportElement] = useState<HTMLDivElement | null>(
     null,
@@ -493,6 +537,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     if (isAtEnd !== undefined) {
       onIsAtEndChange(isAtEnd);
     }
+    if (findReveal) {
+      applyChatFindHighlights({
+        root: timelineViewportElement,
+        query: findReveal.query,
+        activeDocumentId: findReveal.documentId,
+        activeOccurrence: findReveal.occurrence,
+      });
+    } else {
+      clearChatFindHighlights();
+    }
     if (!state || minimapItems.length === 0) {
       return;
     }
@@ -515,7 +569,21 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
       strip.dataset.inView = inView ? "true" : "false";
     }
-  }, [contentInsetEndAdjustment, listRef, minimapItems, minimapStripMap, onIsAtEndChange]);
+  }, [
+    contentInsetEndAdjustment,
+    findReveal,
+    listRef,
+    minimapItems,
+    minimapStripMap,
+    onIsAtEndChange,
+    timelineViewportElement,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      clearChatFindHighlights();
+    };
+  }, []);
 
   useEffect(() => {
     const frame = requestAnimationFrame(handleScroll);
@@ -567,6 +635,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onToggleWorkGroup,
       agentPanelModel,
       onOpenAgents,
+      findRevealDocumentId,
     }),
     [
       timestampFormat,
@@ -586,6 +655,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onToggleWorkGroup,
       agentPanelModel,
       onOpenAgents,
+      findRevealDocumentId,
     ],
   );
   const activityState = useMemo<TimelineRowActivityState>(
@@ -974,7 +1044,8 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
   const isLastExpandedToolGroupEntry = row.kind === "work" && row.isLastExpandedToolGroupEntry;
   const isExpandedToolGroupHeader =
     (row.kind === "work-toggle" && row.expanded) || (row.kind === "work-live" && row.expanded);
-
+  const findId =
+    row.kind === "message" ? row.message.id : row.kind === "proposed-plan" ? row.id : undefined;
   return (
     <div
       className={cn(
@@ -1003,6 +1074,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       data-timeline-row-kind={row.kind}
       data-message-id={row.kind === "message" ? row.message.id : undefined}
       data-message-role={row.kind === "message" ? row.message.role : undefined}
+      data-chat-find-id={findId}
     >
       {row.kind === "work" ? (
         <WorkGroupSection
@@ -1182,6 +1254,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           </div>
         ) : null}
         <CollapsibleUserMessageBody
+          messageId={row.message.id}
           text={elementContextState.promptText}
           terminalContexts={terminalContexts}
           skills={ctx.skills}
@@ -1261,7 +1334,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
 
   return (
     <>
-      <div className="relative min-w-0 px-1 py-0.5">
+      <div className="relative min-w-0 px-1 py-0.5" data-chat-find-text="">
         <ChatMarkdown
           text={messageText}
           cwd={ctx.markdownCwd}
@@ -1322,7 +1395,7 @@ function ProposedPlanTimelineRow({
   const ctx = use(TimelineRowCtx);
 
   return (
-    <div className="min-w-0 px-1 py-0.5">
+    <div className="min-w-0 px-1 py-0.5" data-chat-find-text="">
       <ProposedPlanCard
         planMarkdown={row.proposedPlan.planMarkdown}
         environmentId={ctx.activeThreadEnvironmentId}
@@ -1782,13 +1855,21 @@ function shouldCollapseUserMessage(text: string): boolean {
 }
 
 const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(props: {
+  messageId: MessageId;
   text: string;
   terminalContexts: ParsedTerminalContextEntry[];
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   markdownCwd: string | undefined;
   footer?: ReactNode;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const ctx = use(TimelineRowCtx);
+  const shouldReveal = ctx.findRevealDocumentId === props.messageId;
+  const [expanded, setExpanded] = useState(shouldReveal);
+  useEffect(() => {
+    if (shouldReveal) {
+      setExpanded(true);
+    }
+  }, [shouldReveal]);
   const hasVisibleBody = props.text.trim().length > 0 || props.terminalContexts.length > 0;
   const canCollapse = hasVisibleBody && shouldCollapseUserMessage(props.text);
   const isCollapsed = canCollapse && !expanded;
@@ -1799,6 +1880,7 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
         <div
           className={cn("relative", isCollapsed && "max-h-44 overflow-hidden")}
           data-user-message-body="true"
+          data-chat-find-text=""
           data-user-message-collapsed={isCollapsed ? "true" : "false"}
           data-user-message-collapsible={canCollapse ? "true" : "false"}
           data-user-message-fade={isCollapsed ? "true" : "false"}

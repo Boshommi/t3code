@@ -48,6 +48,7 @@ import {
   LinkIcon,
   MessageSquareIcon,
   PaletteIcon,
+  SearchIcon,
   ServerIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -99,6 +100,7 @@ import {
   resolveProjectPathForDispatch,
 } from "../lib/projectPaths";
 import { onOpenCommandPalette } from "../commandPaletteBus";
+import { openChatFind } from "../chatFindBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
@@ -1635,6 +1637,20 @@ function OpenCommandPaletteDialog(props: {
       openOverlayMode("content");
     },
   });
+
+  if (activeThread || activeDraftThread) {
+    actionItems.push({
+      kind: "action",
+      value: "action:find-in-chat",
+      searchTerms: ["find in chat", "search chat", "find in thread", "search conversation"],
+      title: "Find in chat",
+      icon: <SearchIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "chat.find",
+      run: async () => {
+        openChatFind();
+      },
+    });
+  }
 
   actionItems.push({
     kind: "action",
