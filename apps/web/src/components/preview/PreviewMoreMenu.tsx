@@ -92,7 +92,7 @@ export function PreviewMoreMenu({
         </TooltipTrigger>
         <TooltipPopup>More</TooltipPopup>
       </Tooltip>
-      <MenuPopup align="end" sideOffset={6} className="min-w-56">
+      <MenuPopup align="end" backdrop sideOffset={6} className="min-w-56">
         <MenuItem onClick={callTab(bridge.hardReload)} disabled={tabDisabled}>
           Hard reload
         </MenuItem>
