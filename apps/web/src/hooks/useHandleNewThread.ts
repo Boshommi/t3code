@@ -89,9 +89,10 @@ export function useNewThreadHandler() {
         carryComposerContent?: boolean;
         /**
          * Reopen the project's empty draft without wiping its workspace.
-         * Index landing uses this so an app reload keeps the branch and
-         * start-from-origin choice the user already made. Explicit new-
-         * thread surfaces leave this unset and still reset to defaults.
+         * Index landing uses this so an app reload keeps the branch,
+         * Current checkout / New worktree, and start-from-origin choice
+         * the user already made. Explicit new-thread surfaces leave this
+         * unset and still reset to defaults.
          */
         preserveEmptyDraftWorkspace?: boolean;
       },

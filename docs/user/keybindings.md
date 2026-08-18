@@ -85,8 +85,9 @@ Note that `chat.new` and `chat.newLocal` both create a thread through the same p
 inherits the project you were in, along with model and mode selections. Branch, worktree, and
 environment mode always come from your configured defaults, not from the thread you were looking
 at. To keep a worktree, use the explicit "new thread in this worktree" action in the branch
-toolbar. **Start from origin** in the branch picker is the same default as
-**Settings → General → Start from origin**, and flipping it is remembered after reload. The only
+toolbar. **Current checkout** / **New worktree** and **Start from origin** in the workspace
+picker are the same defaults as **Settings → General → New threads**, and flipping them is
+remembered after reload. The only
 difference between the two commands: with the current sidebar and more than one project, `chat.new`
 opens a project chooser first.
 

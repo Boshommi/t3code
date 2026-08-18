@@ -230,7 +230,9 @@ import {
   preventTerminalCloseShortcut,
 } from "../lib/terminalCloseShortcut";
 import {
+  resolveDefaultThreadEnvModeSettingsPatch,
   resolveNewDraftStartFromOrigin,
+  resolveProjectThreadEnvModePatch,
   resolveStartFromOriginSettingsPatch,
 } from "../lib/chatThreadActions";
 import {
@@ -7029,10 +7031,7 @@ function ChatViewContent(props: ChatViewProps) {
     (mode: DraftThreadEnvMode) => {
       if (canOverrideServerThreadEnvMode) {
         setPendingServerThreadEnvMode(mode);
-        scheduleComposerFocus();
-        return;
-      }
-      if (isLocalDraftThread) {
+      } else if (isLocalDraftThread) {
         setDraftThreadContext(composerDraftTarget, {
           envMode: mode,
           startFromOrigin: resolveNewDraftStartFromOrigin({
@@ -7042,17 +7041,40 @@ function ChatViewContent(props: ChatViewProps) {
           ...(mode === "worktree" && draftThread?.worktreePath ? { worktreePath: null } : {}),
         });
       }
+      const settingsPatch = resolveDefaultThreadEnvModeSettingsPatch({
+        nextEnvMode: mode,
+        currentDefault: primaryServerSettings.defaultThreadEnvMode,
+      });
+      if (settingsPatch) {
+        updatePrimarySettings(settingsPatch);
+      }
+      if (activeProject) {
+        const projectPatch = resolveProjectThreadEnvModePatch({
+          nextEnvMode: mode,
+          currentProjectDefault: activeProject.defaultThreadEnvMode,
+        });
+        if (projectPatch) {
+          void updateProject({
+            environmentId: activeProject.environmentId,
+            input: { projectId: activeProject.id, ...projectPatch },
+          });
+        }
+      }
       scheduleComposerFocus();
     },
     [
+      activeProject,
       canOverrideServerThreadEnvMode,
       composerDraftTarget,
       draftThread?.worktreePath,
       isLocalDraftThread,
+      primaryServerSettings.defaultThreadEnvMode,
       primaryServerSettings.newWorktreesStartFromOrigin,
       setPendingServerThreadEnvMode,
       scheduleComposerFocus,
       setDraftThreadContext,
+      updatePrimarySettings,
+      updateProject,
     ],
   );
 
@@ -7586,9 +7608,7 @@ function ChatViewContent(props: ChatViewProps) {
                                 onEnvModeChange={onEnvModeChange}
                                 startFromOrigin={startFromOrigin}
                                 onStartFromOriginChange={onStartFromOriginChange}
-                                {...(canOverrideServerThreadEnvMode
-                                  ? { effectiveEnvModeOverride: envMode }
-                                  : {})}
+                                effectiveEnvModeOverride={envMode}
                                 {...(canOverrideServerThreadEnvMode
                                   ? {
                                       activeThreadBranchOverride: activeThreadBranch,

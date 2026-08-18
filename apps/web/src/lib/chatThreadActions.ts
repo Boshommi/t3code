@@ -114,6 +114,29 @@ export function resolveStartFromOriginSettingsPatch(input: {
   return { newWorktreesStartFromOrigin: input.nextStartFromOrigin };
 }
 
+export function resolveDefaultThreadEnvModeSettingsPatch(input: {
+  nextEnvMode: DraftThreadEnvMode;
+  currentDefault: DraftThreadEnvMode;
+}): { defaultThreadEnvMode: DraftThreadEnvMode } | null {
+  if (input.nextEnvMode === input.currentDefault) {
+    return null;
+  }
+  return { defaultThreadEnvMode: input.nextEnvMode };
+}
+
+// New drafts resolve project setting before t3.json and the global default.
+// The workspace picker has to write that layer or a project override / checked-in
+// t3.json keeps winning after reload.
+export function resolveProjectThreadEnvModePatch(input: {
+  nextEnvMode: DraftThreadEnvMode;
+  currentProjectDefault: DraftThreadEnvMode | null | undefined;
+}): { defaultThreadEnvMode: DraftThreadEnvMode } | null {
+  if (input.currentProjectDefault === input.nextEnvMode) {
+    return null;
+  }
+  return { defaultThreadEnvMode: input.nextEnvMode };
+}
+
 export function resolveThreadActionProjectRef(
   context: ChatThreadActionContext,
 ): ScopedProjectRef | null {
