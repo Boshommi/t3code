@@ -24,6 +24,17 @@ describe("resolveHostedBrowserWebviewWrapperStyle", () => {
     });
   });
 
+  it("lets host popups receive clicks that would otherwise hit the guest page", () => {
+    expect(
+      resolveHostedBrowserWebviewWrapperStyle({
+        active: true,
+        passThroughPointerEvents: true,
+        rect: { x: 12, y: 34, width: 800, height: 600 },
+        hiddenSize: { width: 1280, height: 800 },
+      }).pointerEvents,
+    ).toBe("none");
+  });
+
   it("clips a floating webview to the mini-player frame", () => {
     expect(
       resolveHostedBrowserWebviewWrapperStyle({
