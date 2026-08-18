@@ -35,6 +35,7 @@ import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
 import { resolveProjectFileBackedSetting } from "@t3tools/shared/projectSettings";
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
+import { copyWorktreeEnvFiles, worktreeEnvFilePathspecs } from "./seedWorktreeEnvFiles.ts";
 import {
   parseRemoteNames,
   parseRemoteNamesInGitOrder,
@@ -3062,6 +3063,29 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     },
   );
 
+  const listWorktreeEnvRelativePaths = (
+    cwd: string,
+  ): Effect.Effect<ReadonlyArray<string>, GitCommandError> =>
+    Effect.gen(function* () {
+      const pathspecs = worktreeEnvFilePathspecs();
+      const untracked = yield* executeGit(
+        "GitVcsDriver.createWorktree.listUntrackedEnvFiles",
+        cwd,
+        ["ls-files", "-z", "-o", "--exclude-standard", "--full-name", "--", ...pathspecs],
+        { allowNonZeroExit: true },
+      );
+      const ignored = yield* executeGit(
+        "GitVcsDriver.createWorktree.listIgnoredEnvFiles",
+        cwd,
+        ["ls-files", "-z", "-o", "-i", "--exclude-standard", "--full-name", "--", ...pathspecs],
+        { allowNonZeroExit: true },
+      );
+      return [
+        ...splitNullSeparatedGitStdoutPaths(untracked),
+        ...splitNullSeparatedGitStdoutPaths(ignored),
+      ];
+    });
+
   const createWorktree: GitVcsDriver.GitVcsDriver["Service"]["createWorktree"] = Effect.fn(
     "createWorktree",
   )(function* (input, options) {
@@ -3174,6 +3198,21 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         }),
       );
     }
+
+    const envRelativePaths = yield* listWorktreeEnvRelativePaths(input.cwd).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("Failed to list env files for the new worktree", {
+          cwd: input.cwd,
+          worktreePath,
+          cause: error,
+        }).pipe(Effect.as<ReadonlyArray<string>>([])),
+      ),
+    );
+    yield* copyWorktreeEnvFiles({
+      sourceCwd: input.cwd,
+      worktreePath,
+      relativePaths: envRelativePaths,
+    });
 
     if (input.newRefName && input.baseRefName) {
       const remoteNames = yield* listRemoteNames(input.cwd).pipe(Effect.orElseSucceed(() => []));
