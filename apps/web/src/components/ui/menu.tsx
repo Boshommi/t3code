@@ -20,6 +20,16 @@ function MenuTrigger({ className, children, ...props }: MenuPrimitive.Trigger.Pr
   );
 }
 
+function MenuBackdrop({ className, ...props }: MenuPrimitive.Backdrop.Props) {
+  return (
+    <MenuPrimitive.Backdrop
+      className={cn("fixed inset-0 z-[129]", className)}
+      data-slot="menu-backdrop"
+      {...props}
+    />
+  );
+}
+
 function MenuPopup({
   children,
   className,
@@ -28,6 +38,7 @@ function MenuPopup({
   alignOffset,
   side = "bottom",
   anchor,
+  backdrop = false,
   ...props
 }: MenuPrimitive.Popup.Props & {
   align?: MenuPrimitive.Positioner.Props["align"];
@@ -35,6 +46,11 @@ function MenuPopup({
   alignOffset?: MenuPrimitive.Positioner.Props["alignOffset"];
   side?: MenuPrimitive.Positioner.Props["side"];
   anchor?: MenuPrimitive.Positioner.Props["anchor"];
+  /**
+   * Invisible page overlay that receives host clicks the preview
+   * `<webview>` would otherwise swallow, so the menu can dismiss.
+   */
+  backdrop?: boolean;
 }) {
   const hasExplicitWidthClass =
     typeof className === "string" &&
@@ -45,6 +61,7 @@ function MenuPopup({
 
   return (
     <MenuPrimitive.Portal>
+      {backdrop ? <MenuBackdrop /> : null}
       <MenuPrimitive.Positioner
         align={align}
         alignOffset={alignOffset}
@@ -281,6 +298,8 @@ export {
   Menu as DropdownMenu,
   MenuPortal,
   MenuPortal as DropdownMenuPortal,
+  MenuBackdrop,
+  MenuBackdrop as DropdownMenuBackdrop,
   MenuTrigger,
   MenuTrigger as DropdownMenuTrigger,
   MenuPopup,
