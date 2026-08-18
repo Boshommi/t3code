@@ -9,6 +9,7 @@ import { Button } from "../components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
+import { useComposerDraftsHydrated } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import {
   useAllEnvironmentShellsBootstrapped,
@@ -42,6 +43,7 @@ function IndexDraftLanding() {
   const handleNewThread = useNewThreadHandler();
   const startingRef = useRef(false);
   const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
+  const draftsHydrated = useComposerDraftsHydrated();
 
   const mostRecentProject = useMemo(
     () =>
@@ -52,17 +54,21 @@ function IndexDraftLanding() {
   );
 
   useEffect(() => {
-    if (mostRecentProject === null || startingRef.current) {
+    if (mostRecentProject === null || !draftsHydrated || startingRef.current) {
       return;
     }
     startingRef.current = true;
     void handleNewThread(scopeProjectRef(mostRecentProject.environmentId, mostRecentProject.id), {
       replace: true,
+      // Reload / cold start lands here, not on the draft URL. Keep the
+      // in-progress workspace (branch, start-from-origin) instead of
+      // treating this as an explicit "new thread".
+      preserveEmptyDraftWorkspace: true,
     }).catch(() => {
       startingRef.current = false;
       setStartState((state) => ({ ...state, failed: true }));
     });
-  }, [handleNewThread, mostRecentProject, startState.retryRequest]);
+  }, [draftsHydrated, handleNewThread, mostRecentProject, startState.retryRequest]);
 
   if (!bootstrapped) {
     return null;

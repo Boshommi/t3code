@@ -26,6 +26,8 @@ import * as Arr from "effect/Array";
 import { pipe } from "effect/Function";
 
 import { useEnvironmentServerConfig, useProjects, useThreadShells } from "../../state/entities";
+import { serverEnvironment } from "../../state/server";
+import { useAtomCommand } from "../../state/use-atom-command";
 import type { TurnCommandMetadata } from "../../lib/commandMetadata";
 import type { DraftComposerAttachment } from "../../lib/composerImages";
 import type { ModelOption, ProviderGroup } from "../../lib/modelOptions";
@@ -361,6 +363,9 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
   const selectedEnvironmentServerConfig = useEnvironmentServerConfig(
     selectedProject?.environmentId ?? null,
   );
+  const updateServerSettings = useAtomCommand(serverEnvironment.updateSettings, {
+    reportFailure: false,
+  });
   // While a queued pending task is being edited its draft lives under a key
   // scoped to the queued message, so per-project new-task drafts stay intact.
   const selectedProjectDraftKey = editingPendingTask
@@ -762,8 +767,26 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
           startFromOrigin: value,
         },
       });
+      const environmentId = selectedProject?.environmentId;
+      if (
+        environmentId &&
+        selectedEnvironmentServerConfig?.settings.newWorktreesStartFromOrigin !== value
+      ) {
+        void updateServerSettings({
+          environmentId,
+          input: { patch: { newWorktreesStartFromOrigin: value } },
+        });
+      }
     },
-    [selectedBranchName, selectedProjectDraftKey, selectedWorktreePath, workspaceMode],
+    [
+      selectedBranchName,
+      selectedEnvironmentServerConfig?.settings.newWorktreesStartFromOrigin,
+      selectedProject?.environmentId,
+      selectedProjectDraftKey,
+      selectedWorktreePath,
+      updateServerSettings,
+      workspaceMode,
+    ],
   );
 
   const refreshBranches = branchState.refresh;

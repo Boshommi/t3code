@@ -31,7 +31,7 @@ import * as Equal from "effect/Equal";
 import * as Effect from "effect/Effect";
 import { DeepMutable } from "effect/Types";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getLocalStorageItem } from "./hooks/useLocalStorage";
 import { resolveAppModelSelection, resolveAppModelSelectionForInstance } from "./modelSelection";
 import {
@@ -3929,6 +3929,19 @@ export function useBackgroundDraftSubmissionPending(threadRef: ScopedThreadRef |
   return useComposerDraftStore(
     (state) => threadKey !== null && state.backgroundSubmissionThreadKeys[threadKey] === true,
   );
+}
+
+export function useComposerDraftsHydrated(): boolean {
+  const [hydrated, setHydrated] = useState(() => composerDraftStore.persist.hasHydrated());
+  useEffect(() => {
+    if (hydrated) {
+      return;
+    }
+    return composerDraftStore.persist.onFinishHydration(() => {
+      setHydrated(true);
+    });
+  }, [hydrated]);
+  return hydrated;
 }
 
 export function clearComposerDraftsEnvironment(environmentId: EnvironmentId): void {
