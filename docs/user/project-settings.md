@@ -168,6 +168,10 @@ itself, or **Skip** to leave them for a setup script. It resolves in the same or
 workspace default: a `"worktreeSubmodules"` value in the `t3.json` of the branch being checked out
 applies when the project and environment are both on **Inherit**.
 
+Git leaves ignored files out of a new worktree, so T3 Code copies `.env` and `.env.*` files from the
+project checkout into it, including nested ones like `apps/web/.env.local`. Files already in the
+worktree are left alone. Setup scripts run after the copy.
+
 ## Worktree location
 
 New worktrees go in the `worktrees` folder of the T3 home directory. To put them somewhere else,
