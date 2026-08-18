@@ -13,6 +13,9 @@ import {
 } from "@t3tools/contracts";
 import {
   formatShortcutLabel,
+  isChatNewShortcut,
+  isChatNewLocalShortcut,
+  isChatFindShortcut,
   isDiffToggleShortcut,
   isRichTextBoldShortcut,
   modelPickerJumpCommandForIndex,
@@ -135,6 +138,14 @@ const DEFAULT_BINDINGS = compile([
     shortcut: modShortcut("f", { shiftKey: true }),
     command: "projectSearch.toggle",
     whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
+  {
+    shortcut: modShortcut("f"),
+    command: "chat.find",
+    whenAst: whenAnd(
+      whenNot(whenIdentifier("terminalFocus")),
+      whenNot(whenIdentifier("previewFocus")),
+    ),
   },
   {
     shortcut: modShortcut("t", { altKey: true, shiftKey: true }),
@@ -438,6 +449,7 @@ describe("shortcutLabelForCommand", () => {
       shortcutLabelForCommand(DEFAULT_BINDINGS, "projectSearch.toggle", "MacIntel"),
       "⇧⌘F",
     );
+    assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, "chat.find", "MacIntel"), "⌘F");
     assert.strictEqual(
       shortcutLabelForCommand(DEFAULT_BINDINGS, "modelPicker.toggle", "Linux"),
       "Ctrl+Shift+M",
@@ -585,6 +597,39 @@ describe("chat/editor shortcuts", () => {
         platform: "Linux",
       }),
       "chat.new",
+    );
+  });
+
+  it("matches chat.find shortcut outside terminal and preview focus", () => {
+    assert.isTrue(
+      isChatFindShortcut(event({ key: "f", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: false, previewFocus: false },
+      }),
+    );
+    assert.isTrue(
+      isChatFindShortcut(event({ key: "f", ctrlKey: true }), DEFAULT_BINDINGS, {
+        platform: "Linux",
+        context: { terminalFocus: false, previewFocus: false },
+      }),
+    );
+    assert.isFalse(
+      isChatFindShortcut(event({ key: "f", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: true, previewFocus: false },
+      }),
+    );
+    assert.isFalse(
+      isChatFindShortcut(event({ key: "f", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: false, previewFocus: true },
+      }),
+    );
+    assert.isFalse(
+      isChatFindShortcut(event({ key: "f", metaKey: true, shiftKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: false, previewFocus: false },
+      }),
     );
   });
 
