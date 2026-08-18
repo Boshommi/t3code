@@ -50,6 +50,7 @@ import { scopedProjectKey } from "../../lib/scopedEntities";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { projectEnvironment } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
+import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import {
   appendComposerDraftAttachments,
@@ -352,6 +353,9 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
   const selectedEnvironmentServerConfig = useEnvironmentServerConfig(
     selectedProject?.environmentId ?? null,
   );
+  const updateServerSettings = useAtomCommand(serverEnvironment.updateSettings, {
+    reportFailure: false,
+  });
   const isScratchDraft =
     selectedProject !== null &&
     isScratchProject(selectedProject, selectedEnvironmentServerConfig?.scratchWorkspaceRoot);
@@ -864,6 +868,18 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
         startFromOrigin: value,
       },
     });
+    // Remember the choice for the next worktree, unless the project pins its own value.
+    const environmentId = selectedProject?.environmentId;
+    if (
+      environmentId &&
+      projectSettings.sources.newWorktreesStartFromOrigin === "environment" &&
+      projectSettings.settings.newWorktreesStartFromOrigin !== value
+    ) {
+      void updateServerSettings({
+        environmentId,
+        input: { patch: { newWorktreesStartFromOrigin: value } },
+      });
+    }
   };
 
   const refreshBranches = branchState.refresh;

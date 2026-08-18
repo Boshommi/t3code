@@ -81,6 +81,7 @@ import {
 } from "./lib/composerContextRecords";
 import { create } from "zustand";
 import { persist, type PersistStorage, type StorageValue } from "zustand/middleware";
+import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { createDeferredStorage, createMemoryStorage } from "./lib/storage";
 import { getDefaultServerModel } from "./providerModels";
@@ -4242,6 +4243,16 @@ export function useBackgroundDraftSubmissionPending(threadRef: ScopedThreadRef |
   return useComposerDraftStore(
     (state) => threadKey !== null && state.backgroundSubmissionThreadKeys[threadKey] === true,
   );
+}
+
+/** False until persisted drafts load, so routes do not mistake a draft for missing. */
+export function useComposerDraftsHydrated(): boolean {
+  const [hydrated, setHydrated] = useState(() => composerDraftStore.persist.hasHydrated());
+  useEffect(() => {
+    if (hydrated) return;
+    return composerDraftStore.persist.onFinishHydration(() => setHydrated(true));
+  }, [hydrated]);
+  return hydrated;
 }
 
 export function clearComposerDraftsEnvironment(environmentId: EnvironmentId): void {

@@ -74,6 +74,12 @@ export function useNewThreadHandler() {
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
       replace?: boolean;
+      /**
+       * Reopen the project's empty draft without resetting its workspace.
+       * Index landing sets this so an app reload keeps the branch and
+       * start-from-origin choice already made in that draft.
+       */
+      preserveEmptyDraftWorkspace?: boolean;
     },
   ): Promise<{ draftId: DraftId; threadId: ThreadId } | null> => {
     const projects = readProjects();
@@ -201,7 +207,7 @@ export function useNewThreadHandler() {
         let workspaceContext: NewThreadWorkspaceOptions | null = null;
         if (hasExplicitWorkspaceOption) {
           workspaceContext = pickExplicitWorkspaceOptions(options);
-        } else if (!isDraftAlreadyOpen) {
+        } else if (!isDraftAlreadyOpen && options?.preserveEmptyDraftWorkspace !== true) {
           const defaultEnvMode = await resolveDefaultEnvMode();
           if (abandonedSinceRequest()) {
             return null;

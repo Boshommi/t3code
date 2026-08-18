@@ -11,6 +11,7 @@ import { HostedEmptyState } from "../components/HostedEmptyState";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
+import { useComposerDraftsHydrated } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import {
   readProject,
@@ -43,6 +44,7 @@ function IndexDraftLanding() {
   const isStillOnIndex = useEffectEvent(() => router.state.location.pathname === "/");
   const startedAttemptRef = useRef<number | null>(null);
   const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
+  const draftsHydrated = useComposerDraftsHydrated();
 
   const mostRecentProject =
     sortScopedProjectsForSidebar(projects, threads, "updated_at")[0] ?? null;
@@ -50,7 +52,12 @@ function IndexDraftLanding() {
 
   useEffect(() => {
     // Starting a draft after the user has left would replace the page they picked.
-    if (mostRecentProject === null || startedAttemptRef.current === attempt || !isStillOnIndex()) {
+    if (
+      mostRecentProject === null ||
+      !draftsHydrated ||
+      startedAttemptRef.current === attempt ||
+      !isStillOnIndex()
+    ) {
       return;
     }
     const projectRef = scopeProjectRef(mostRecentProject.environmentId, mostRecentProject.id);
@@ -58,7 +65,9 @@ function IndexDraftLanding() {
       return;
     }
     startedAttemptRef.current = attempt;
-    void handleNewThread(projectRef, { replace: true })
+    // Reload and cold start land here rather than on the draft URL, so keep
+    // the draft's workspace instead of treating this as a fresh thread.
+    void handleNewThread(projectRef, { replace: true, preserveEmptyDraftWorkspace: true })
       .then((opened) => {
         if (opened === null) {
           setStartState((state) => ({ ...state, retryRequest: state.retryRequest + 1 }));
@@ -67,7 +76,7 @@ function IndexDraftLanding() {
       .catch(() => {
         setStartState((state) => ({ ...state, failed: true }));
       });
-  }, [attempt, handleNewThread, mostRecentProject]);
+  }, [attempt, draftsHydrated, handleNewThread, mostRecentProject]);
 
   if (mostRecentProject !== null) {
     return startState.failed ? (

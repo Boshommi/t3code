@@ -300,6 +300,7 @@ import {
 import {
   useClientSettings,
   useClientSettingsHydrated,
+  useUpdateEnvironmentSettings,
   useEnvironmentSettings,
 } from "../hooks/useSettings";
 import { useNowMinute } from "../hooks/useNowMinute";
@@ -1251,6 +1252,7 @@ export default function ChatView(props: ChatViewProps) {
     return ids;
   })();
   const settings = useEnvironmentSettings(environmentId);
+  const updateEnvironmentSettings = useUpdateEnvironmentSettings(environmentId);
   const clientSettingsHydrated = useClientSettingsHydrated();
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
@@ -7904,12 +7906,17 @@ export default function ChatView(props: ChatViewProps) {
           ? current
           : { ...current, [activeThread.id]: nextStartFromOrigin },
       );
-      return;
-    }
-    if (isLocalDraftThread) {
+    } else if (isLocalDraftThread) {
       setDraftThreadContext(composerDraftTarget, {
         startFromOrigin: nextStartFromOrigin,
       });
+    }
+    // Remember the choice for the next worktree, unless the project pins its own value.
+    if (
+      activeProjectSettings.sources.newWorktreesStartFromOrigin === "environment" &&
+      activeProjectSettings.settings.newWorktreesStartFromOrigin !== nextStartFromOrigin
+    ) {
+      updateEnvironmentSettings({ newWorktreesStartFromOrigin: nextStartFromOrigin });
     }
   };
 
