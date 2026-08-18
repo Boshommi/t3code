@@ -70,7 +70,8 @@ focus. See [Organizing threads](./thread-sidebar.md) for how pinned threads are 
 
 `mod+w` closes the thing you are looking at, not the T3 Code window: a focused terminal pane, the
 in-app browser tab, or whichever other right-panel tab has focus. When none of those have focus,
-the desktop app still uses that shortcut to close the window.
+the desktop app asks you to press the shortcut again to close the window. **File → Close Window**
+closes immediately.
 
 The command palette searches settings, active thread titles, projects, branches, user messages, and
 final agent responses across connected environments. A setting result opens its exact control or

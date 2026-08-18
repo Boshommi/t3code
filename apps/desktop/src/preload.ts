@@ -127,6 +127,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.removeListener(IpcChannels.MENU_ACTION_CHANNEL, wrappedListener);
     };
   },
+  requestWindowClose: () => ipcRenderer.invoke(IpcChannels.WINDOW_CLOSE_REQUEST_CHANNEL),
   onQuitShortcut: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, hint: unknown) => {
       if (typeof hint !== "object" || hint === null || !("state" in hint)) return;

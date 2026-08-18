@@ -115,6 +115,14 @@ const DEFAULT_BINDINGS = compile([
     whenAst: whenAnd(whenIdentifier("previewFocus"), whenNot(whenIdentifier("terminalFocus"))),
   },
   {
+    shortcut: modShortcut("w"),
+    command: "window.close",
+    whenAst: whenAnd(
+      whenNot(whenIdentifier("terminalFocus")),
+      whenNot(whenIdentifier("previewFocus")),
+    ),
+  },
+  {
     shortcut: modShortcut("d"),
     command: "diff.toggle",
     whenAst: whenNot(whenIdentifier("terminalFocus")),
@@ -336,11 +344,12 @@ describe("split/new/close terminal shortcuts", () => {
       }),
       "terminal.close",
     );
-    assert.isNull(
+    assert.equal(
       resolveShortcutCommand(event({ key: "w", metaKey: true }), DEFAULT_BINDINGS, {
         platform: "MacIntel",
         context: { previewFocus: false, terminalFocus: false },
       }),
+      "window.close",
     );
   });
 
@@ -444,6 +453,7 @@ describe("shortcutLabelForCommand", () => {
       "⇧⌘F",
     );
     assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, "chat.find", "MacIntel"), "⌘F");
+    assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, "window.close", "MacIntel"), "⌘W");
     assert.strictEqual(
       shortcutLabelForCommand(DEFAULT_BINDINGS, "modelPicker.toggle", "Linux"),
       "Ctrl+Shift+M",
