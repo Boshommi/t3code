@@ -2149,7 +2149,7 @@ export function GeneralSettingsPanel() {
           <SettingsRow
             className="bg-muted/20 sm:pl-9"
             title={searchableSetting("start-from-origin").title}
-            description="Creates the worktree from the latest matching branch on origin instead of your local branch."
+            description="Creates the worktree from the latest matching branch on origin instead of your local branch. The same switch in the branch picker saves this default."
             resetAction={
               settings.newWorktreesStartFromOrigin !==
               DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin ? (

@@ -1138,6 +1138,32 @@ describe("composerDraftStore project draft thread mapping", () => {
     expect(useComposerDraftStore.getState().getDraftThread(draftId)?.startFromOrigin).toBe(false);
   });
 
+  it("round-trips the start-from-origin choice through persisted draft storage", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, {
+      threadId,
+      envMode: "worktree",
+      startFromOrigin: true,
+    });
+    store.setDraftThreadContext(draftId, { startFromOrigin: false });
+
+    const persistApi = useComposerDraftStore.persist as unknown as {
+      getOptions: () => {
+        partialize: (state: unknown) => unknown;
+        merge: (
+          persistedState: unknown,
+          currentState: unknown,
+        ) => {
+          draftThreadsByThreadKey: Record<string, { startFromOrigin?: boolean }>;
+        };
+      };
+    };
+    const persisted = persistApi.getOptions().partialize(useComposerDraftStore.getState());
+    const merged = persistApi.getOptions().merge(persisted, useComposerDraftStore.getState());
+
+    expect(merged.draftThreadsByThreadKey[draftId]?.startFromOrigin).toBe(false);
+  });
+
   it("preserves existing branch and worktree when setProjectDraftThreadId receives undefined", () => {
     const store = useComposerDraftStore.getState();
     store.setProjectDraftThreadId(projectRef, draftId, {

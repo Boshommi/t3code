@@ -24,7 +24,10 @@ import {
 } from "../logicalProject";
 import { resolveDefaultThreadEnvMode } from "@t3tools/shared/threadEnvMode";
 import { readThreadShell, useProjects, useThread } from "../state/entities";
-import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
+import {
+  resolveNewDraftStartFromOrigin,
+  resolveResurrectedEmptyDraftWorkspace,
+} from "../lib/chatThreadActions";
 import { readT3ProjectFileDefaultThreadEnvMode } from "../lib/t3ProjectFileDefaults";
 import { primaryServerSettingsAtom } from "../state/server";
 import { resolveThreadRouteTarget } from "../threadRoutes";
@@ -82,6 +85,13 @@ export function useNewThreadHandler() {
          * keep mint-fresh semantics.
          */
         carryComposerContent?: boolean;
+        /**
+         * Reopen the project's empty draft without wiping its workspace.
+         * Index landing uses this so an app reload keeps the branch and
+         * start-from-origin choice the user already made. Explicit new-
+         * thread surfaces leave this unset and still reset to defaults.
+         */
+        preserveEmptyDraftWorkspace?: boolean;
       },
       // Which draft the thread ended up in, so a caller that has something to put in it — a
       // prepared checkout, a task to write — addresses that one rather than looking the project
@@ -227,11 +237,12 @@ export function useNewThreadHandler() {
           // before a defaults change (or by the old carry-over behavior) stop
           // landing on "current checkout" branches forever. When the draft is
           // already open and no options were passed, leave it alone entirely —
-          // the user may have just picked a branch in the composer.
+          // the user may have just picked a branch in the composer. App-reload
+          // landing is the same situation after the route has been lost.
           let workspaceContext: NewThreadWorkspaceOptions | null = null;
           if (hasExplicitWorkspaceOption) {
             workspaceContext = pickExplicitWorkspaceOptions(options);
-          } else if (!isDraftAlreadyOpen) {
+          } else if (!isDraftAlreadyOpen && options?.preserveEmptyDraftWorkspace !== true) {
             const defaultEnvMode = await resolveDefaultEnvMode();
             // The await yields. If the draft was opened (a concurrent
             // invocation's navigation landed), promoted to a real thread,
@@ -257,15 +268,13 @@ export function useNewThreadHandler() {
             if (openedMeanwhile || promotedMeanwhile || remappedMeanwhile || investedMeanwhile) {
               return null;
             }
-            workspaceContext = {
-              branch: null,
-              worktreePath: null,
-              envMode: defaultEnvMode,
-              startFromOrigin: resolveNewDraftStartFromOrigin({
-                envMode: defaultEnvMode,
-                newWorktreesStartFromOrigin: primaryServerSettings.newWorktreesStartFromOrigin,
-              }),
-            };
+            workspaceContext = resolveResurrectedEmptyDraftWorkspace({
+              explicitWorkspace: null,
+              isDraftAlreadyOpen: false,
+              preserveEmptyDraftWorkspace: false,
+              defaultEnvMode,
+              newWorktreesStartFromOrigin: primaryServerSettings.newWorktreesStartFromOrigin,
+            });
           }
           if (workspaceContext) {
             setDraftThreadContext(emptyStoredDraftThread.draftId, {

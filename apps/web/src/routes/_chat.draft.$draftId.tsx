@@ -5,6 +5,7 @@ import { threadHasStarted } from "../components/ChatView.logic";
 import {
   DraftId,
   markPromotedDraftThreadByRef,
+  useComposerDraftsHydrated,
   useComposerDraftStore,
 } from "../composerDraftStore";
 import { SidebarInset } from "../components/ui/sidebar";
@@ -16,6 +17,7 @@ function DraftChatThreadRouteView() {
   const navigate = useNavigate();
   const { draftId: rawDraftId } = Route.useParams();
   const draftId = DraftId.make(rawDraftId);
+  const draftsHydrated = useComposerDraftsHydrated();
   const draftSession = useComposerDraftStore((store) => store.getDraftSession(draftId));
   const threadRefs = useThreadRefs();
   const inferredThreadRef = draftSession
@@ -60,11 +62,11 @@ function DraftChatThreadRouteView() {
   }, [canonicalThreadRef, navigate]);
 
   useEffect(() => {
-    if (draftSession || canonicalThreadRef) {
+    if (!draftsHydrated || draftSession || canonicalThreadRef) {
       return;
     }
     void navigate({ to: "/", replace: true });
-  }, [canonicalThreadRef, draftSession, navigate]);
+  }, [canonicalThreadRef, draftSession, draftsHydrated, navigate]);
 
   if (!draftSession) {
     return null;

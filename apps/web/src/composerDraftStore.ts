@@ -30,7 +30,7 @@ import * as Equal from "effect/Equal";
 import * as Effect from "effect/Effect";
 import { DeepMutable } from "effect/Types";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getLocalStorageItem } from "./hooks/useLocalStorage";
 import { resolveAppModelSelection, resolveAppModelSelectionForInstance } from "./modelSelection";
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type ChatImageAttachment } from "./types";
@@ -3577,6 +3577,19 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
 );
 
 export const useComposerDraftStore = composerDraftStore;
+
+export function useComposerDraftsHydrated(): boolean {
+  const [hydrated, setHydrated] = useState(() => composerDraftStore.persist.hasHydrated());
+  useEffect(() => {
+    if (hydrated) {
+      return;
+    }
+    return composerDraftStore.persist.onFinishHydration(() => {
+      setHydrated(true);
+    });
+  }, [hydrated]);
+  return hydrated;
+}
 
 export function clearComposerDraftsEnvironment(environmentId: EnvironmentId): void {
   useComposerDraftStore.setState((state) => {

@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import {
   resolveThreadActionProjectRef,
   resolveNewDraftStartFromOrigin,
+  resolveResurrectedEmptyDraftWorkspace,
+  resolveStartFromOriginSettingsPatch,
   startNewThreadFromContext,
   type ChatThreadActionContext,
 } from "./chatThreadActions";
@@ -36,6 +38,74 @@ describe("chatThreadActions", () => {
         newWorktreesStartFromOrigin: true,
       }),
     ).toBe(false);
+  });
+
+  it("resets an empty stored draft to configured defaults on a new-thread request", () => {
+    expect(
+      resolveResurrectedEmptyDraftWorkspace({
+        explicitWorkspace: null,
+        isDraftAlreadyOpen: false,
+        preserveEmptyDraftWorkspace: false,
+        defaultEnvMode: "worktree",
+        newWorktreesStartFromOrigin: true,
+      }),
+    ).toEqual({
+      branch: null,
+      worktreePath: null,
+      envMode: "worktree",
+      startFromOrigin: true,
+    });
+  });
+
+  it("keeps the stored workspace when the empty draft is already open", () => {
+    expect(
+      resolveResurrectedEmptyDraftWorkspace({
+        explicitWorkspace: null,
+        isDraftAlreadyOpen: true,
+        preserveEmptyDraftWorkspace: false,
+        defaultEnvMode: "worktree",
+        newWorktreesStartFromOrigin: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps the stored workspace when landing after an app reload", () => {
+    expect(
+      resolveResurrectedEmptyDraftWorkspace({
+        explicitWorkspace: null,
+        isDraftAlreadyOpen: false,
+        preserveEmptyDraftWorkspace: true,
+        defaultEnvMode: "local",
+        newWorktreesStartFromOrigin: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("still applies explicit workspace options while preserving a stored draft", () => {
+    expect(
+      resolveResurrectedEmptyDraftWorkspace({
+        explicitWorkspace: { branch: "main", startFromOrigin: false },
+        isDraftAlreadyOpen: false,
+        preserveEmptyDraftWorkspace: true,
+        defaultEnvMode: "worktree",
+        newWorktreesStartFromOrigin: true,
+      }),
+    ).toEqual({ branch: "main", startFromOrigin: false });
+  });
+
+  it("writes the start-from-origin toggle back to the stored default", () => {
+    expect(
+      resolveStartFromOriginSettingsPatch({
+        nextStartFromOrigin: false,
+        currentDefault: true,
+      }),
+    ).toEqual({ newWorktreesStartFromOrigin: false });
+    expect(
+      resolveStartFromOriginSettingsPatch({
+        nextStartFromOrigin: true,
+        currentDefault: true,
+      }),
+    ).toBeNull();
   });
 
   it("prefers the active thread project when resolving thread actions", () => {

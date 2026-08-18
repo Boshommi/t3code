@@ -34,6 +34,52 @@ export function resolveNewDraftStartFromOrigin(input: {
   return input.envMode === "worktree" && input.newWorktreesStartFromOrigin;
 }
 
+export interface DraftWorkspaceContext {
+  branch?: string | null;
+  worktreePath?: string | null;
+  envMode?: DraftThreadEnvMode;
+  startFromOrigin?: boolean;
+}
+
+// Reusing an empty stored draft is not the same as opening the draft the
+// user is already looking at. Explicit new-thread surfaces reset workspace
+// context to configured defaults so old carry-over checkouts do not stick
+// forever. App-reload landing reopens the same in-progress draft and must
+// keep the branch / start-from-origin the user just picked.
+export function resolveResurrectedEmptyDraftWorkspace(input: {
+  explicitWorkspace: DraftWorkspaceContext | null;
+  isDraftAlreadyOpen: boolean;
+  preserveEmptyDraftWorkspace: boolean;
+  defaultEnvMode: DraftThreadEnvMode;
+  newWorktreesStartFromOrigin: boolean;
+}): DraftWorkspaceContext | null {
+  if (input.explicitWorkspace !== null) {
+    return input.explicitWorkspace;
+  }
+  if (input.isDraftAlreadyOpen || input.preserveEmptyDraftWorkspace) {
+    return null;
+  }
+  return {
+    branch: null,
+    worktreePath: null,
+    envMode: input.defaultEnvMode,
+    startFromOrigin: resolveNewDraftStartFromOrigin({
+      envMode: input.defaultEnvMode,
+      newWorktreesStartFromOrigin: input.newWorktreesStartFromOrigin,
+    }),
+  };
+}
+
+export function resolveStartFromOriginSettingsPatch(input: {
+  nextStartFromOrigin: boolean;
+  currentDefault: boolean;
+}): { newWorktreesStartFromOrigin: boolean } | null {
+  if (input.nextStartFromOrigin === input.currentDefault) {
+    return null;
+  }
+  return { newWorktreesStartFromOrigin: input.nextStartFromOrigin };
+}
+
 export function resolveThreadActionProjectRef(
   context: ChatThreadActionContext,
 ): ScopedProjectRef | null {

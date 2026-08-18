@@ -189,13 +189,17 @@ import {
   useClientSettings,
   useClientSettingsHydrated,
   useEnvironmentSettings,
+  useUpdatePrimarySettings,
 } from "../hooks/useSettings";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";
 import { preventRepeatedTerminalCloseShortcut } from "../lib/terminalCloseShortcut";
-import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
+import {
+  resolveNewDraftStartFromOrigin,
+  resolveStartFromOriginSettingsPatch,
+} from "../lib/chatThreadActions";
 import {
   derivePhysicalProjectKey,
   deriveLogicalProjectKeyFromSettings,
@@ -1295,6 +1299,7 @@ function ChatViewContent(props: ChatViewProps) {
   // settings UI never writes to remote environments), so read them from the
   // primary server rather than the thread's environment.
   const primaryServerSettings = useAtomValue(primaryServerSettingsAtom);
+  const updatePrimarySettings = useUpdatePrimarySettings();
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
   );
@@ -6049,12 +6054,17 @@ function ChatViewContent(props: ChatViewProps) {
           ? current
           : { ...current, [activeThread.id]: nextStartFromOrigin },
       );
-      return;
-    }
-    if (isLocalDraftThread) {
+    } else if (isLocalDraftThread) {
       setDraftThreadContext(composerDraftTarget, {
         startFromOrigin: nextStartFromOrigin,
       });
+    }
+    const settingsPatch = resolveStartFromOriginSettingsPatch({
+      nextStartFromOrigin,
+      currentDefault: primaryServerSettings.newWorktreesStartFromOrigin,
+    });
+    if (settingsPatch) {
+      updatePrimarySettings(settingsPatch);
     }
   };
 
