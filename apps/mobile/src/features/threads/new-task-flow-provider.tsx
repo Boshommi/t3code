@@ -355,6 +355,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
   const updateServerSettings = useAtomCommand(serverEnvironment.updateSettings, {
     reportFailure: false,
   });
+  const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   // While a queued pending task is being edited its draft lives under a key
   // scoped to the queued message, so per-project new-task drafts stay intact.
   const selectedProjectDraftKey = editingPendingTask
@@ -661,14 +662,30 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
           ...(draftStartFromOrigin !== undefined ? { startFromOrigin: draftStartFromOrigin } : {}),
         },
       });
+      const environmentId = selectedProject.environmentId;
+      if (selectedEnvironmentServerConfig?.settings.defaultThreadEnvMode !== mode) {
+        void updateServerSettings({
+          environmentId,
+          input: { patch: { defaultThreadEnvMode: mode } },
+        });
+      }
+      if (selectedProject.defaultThreadEnvMode !== mode) {
+        void updateProject({
+          environmentId,
+          input: { projectId: selectedProject.id, defaultThreadEnvMode: mode },
+        });
+      }
     },
     [
       availableBranches,
       draftStartFromOrigin,
       selectedBranchName,
+      selectedEnvironmentServerConfig?.settings.defaultThreadEnvMode,
       selectedProject,
       selectedProjectDraftKey,
       selectedWorktreePath,
+      updateProject,
+      updateServerSettings,
     ],
   );
 

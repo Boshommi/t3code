@@ -5,6 +5,8 @@ import {
   resolveThreadActionProjectRef,
   resolveNewDraftStartFromOrigin,
   resolveResurrectedEmptyDraftWorkspace,
+  resolveDefaultThreadEnvModeSettingsPatch,
+  resolveProjectThreadEnvModePatch,
   resolveStartFromOriginSettingsPatch,
   startNewThreadFromContext,
   type ChatThreadActionContext,
@@ -91,6 +93,36 @@ describe("chatThreadActions", () => {
         newWorktreesStartFromOrigin: true,
       }),
     ).toEqual({ branch: "main", startFromOrigin: false });
+  });
+
+  it("writes the workspace-mode picker back to the stored default", () => {
+    expect(
+      resolveDefaultThreadEnvModeSettingsPatch({
+        nextEnvMode: "worktree",
+        currentDefault: "local",
+      }),
+    ).toEqual({ defaultThreadEnvMode: "worktree" });
+    expect(
+      resolveDefaultThreadEnvModeSettingsPatch({
+        nextEnvMode: "local",
+        currentDefault: "local",
+      }),
+    ).toBeNull();
+  });
+
+  it("pins the workspace-mode picker onto the project so t3.json cannot win", () => {
+    expect(
+      resolveProjectThreadEnvModePatch({
+        nextEnvMode: "worktree",
+        currentProjectDefault: null,
+      }),
+    ).toEqual({ defaultThreadEnvMode: "worktree" });
+    expect(
+      resolveProjectThreadEnvModePatch({
+        nextEnvMode: "local",
+        currentProjectDefault: "local",
+      }),
+    ).toBeNull();
   });
 
   it("writes the start-from-origin toggle back to the stored default", () => {
