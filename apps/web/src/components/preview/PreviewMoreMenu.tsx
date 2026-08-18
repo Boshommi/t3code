@@ -2,6 +2,9 @@
 
 import type { DesktopPreviewColorScheme } from "@t3tools/contracts";
 import { Minus, MoreVertical, Plus as PlusIcon, RotateCcw } from "lucide-react";
+import { useEffect, useState } from "react";
+
+import { usePreviewHostPopupStore } from "~/browser/previewHostPopupStore";
 
 import { Button } from "~/components/ui/button";
 import {
@@ -18,6 +21,7 @@ import {
 } from "~/components/ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 
+import { subscribePreviewGuestPointer } from "./previewGuestPointerBus";
 import { previewBridge } from "./previewBridge";
 
 const COLOR_SCHEME_OPTIONS: ReadonlyArray<{
@@ -67,6 +71,21 @@ export function PreviewMoreMenu({
   nativePictureInPicture,
   onNativePictureInPicture,
 }: Props) {
+  const [open, setOpen] = useState(false);
+  const beginHostPopup = usePreviewHostPopupStore((state) => state.begin);
+  const endHostPopup = usePreviewHostPopupStore((state) => state.end);
+
+  useEffect(() => {
+    if (!open) return;
+    beginHostPopup();
+    return () => endHostPopup();
+  }, [beginHostPopup, endHostPopup, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    return subscribePreviewGuestPointer(() => setOpen(false));
+  }, [open]);
+
   if (!previewBridge) return null;
   const bridge = previewBridge;
   const tabDisabled = !tabId || !hasWebContents;
@@ -77,7 +96,7 @@ export function PreviewMoreMenu({
 
   const zoomLabel = `${Math.round(zoomFactor * 100)}%`;
   return (
-    <Menu>
+    <Menu open={open} onOpenChange={setOpen}>
       <Tooltip>
         <TooltipTrigger
           render={

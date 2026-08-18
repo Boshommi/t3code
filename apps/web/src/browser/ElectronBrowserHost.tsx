@@ -5,6 +5,7 @@ import { FILL_PREVIEW_VIEWPORT } from "@t3tools/contracts";
 import { useEffect, useMemo } from "react";
 
 import { dispatchPreviewAction } from "~/components/preview/previewActionBus";
+import { dispatchPreviewGuestPointer } from "~/components/preview/previewGuestPointerBus";
 import { isElectron } from "~/env";
 import { useTheme } from "~/hooks/useTheme";
 import { useActivePreviewSessions } from "~/previewStateStore";
@@ -87,6 +88,16 @@ export function ElectronBrowserHost() {
     }
     return onCloseTabRequest(() => {
       dispatchPreviewAction("close-tab");
+    });
+  }, []);
+
+  useEffect(() => {
+    const onGuestPointerDown = window.desktopBridge?.preview?.onGuestPointerDown;
+    if (typeof onGuestPointerDown !== "function") {
+      return;
+    }
+    return onGuestPointerDown(() => {
+      dispatchPreviewGuestPointer();
     });
   }, []);
 

@@ -298,5 +298,16 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       return () =>
         ipcRenderer.removeListener(IpcChannels.PREVIEW_REQUEST_CLOSE_TAB_CHANNEL, wrappedListener);
     },
+    onGuestPointerDown: (listener) => {
+      const wrappedListener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
+        if (typeof payload !== "object" || payload === null) return;
+        const tabId = (payload as { tabId?: unknown }).tabId;
+        if (typeof tabId !== "string" || tabId.length === 0) return;
+        listener(tabId);
+      };
+      ipcRenderer.on(IpcChannels.PREVIEW_GUEST_POINTER_DOWN_CHANNEL, wrappedListener);
+      return () =>
+        ipcRenderer.removeListener(IpcChannels.PREVIEW_GUEST_POINTER_DOWN_CHANNEL, wrappedListener);
+    },
   },
 } satisfies DesktopBridge);

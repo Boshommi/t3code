@@ -46,6 +46,7 @@ export const SSH_PASSWORD_PROMPT_CANCELLED_RESULT = "ssh-password-prompt-cancell
 export const PREVIEW_CREATE_TAB_CHANNEL = "desktop:preview-create-tab";
 export const PREVIEW_CLOSE_TAB_CHANNEL = "desktop:preview-close-tab";
 export const PREVIEW_REQUEST_CLOSE_TAB_CHANNEL = "desktop:preview-request-close-tab";
+export const PREVIEW_GUEST_POINTER_DOWN_CHANNEL = "desktop:preview-guest-pointer-down";
 export const PREVIEW_REGISTER_WEBVIEW_CHANNEL = "desktop:preview-register-webview";
 export const PREVIEW_NAVIGATE_CHANNEL = "desktop:preview-navigate";
 export const PREVIEW_ENSURE_LOOPBACK_FORWARD_CHANNEL = "desktop:preview-ensure-loopback-forward";

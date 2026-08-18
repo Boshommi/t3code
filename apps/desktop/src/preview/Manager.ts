@@ -53,6 +53,7 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import {
+  PREVIEW_GUEST_POINTER_DOWN_CHANNEL,
   PREVIEW_PICTURE_IN_PICTURE_FRAME_CHANNEL,
   PREVIEW_REQUEST_CLOSE_TAB_CHANNEL,
 } from "../ipc/channels.ts";
@@ -1783,6 +1784,17 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     ) {
       if (isPreviewInputSignal(rawSignal) && (yield* consumeExpectedAgentInput(tabId, rawSignal))) {
         return;
+      }
+      if (
+        typeof rawSignal === "object" &&
+        rawSignal !== null &&
+        "kind" in rawSignal &&
+        rawSignal.kind === "pointer"
+      ) {
+        const mainWindow = yield* Ref.get(mainWindowRef);
+        if (Option.isSome(mainWindow) && !mainWindow.value.isDestroyed()) {
+          mainWindow.value.webContents.send(PREVIEW_GUEST_POINTER_DOWN_CHANNEL, { tabId });
+        }
       }
       yield* Ref.update(controlEpochRef, (epochs) =>
         replaceMap(epochs, (copy) => {
