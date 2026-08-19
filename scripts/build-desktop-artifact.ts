@@ -3286,6 +3286,11 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     delete buildEnv.APPLE_API_KEY_ID;
     delete buildEnv.APPLE_API_ISSUER;
   }
+  // `--publish never` still writes updater metadata. A GitHub token without a
+  // staged repository makes electron-builder invent a null GitHub publisher and
+  // crash in computeChannelNames.
+  delete buildEnv.GH_TOKEN;
+  delete buildEnv.GITHUB_TOKEN;
 
   if (hostPlatform === "win32") {
     const python = yield* resolvePythonForNodeGyp();
