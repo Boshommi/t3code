@@ -1402,6 +1402,32 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("creates worktrees under the project's .t3/worktrees folder", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const pathService = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        const created = yield* driver.createWorktree({
+          cwd,
+          path: null,
+          refName: initialBranch,
+          newRefName: "feature/in-project",
+        });
+
+        const expectedPath = pathService.join(cwd, ".t3", "worktrees", "feature-in-project");
+        assert.equal(created.worktree.path, expectedPath);
+        assert.equal(yield* fileSystem.exists(expectedPath), true);
+        assert.equal(yield* git(expectedPath, ["branch", "--show-current"]), "feature/in-project");
+        const exclude = yield* fileSystem.readFileString(
+          pathService.join(cwd, ".git", "info", "exclude"),
+        );
+        assert.ok(exclude.includes(".t3/worktrees/"));
+      }),
+    );
+
     it.effect("copies gitignored env files into a new worktree", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
