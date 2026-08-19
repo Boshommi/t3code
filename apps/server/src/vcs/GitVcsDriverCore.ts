@@ -32,6 +32,7 @@ import { decodeJsonResult } from "@t3tools/shared/schemaJson";
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 import { copyWorktreeEnvFiles, worktreeEnvFilePathspecs } from "./seedWorktreeEnvFiles.ts";
+import { ensureProjectWorktreeExclude, resolveDefaultWorktreePath } from "./projectWorktreePath.ts";
 import {
   parseRemoteNames,
   parseRemoteNamesInGitOrder,
@@ -2849,9 +2850,28 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     "createWorktree",
   )(function* (input) {
     const targetBranch = input.newRefName ?? input.refName;
-    const sanitizedBranch = targetBranch.replace(/\//g, "-");
-    const repoName = path.basename(input.cwd);
-    const worktreePath = input.path ?? path.join(worktreesDir, repoName, sanitizedBranch);
+    const repositoryPaths = yield* resolveRepositoryPaths(input.cwd).pipe(
+      Effect.catch(() => Effect.succeed(null)),
+    );
+    if (!input.path && repositoryPaths !== null) {
+      yield* ensureProjectWorktreeExclude(repositoryPaths.gitCommonDir).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("Failed to ignore project worktrees in the main checkout", {
+            cwd: input.cwd,
+            gitCommonDir: repositoryPaths.gitCommonDir,
+            cause: error,
+          }),
+        ),
+      );
+    }
+    const worktreePath =
+      input.path ??
+      resolveDefaultWorktreePath({
+        gitCommonDir: repositoryPaths?.gitCommonDir ?? input.cwd,
+        branchName: targetBranch,
+        fallbackWorktreesDir: worktreesDir,
+        repoName: path.basename(input.cwd),
+      });
     const args = input.newRefName
       ? ["worktree", "add", "-b", input.newRefName, worktreePath, input.refName]
       : ["worktree", "add", worktreePath, input.refName];
