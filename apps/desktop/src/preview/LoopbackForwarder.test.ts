@@ -249,6 +249,21 @@ describe("PreviewLoopbackForwarder", () => {
     }),
   );
 
+  effectIt.effect("does not register a remote tunnel for a local environment", () =>
+    Effect.gen(function* () {
+      const forwarder = yield* make;
+      const result = yield* forwarder.ensure({
+        environmentId: EnvironmentId.make("local"),
+        url: "http://localhost:4000/",
+        environmentIsLoopback: true,
+        tunnelWebsocketUrl: "ws://127.0.0.1:9/preview-tunnel?wsTicket=ticket&port=4000",
+      });
+      expect(result.kind).toBe("not-applicable");
+      const related = yield* forwarder.ensureRelated("http://localhost:5173/");
+      expect(related.kind).toBe("not-applicable");
+    }),
+  );
+
   it("always starts a remote tunnel from the in-app preview", () => {
     expect(
       decideLoopbackForward({

@@ -7,7 +7,6 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import * as BrowserSession from "./BrowserSession.ts";
-import * as PreviewLoopbackForwarder from "./LoopbackForwarder.ts";
 import { rewritePreviewSecChUa } from "./previewClientHints.ts";
 import {
   buildPreviewLoopbackRequestHeaders,
@@ -224,6 +223,10 @@ export const attachPreviewLoopbackHttpHandler = (
  * answers plain-http loopback requests in origin-form over the tunnel, and the
  * SOCKS proxy carries ws/wss/https. Safe to call repeatedly for the same
  * session. The returned promise resolves when the proxy rules are applied.
+ *
+ * Only remote environments need this. Local Chromium must stay DIRECT —
+ * otherwise every localhost preview hop goes through SOCKS even when the
+ * agent is on the same machine, and a leftover remote tunnel can steal it.
  */
 export const attachPreviewLoopbackSession = (
   session: Session,
@@ -234,12 +237,32 @@ export const attachPreviewLoopbackSession = (
   return applyPreviewLoopbackProxy(session, services.proxyPort);
 };
 
+export const isPreviewLoopbackSessionAttached = (session: Session): boolean =>
+  interceptedSessions.has(session);
+
+/** SOCKS + http intercept are for reaching localhost on a remote machine. */
+export const shouldAttachPreviewLoopbackProxy = (
+  environmentIsLoopback: boolean | undefined,
+): boolean => environmentIsLoopback === false;
+
+export const attachPreviewLoopbackSessionIfRemote = (
+  session: Session,
+  services: PreviewLoopbackSessionServices,
+  environmentIsLoopback: boolean | undefined,
+): Promise<void> => {
+  if (!shouldAttachPreviewLoopbackProxy(environmentIsLoopback)) {
+    return Promise.resolve();
+  }
+  return attachPreviewLoopbackSession(session, services);
+};
+
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const browserSession = yield* BrowserSession.BrowserSession;
-    const forwarder = yield* PreviewLoopbackForwarder.PreviewLoopbackForwarder;
     yield* browserSession.onSessionCreated((session) => {
-      void attachPreviewLoopbackSession(session, forwarder);
+      // Client hints are safe on every preview session. The SOCKS/http
+      // intercept is attached later, and only for a remote environment.
+      attachPreviewClientHintOverrides(session);
     });
   }),
 );

@@ -6,7 +6,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { previewBridge } from "~/components/preview/previewBridge";
 import { readPreparedConnection } from "~/state/session";
 
-import { isLocalLoopbackHost, resolveBrowserNavigationTarget } from "./browserTargetResolver";
+import { previewEnvironmentIsLocal, resolveBrowserNavigationTarget } from "./browserTargetResolver";
 
 const issuePreviewTunnelWebsocketUrl = async (
   httpBaseUrl: string,
@@ -53,7 +53,7 @@ export async function prepareDesktopLoopbackPreviewUrl(
     previewBridge?.ensureLoopbackForward === undefined ||
     connection === null ||
     target === null ||
-    isLocalLoopbackHost(new URL(connection.httpBaseUrl).hostname)
+    previewEnvironmentIsLocal(connection)
   ) {
     return null;
   }

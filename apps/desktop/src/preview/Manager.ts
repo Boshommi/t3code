@@ -58,7 +58,7 @@ import {
 } from "../ipc/channels.ts";
 import * as BrowserSession from "./BrowserSession.ts";
 import * as PreviewLoopbackForwarder from "./LoopbackForwarder.ts";
-import { attachPreviewLoopbackSession } from "./LoopbackRequestInterceptor.ts";
+import { isPreviewLoopbackSessionAttached } from "./LoopbackRequestInterceptor.ts";
 import {
   ANNOTATION_CAPTURED_CHANNEL,
   ANNOTATION_THEME_CHANNEL,
@@ -1439,9 +1439,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     const loopbackForwarder = yield* Effect.serviceOption(
       PreviewLoopbackForwarder.PreviewLoopbackForwarder,
     );
-    if (Option.isSome(loopbackForwarder)) {
-      void attachPreviewLoopbackSession(wc.session, loopbackForwarder.value);
-    }
     const scope = yield* Scope.fork(parentScope, "sequential");
     const attachmentId = Symbol();
     let documentId = 0;
@@ -1729,16 +1726,18 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           features: details.features,
         });
         if (decision.kind === "allow-popup") {
-          if (Option.isSome(loopbackForwarder)) {
+          if (
+            Option.isSome(loopbackForwarder) &&
+            isPreviewLoopbackSessionAttached(target.session)
+          ) {
             runFork(loopbackForwarder.value.ensureRelated(details.url).pipe(Effect.ignore));
           }
           return {
             action: "allow",
             overrideBrowserWindowOptions: {
               ...previewPopupWindowBounds(decision),
-              // Must reuse the opener session. Guest webviews often have no
-              // partition string; a new default session has no SOCKS tunnel and
-              // localhost is refused on the laptop instead of tunneled.
+              // Reuse the opener session so a remote preview keeps its SOCKS
+              // tunnel. Local sessions stay DIRECT and must not inherit a proxy.
               webPreferences: {
                 ...PREVIEW_POPUP_WEB_PREFERENCES,
                 session: target.session,
@@ -1759,9 +1758,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       target.on("did-create-window", handlePreviewPopupCreated);
     };
     const handlePreviewPopupCreated = (child: BrowserWindow): void => {
-      if (Option.isSome(loopbackForwarder)) {
-        void attachPreviewLoopbackSession(child.webContents.session, loopbackForwarder.value);
-      }
       attachPreviewWindowOpenHandler(child.webContents);
       // Touch ID / the system passkey sheet attach to the focused window.
       if (!child.isDestroyed()) {
@@ -1970,12 +1966,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       const loopbackForwarder = yield* Effect.serviceOption(
         PreviewLoopbackForwarder.PreviewLoopbackForwarder,
       );
-      if (Option.isNone(loopbackForwarder)) {
+      if (Option.isNone(loopbackForwarder) || !isPreviewLoopbackSessionAttached(wc.session)) {
         return;
       }
-      yield* Effect.promise(() =>
-        attachPreviewLoopbackSession(wc.session, loopbackForwarder.value),
-      );
       const targetUrl = relatedUrl ?? wc.getURL();
       if (targetUrl.length > 0) {
         yield* loopbackForwarder.value.ensureRelated(targetUrl).pipe(Effect.ignore);
@@ -2012,12 +2005,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       // The guest we already own re-announced itself, so nothing about the tab
       // changed. Only push its zoom back down — Chromium may have just handed
       // this guest the app window's zoom level.
-      const loopbackForwarder = yield* Effect.serviceOption(
-        PreviewLoopbackForwarder.PreviewLoopbackForwarder,
-      );
-      if (Option.isSome(loopbackForwarder)) {
-        void attachPreviewLoopbackSession(wc.session, loopbackForwarder.value);
-      }
       yield* assertTabZoom(tabId);
       yield* attempt({ operation: "registerWebview.sendTheme", tabId, webContentsId }, () =>
         wc.send(ANNOTATION_THEME_CHANNEL, annotationTheme),

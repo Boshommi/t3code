@@ -1015,6 +1015,8 @@ export type DesktopPreviewLoopbackForwardResult =
 
 export const DesktopPreviewConfigInputSchema = Schema.Struct({
   environmentId: EnvironmentId,
+  /** When true or omitted, the preview session stays DIRECT (no loopback SOCKS). */
+  environmentIsLoopback: Schema.optional(Schema.Boolean),
 });
 
 export const DesktopPreviewSetColorSchemeInputSchema = Schema.Struct({
@@ -1208,7 +1210,10 @@ export interface DesktopPreviewBridge {
    * `getPickPreloadPath`) so adding a new field here only requires touching
    * the contract + main, not the renderer's mount logic.
    */
-  getPreviewConfig: (environmentId: EnvironmentId) => Promise<DesktopPreviewWebviewConfig>;
+  getPreviewConfig: (
+    environmentId: EnvironmentId,
+    environmentIsLoopback?: boolean,
+  ) => Promise<DesktopPreviewWebviewConfig>;
   setAnnotationTheme: (theme: DesktopPreviewAnnotationTheme) => Promise<void>;
   /**
    * Activate the in-page element picker for the given tab. Resolves with
