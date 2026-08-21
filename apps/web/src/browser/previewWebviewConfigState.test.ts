@@ -39,20 +39,45 @@ describe("loadPreviewWebviewConfig", () => {
   it.effect("forwards the environment id to the bridge", () =>
     Effect.gen(function* () {
       let requestedEnvironmentId: EnvironmentId | null = null;
+      let requestedLoopback: boolean | undefined;
       const config = {
         partition: "persist:test-preview",
         webPreferences: "sandbox=yes",
         preloadUrl: null,
       };
-      const result = yield* loadPreviewWebviewConfig(environmentId, {
-        getPreviewConfig: (input) => {
-          requestedEnvironmentId = input;
-          return Promise.resolve(config);
+      const result = yield* loadPreviewWebviewConfig(
+        environmentId,
+        {
+          getPreviewConfig: (input, environmentIsLoopback) => {
+            requestedEnvironmentId = input;
+            requestedLoopback = environmentIsLoopback;
+            return Promise.resolve(config);
+          },
+        },
+        false,
+      );
+
+      expect(requestedEnvironmentId).toBe(environmentId);
+      expect(requestedLoopback).toBe(false);
+      expect(result).toEqual(config);
+    }),
+  );
+
+  it.effect("defaults to a local session so desktop does not attach the loopback proxy", () =>
+    Effect.gen(function* () {
+      let requestedLoopback: boolean | undefined;
+      yield* loadPreviewWebviewConfig(environmentId, {
+        getPreviewConfig: (_input, environmentIsLoopback) => {
+          requestedLoopback = environmentIsLoopback;
+          return Promise.resolve({
+            partition: "persist:test-preview",
+            webPreferences: "sandbox=yes",
+            preloadUrl: null,
+          });
         },
       });
 
-      expect(requestedEnvironmentId).toBe(environmentId);
-      expect(result).toEqual(config);
+      expect(requestedLoopback).toBe(true);
     }),
   );
 });

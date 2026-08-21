@@ -1,15 +1,18 @@
 "use client";
 
 import type { PreviewViewportSetting, ScopedThreadRef } from "@t3tools/contracts";
+import * as Option from "effect/Option";
 import { useShallow } from "zustand/react/shallow";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { previewBridge } from "~/components/preview/previewBridge";
 import { usePreviewBridge } from "~/components/preview/usePreviewBridge";
 import { cn, isMacPlatform } from "~/lib/utils";
+import { usePreparedConnection } from "~/state/session";
 
 import { resolveBrowserSurfacePanelRect, useBrowserSurfaceStore } from "./browserSurfaceStore";
 import { useActiveBrowserRecordingTabIds } from "./browserRecording";
+import { previewEnvironmentIsLocal } from "./browserTargetResolver";
 import {
   browserViewportSettingKey,
   resolveBrowserViewportLayout,
@@ -55,7 +58,9 @@ export function HostedBrowserWebview(props: {
 }) {
   const { threadRef, tabId, runtimeTabId, initialUrl, viewport, pictureInPicture, zoomFactor } =
     props;
-  const config = usePreviewWebviewConfig(threadRef.environmentId);
+  const preparedConnection = usePreparedConnection(threadRef.environmentId);
+  const environmentIsLoopback = previewEnvironmentIsLocal(Option.getOrNull(preparedConnection));
+  const config = usePreviewWebviewConfig(threadRef.environmentId, environmentIsLoopback);
   const [initialSrc] = useState(() => initialUrl ?? "about:blank");
   const tabLeaseRef = useRef<AcquiredDesktopTab | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);

@@ -1,3 +1,4 @@
+import type { PreparedConnection } from "@t3tools/client-runtime/connection";
 import type {
   BrowserNavigationTarget,
   EnvironmentId,
@@ -5,6 +6,7 @@ import type {
 } from "@t3tools/contracts";
 import { isLoopbackHost, normalizePreviewUrl } from "@t3tools/shared/preview";
 
+import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
 import { readPreparedConnection } from "~/state/session";
 
 export const normalizeHostname = (host: string): string =>
@@ -89,6 +91,28 @@ export const isLocalLoopbackHost = (host: string): boolean => {
   if (normalized === "localhost" || normalized === "::1") return true;
   return parseIpv4Address(normalized)?.[0] === 127;
 };
+
+/**
+ * Local chats (this device, WSL, or any environment already on loopback)
+ * must not use the desktop preview SOCKS tunnel. That path exists to reach
+ * localhost on a remote machine.
+ */
+export function previewEnvironmentIsLocal(
+  connection: {
+    readonly httpBaseUrl: string;
+    readonly target?: PreparedConnection["target"];
+  } | null,
+): boolean {
+  if (connection === null) return true;
+  const target = connection.target;
+  if (target?._tag === "PrimaryConnectionTarget") return true;
+  if (target !== undefined && isDesktopLocalConnectionTarget(target)) return true;
+  try {
+    return isLocalLoopbackHost(new URL(connection.httpBaseUrl).hostname);
+  } catch {
+    return true;
+  }
+}
 
 export const isPrivateNetworkHost = (host: string): boolean => {
   const normalized = normalizeHostname(host);
@@ -215,7 +239,19 @@ export function resolveBrowserNavigationTarget(
       // reports malformed URL errors through its normal navigation path.
     }
     if (parsed && isLoopbackHost(parsed.hostname)) {
-      const environmentUrl = readEnvironmentUrl(environmentId);
+      const connection = readPreparedConnection(environmentId);
+      if (!connection) throw new Error(`Environment ${environmentId} is not connected.`);
+      // Local chats keep localhost on this machine. Rewriting onto a tailnet
+      // or LAN hostname would force the preview through a remote path.
+      if (parsed.hostname !== "0.0.0.0" && previewEnvironmentIsLocal(connection)) {
+        return {
+          requestedUrl: target.url,
+          resolvedUrl: target.url,
+          resolutionKind: "direct",
+          environmentId,
+        };
+      }
+      const environmentUrl = new URL(connection.httpBaseUrl);
       if (parsed.hostname === "0.0.0.0" || !isLocalLoopbackHost(environmentUrl.hostname)) {
         return resolveEnvironmentPortTarget(
           environmentId,

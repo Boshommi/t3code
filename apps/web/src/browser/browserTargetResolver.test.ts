@@ -1,3 +1,4 @@
+import { PrimaryConnectionTarget } from "@t3tools/client-runtime/connection";
 import { EnvironmentId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -38,6 +39,31 @@ describe("browser target resolver", () => {
       resolvedUrl: "http://100.65.180.100:5173/dashboard?mode=test#results",
       resolutionKind: "direct-private-network",
       environmentId: "environment-1",
+    });
+  });
+
+  it("keeps localhost on this device even when the primary URL is a tailnet host", async () => {
+    const environmentId = EnvironmentId.make("environment-1");
+    readPreparedConnection.mockReturnValue({
+      httpBaseUrl: "https://desktop.tail5db3ea.ts.net/",
+      target: new PrimaryConnectionTarget({
+        environmentId,
+        label: "This device",
+        httpBaseUrl: "https://desktop.tail5db3ea.ts.net/",
+        wsBaseUrl: "wss://desktop.tail5db3ea.ts.net/",
+      }),
+    });
+    const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
+    expect(
+      resolveBrowserNavigationTarget(environmentId, {
+        kind: "url",
+        url: "http://localhost:5173/dashboard",
+      }),
+    ).toEqual({
+      requestedUrl: "http://localhost:5173/dashboard",
+      resolvedUrl: "http://localhost:5173/dashboard",
+      resolutionKind: "direct",
+      environmentId,
     });
   });
 

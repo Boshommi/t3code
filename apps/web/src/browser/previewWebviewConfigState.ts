@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
-import type {
-  DesktopPreviewBridge,
-  DesktopPreviewWebviewConfig,
+import {
+  type DesktopPreviewBridge,
+  type DesktopPreviewWebviewConfig,
   EnvironmentId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -43,34 +43,48 @@ export type PreviewWebviewConfigError = typeof PreviewWebviewConfigError.Type;
 
 type PreviewConfigBridge = Pick<DesktopPreviewBridge, "getPreviewConfig">;
 
+const previewWebviewConfigCacheKey = (
+  environmentId: EnvironmentId,
+  environmentIsLoopback: boolean,
+): string => `${environmentId}:${environmentIsLoopback ? "loopback" : "remote"}`;
+
 export const loadPreviewWebviewConfig = (
   environmentId: EnvironmentId,
   bridge: PreviewConfigBridge | null = previewBridge,
+  environmentIsLoopback = true,
 ): Effect.Effect<DesktopPreviewWebviewConfig, PreviewWebviewConfigError> => {
   if (bridge === null) {
     return Effect.fail(new PreviewWebviewBridgeUnavailableError({ environmentId }));
   }
 
   return Effect.tryPromise({
-    try: () => bridge.getPreviewConfig(environmentId),
+    try: () => bridge.getPreviewConfig(environmentId, environmentIsLoopback),
     catch: (cause) => new PreviewWebviewConfigLoadError({ environmentId, cause }),
   });
 };
 
-const previewWebviewConfigAtom = Atom.family((environmentId: EnvironmentId) =>
-  Atom.make(loadPreviewWebviewConfig(environmentId)).pipe(
+const previewWebviewConfigAtom = Atom.family((key: string) => {
+  const separator = key.lastIndexOf(":");
+  const environmentId = EnvironmentId.make(key.slice(0, separator));
+  const environmentIsLoopback = key.slice(separator + 1) !== "remote";
+  return Atom.make(
+    loadPreviewWebviewConfig(environmentId, previewBridge, environmentIsLoopback),
+  ).pipe(
     Atom.swr({
       staleTime: PREVIEW_CONFIG_STALE_TIME_MS,
       revalidateOnMount: true,
     }),
     Atom.setIdleTTL(PREVIEW_CONFIG_IDLE_TTL_MS),
-    Atom.withLabel(`preview:webview-config:${environmentId}`),
-  ),
-);
+    Atom.withLabel(`preview:webview-config:${key}`),
+  );
+});
 
 export function usePreviewWebviewConfig(
   environmentId: EnvironmentId,
+  environmentIsLoopback: boolean,
 ): DesktopPreviewWebviewConfig | null {
-  const result = useAtomValue(previewWebviewConfigAtom(environmentId));
+  const result = useAtomValue(
+    previewWebviewConfigAtom(previewWebviewConfigCacheKey(environmentId, environmentIsLoopback)),
+  );
   return Option.getOrNull(AsyncResult.value(result));
 }

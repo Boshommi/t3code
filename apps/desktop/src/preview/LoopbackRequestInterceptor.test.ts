@@ -6,8 +6,11 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
   attachPreviewLoopbackSession,
+  attachPreviewLoopbackSessionIfRemote,
+  isPreviewLoopbackSessionAttached,
   previewLoopbackProxyBypassRules,
   previewLoopbackProxyRules,
+  shouldAttachPreviewLoopbackProxy,
 } from "./LoopbackRequestInterceptor.ts";
 
 vi.mock("electron", () => ({
@@ -112,6 +115,25 @@ describe("attachPreviewLoopbackSession", () => {
   // answers with a 308 back to the same URL. SOCKS5 keeps it origin-form.
   it("asks Chromium for a SOCKS5 circuit, not an HTTP forward proxy", () => {
     expect(previewLoopbackProxyRules(43_210)).toBe("socks5://127.0.0.1:43210");
+  });
+
+  it("leaves a local environment on Chromium DIRECT", () => {
+    expect(shouldAttachPreviewLoopbackProxy(true)).toBe(false);
+    expect(shouldAttachPreviewLoopbackProxy(undefined)).toBe(false);
+    expect(shouldAttachPreviewLoopbackProxy(false)).toBe(true);
+    const { session, handle, setProxy } = makeSessionMock();
+    void attachPreviewLoopbackSessionIfRemote(session, services, true);
+    expect(setProxy).not.toHaveBeenCalled();
+    expect(handle).not.toHaveBeenCalled();
+    expect(isPreviewLoopbackSessionAttached(session)).toBe(false);
+  });
+
+  it("attaches the loopback proxy only when the environment is remote", () => {
+    const { session, handle, setProxy } = makeSessionMock();
+    void attachPreviewLoopbackSessionIfRemote(session, services, false);
+    expect(setProxy).toHaveBeenCalledTimes(1);
+    expect(handle).toHaveBeenCalledTimes(1);
+    expect(isPreviewLoopbackSessionAttached(session)).toBe(true);
   });
 });
 

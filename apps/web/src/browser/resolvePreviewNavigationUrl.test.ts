@@ -1,3 +1,4 @@
+import { PrimaryConnectionTarget } from "@t3tools/client-runtime/connection";
 import { EnvironmentId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -43,5 +44,36 @@ describe("resolvePreviewNavigationUrl", () => {
       tunnelWebsocketUrl:
         "wss://nucboxevo-x2.tail5db3ea.ts.net/preview-tunnel?wsTicket=ws-ticket&port=4000",
     });
+  });
+
+  it("does not tunnel localhost when the agent environment is already local", async () => {
+    readPreparedConnection.mockReturnValue({
+      httpBaseUrl: "http://127.0.0.1:3773/",
+      httpAuthorization: { _tag: "Bearer", token: "test-token" },
+    });
+    const { resolvePreviewNavigationUrl } = await import("./resolvePreviewNavigationUrl");
+    await expect(
+      resolvePreviewNavigationUrl(EnvironmentId.make("env-local"), "http://localhost:4000"),
+    ).resolves.toBe("http://localhost:4000/");
+    expect(ensureLoopbackForward).not.toHaveBeenCalled();
+  });
+
+  it("does not tunnel localhost for this-device chats even over a tailnet URL", async () => {
+    const environmentId = EnvironmentId.make("env-primary");
+    readPreparedConnection.mockReturnValue({
+      httpBaseUrl: "https://desktop.tail5db3ea.ts.net/",
+      httpAuthorization: null,
+      target: new PrimaryConnectionTarget({
+        environmentId,
+        label: "This device",
+        httpBaseUrl: "https://desktop.tail5db3ea.ts.net/",
+        wsBaseUrl: "wss://desktop.tail5db3ea.ts.net/",
+      }),
+    });
+    const { resolvePreviewNavigationUrl } = await import("./resolvePreviewNavigationUrl");
+    await expect(resolvePreviewNavigationUrl(environmentId, "http://localhost:4000")).resolves.toBe(
+      "http://localhost:4000/",
+    );
+    expect(ensureLoopbackForward).not.toHaveBeenCalled();
   });
 });
