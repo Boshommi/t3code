@@ -159,7 +159,7 @@ interface PromptStashStoreState {
    */
   takeEntry: (entryId: string) => { entry: PromptStashEntry | null; durable: boolean };
   /**
-   * Returns attached=false when the entry is gone (restored or deleted while
+   * Returns attached=false when the entry is gone (deleted while
    * encoding was still running) so the caller can tell the user their images
    * did not make it.
    */

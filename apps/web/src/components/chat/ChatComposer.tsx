@@ -4327,9 +4327,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setIsStashMenuOpen(false);
 
     // An expired upload restores as a needs-reattach row instead of a reference
-    // the next send would fail to verify. Verify BEFORE taking: the take
-    // removes the entry from durable storage, and a tab closed during this
-    // await must still find it there after reload.
+    // the next send would fail to verify.
     const verifications = await Promise.all(
       filesToVerify.map((file) =>
         verifyStashedAttachmentUpload({ environmentId, attachmentId: file.attachmentId }),
@@ -4342,7 +4340,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     );
 
     // A thread switch during the verify await would mix the new thread's
-    // prompt with this invocation's captured target. Nothing was taken yet,
+    // prompt with this invocation's captured target. Nothing changed yet,
     // so abort and leave the entry restorable where the user now is.
     if (
       isRevertingCheckpointRef.current ||
@@ -4351,17 +4349,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       return;
     }
 
-    const { entry, durable } = takeStashEntry(menuEntry.id);
-    if (!entry) return;
-    if (!durable) {
-      toastManager.add({
-        type: "warning",
-        title: "Restored prompt may reappear in the stash",
-        description:
-          "Browser storage rejected the update, so this entry could still be there after a reload.",
-        data: { hideCopyButton: true },
-      });
-    }
+    // Restore copies the saved prompt into the composer; it stays saved until deleted.
+    const entry = menuEntry;
 
     const rewrittenContextIds = entry.records
       ? importContextRecords(entry.records, null, composerDraftTarget)
@@ -4398,15 +4387,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (stashedFiles.length > 0) {
       const composerFilesNow = composerFilesRef.current;
       const existingFileIds = new Set(composerFilesNow.map((file) => file.id));
-      const retainedUploadIds = new Set(
-        composerFilesNow.flatMap((file) =>
-          file.uploadedAttachmentId ? [file.uploadedAttachmentId] : [],
-        ),
-      );
       const existingFileKeys = new Set(composerFilesNow.map(composerFileDedupKey));
       const reattachMarkers = composerFilesNow.filter(composerFileNeedsReattach);
       const restoredMarkerIds = new Set<string>();
-      const duplicateFiles: PersistedComposerFileAttachment[] = [];
       const markerReplacements: ComposerFileAttachment[] = [];
       const appendedFiles: ComposerFileAttachment[] = [];
       for (const file of stashedFiles) {
@@ -4424,12 +4407,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             ? {}
             : { uploadedAttachmentId: file.attachmentId, uploadEnvironmentId: environmentId }),
         };
-        if (existingFileIds.has(file.id)) {
-          if (!expired && !retainedUploadIds.has(file.attachmentId)) {
-            duplicateFiles.push(file);
-          }
-          continue;
-        }
+        if (existingFileIds.has(file.id)) continue;
         const reattachMarker = reattachMarkers.find(
           (marker) =>
             !restoredMarkerIds.has(marker.id) && composerFileMatchesReattachMarker(marker, file),
@@ -4441,24 +4419,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           if (expired) {
             expiredFileNames.push(file.name);
           } else {
-            retainedUploadIds.add(file.attachmentId);
             markerReplacements.push(restored);
           }
           continue;
         }
-        if (existingFileKeys.has(key)) {
-          if (!expired && !retainedUploadIds.has(file.attachmentId)) {
-            duplicateFiles.push(file);
-          }
-          continue;
-        }
+        if (existingFileKeys.has(key)) continue;
         existingFileIds.add(file.id);
         existingFileKeys.add(key);
-        if (expired) {
-          expiredFileNames.push(file.name);
-        } else {
-          retainedUploadIds.add(file.attachmentId);
-        }
+        if (expired) expiredFileNames.push(file.name);
         appendedFiles.push(restored);
       }
       const capacity = remainingComposerAttachmentSlots(
@@ -4468,26 +4436,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const filesToAppend = appendedFiles.slice(0, capacity);
       const skippedFiles = appendedFiles.slice(capacity);
       unrestoredFileNames = skippedFiles.map((file) => file.name);
-      // A non-durable take can resurrect the stash entry after a reload;
-      // deleting these uploads would leave it pointing at nothing.
-      if (durable) {
-        for (const file of duplicateFiles) {
-          releasePersistedAttachmentUpload({
-            id: file.id,
-            environmentId,
-            attachmentId: file.attachmentId,
-          });
-        }
-        for (const file of skippedFiles) {
-          if (file.uploadedAttachmentId) {
-            releasePersistedAttachmentUpload({
-              id: file.id,
-              environmentId,
-              attachmentId: file.uploadedAttachmentId,
-            });
-          }
-        }
-      }
+      // The saved entry still references these uploads, so they are kept.
       const restoredFiles = [...markerReplacements, ...filesToAppend];
       if (restoredFiles.length > 0) {
         addComposerDraftFiles(composerDraftTarget, restoredFiles, { appendReference: true });
@@ -4801,7 +4750,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         toastManager.add({
           type: "warning",
           title: "Stashed images did not attach",
-          description: `That prompt was restored or deleted before ${kept.length} image${kept.length === 1 ? "" : "s"} finished saving. Re-attach ${kept.length === 1 ? "it" : "them"} if you still need ${kept.length === 1 ? "it" : "them"}.`,
+          description: `That prompt was deleted before ${kept.length} image${kept.length === 1 ? "" : "s"} finished saving. Re-attach ${kept.length === 1 ? "it" : "them"} if you still need ${kept.length === 1 ? "it" : "them"}.`,
           data: { hideCopyButton: true },
         });
       }
