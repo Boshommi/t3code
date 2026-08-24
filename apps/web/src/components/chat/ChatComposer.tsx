@@ -4008,6 +4008,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Prompt stash (⌘S)
   // ------------------------------------------------------------------
   // Files remain tied to the environment that owns their uploaded bytes.
+  // Restore copies a saved prompt into the composer; the entry stays until
+  // the user deletes it.
   const stashQueue = usePromptStashStore((state) => state.entries);
   const stashEntryToQueue = usePromptStashStore((state) => state.stashEntry);
   const takeStashEntry = usePromptStashStore((state) => state.takeEntry);
@@ -4050,8 +4052,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       // The server sweeps pending uploads after 24 hours, so ask before
       // reattaching. An expired upload restores as a needs-reattach row
       // instead of a reference the next send would fail to verify. Verify
-      // BEFORE taking: the take removes the entry from durable storage, and a
-      // tab closed during this await must still find it there after reload.
+      // before restoring so an expired upload hydrates as needs-reattach.
       const verifications = await Promise.all(
         filesToVerify.map((file) =>
           verifyStashedAttachmentUpload({ environmentId, attachmentId: file.attachmentId }),
@@ -4073,19 +4074,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return;
       }
 
-      // The take is also the double-activation guard (click + Enter): the
-      // second caller finds the entry gone and stops here.
-      const { entry, durable } = takeStashEntry(menuEntry.id);
-      if (!entry) return;
-      if (!durable) {
-        toastManager.add({
-          type: "warning",
-          title: "Restored prompt may reappear in the stash",
-          description:
-            "Browser storage rejected the update, so this entry could still be there after a reload.",
-          data: { hideCopyButton: true },
-        });
-      }
+      // Restore copies into the composer. Saved prompts stay until deleted.
+      const entry = menuEntry;
 
       const rewrittenContextIds = entry.records
         ? importContextRecords(entry.records, null)
@@ -4262,9 +4252,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               `${attachment.mimeType}\0${attachment.sizeBytes}\0${attachment.name}`,
             ),
         );
-        // Anything past the attachment limit cannot be restored. The entry is
-        // already out of the queue, so report the overflow by name instead of
-        // discarding it silently.
+        // Anything past the attachment limit cannot be restored this time.
+        // The saved prompt stays in the list, so report overflow by name.
         unrestoredImageNames = pending.slice(capacity).map((attachment) => attachment.name);
         const restoredImages = hydrateImagesFromPersisted(pending.slice(0, capacity));
         if (restoredImages.length > 0) {
@@ -4330,7 +4319,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       environmentId,
       promptRef,
       setComposerDraftPrompt,
-      takeStashEntry,
       importContextRecords,
     ],
   );
@@ -4574,13 +4562,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           });
         }
       } else if (kept.length > 0) {
-        // The entry was restored or deleted before its images finished
-        // encoding, so they have nowhere to land. Say so rather than letting
-        // them evaporate.
+        // The entry was deleted before its images finished encoding, so they
+        // have nowhere to land. Say so rather than letting them evaporate.
         toastManager.add({
           type: "warning",
           title: "Stashed images did not attach",
-          description: `That prompt was restored or deleted before ${kept.length} image${kept.length === 1 ? "" : "s"} finished saving. Re-attach ${kept.length === 1 ? "it" : "them"} if you still need ${kept.length === 1 ? "it" : "them"}.`,
+          description: `That prompt was deleted before ${kept.length} image${kept.length === 1 ? "" : "s"} finished saving. Re-attach ${kept.length === 1 ? "it" : "them"} if you still need ${kept.length === 1 ? "it" : "them"}.`,
           data: { hideCopyButton: true },
         });
       }
