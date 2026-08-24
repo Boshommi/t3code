@@ -128,7 +128,7 @@ describe("promptStashStore", () => {
     ]);
   });
 
-  it("takeEntry removes and returns the entry; second take returns null", () => {
+  it("takeEntry deletes the entry; restore does not use this path", () => {
     const store = usePromptStashStore.getState();
     store.stashEntry(makeEntry({ id: "keep" }));
     store.stashEntry(makeEntry({ id: "take" }));
@@ -222,7 +222,7 @@ describe("promptStashStore", () => {
   it("finalizeEntryImages reports false when the entry was already taken", () => {
     const store = usePromptStashStore.getState();
     store.stashEntry({ ...makeEntry({ id: "racing" }), pendingImageCount: 1 });
-    // Restored (or deleted) while its images were still encoding.
+    // Deleted while its images were still encoding.
     store.takeEntry("racing");
 
     const { attached } = store.finalizeEntryImages("racing", {
