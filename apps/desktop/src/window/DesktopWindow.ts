@@ -869,13 +869,13 @@ export const make = Effect.gen(function* () {
     flushMainWindowBounds: Effect.suspend(() => flushMainWindowBounds).pipe(
       Effect.withSpan("desktop.window.flushMainWindowBounds"),
     ),
-    closeMain: Effect.fn("desktop.window.closeMain")(function* () {
+    closeMain: Effect.gen(function* () {
       const window = yield* focusedMainWindow;
       if (Option.isNone(window) || window.value.isDestroyed()) {
         return;
       }
       window.value.close();
-    }),
+    }).pipe(Effect.withSpan("desktop.window.closeMain")),
     dispatchMenuAction: Effect.fn("desktop.window.dispatchMenuAction")(function* (action) {
       yield* Effect.annotateCurrentSpan({ action });
       const existingWindow = yield* focusedMainWindow;

@@ -1,4 +1,4 @@
-// @effect-diagnostics globalConsole:off - WebAuthn setup runs outside Effect; failures must not crash session create.
+// @effect-diagnostics globalConsole:off nodeBuiltinImport:off - WebAuthn setup runs outside Effect and reads Info.plist; failures must not crash session create.
 import { app, BrowserWindow, dialog, webContents, type Session } from "electron";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -47,7 +47,7 @@ export const configurePreviewWebAuthnPlatformAuthenticator = (
       touchID: {
         keychainAccessGroup,
         promptReason: "sign in to $1",
-      },
+      } as { keychainAccessGroup: string },
     });
     configuredPlatformAuthenticator = true;
     return true;

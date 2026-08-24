@@ -2855,6 +2855,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     );
     if (!input.path && repositoryPaths !== null) {
       yield* ensureProjectWorktreeExclude(repositoryPaths.gitCommonDir).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
         Effect.catch((error) =>
           Effect.logWarning("Failed to ignore project worktrees in the main checkout", {
             cwd: input.cwd,
@@ -2918,7 +2920,17 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       sourceCwd: input.cwd,
       worktreePath,
       relativePaths: envRelativePaths,
-    });
+    }).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+      Effect.catch((error) =>
+        Effect.logWarning("Failed to copy env files into the new worktree", {
+          cwd: input.cwd,
+          worktreePath,
+          cause: error,
+        }),
+      ),
+    );
 
     if (input.newRefName && input.baseRefName) {
       const remoteNames = yield* listRemoteNames(input.cwd).pipe(Effect.orElseSucceed(() => []));

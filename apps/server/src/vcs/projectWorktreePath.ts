@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - Pure path helpers used outside Effect; Effect Path is used in ensureProjectWorktreeExclude.
 import * as NodePath from "node:path";
 
 import * as FileSystem from "effect/FileSystem";

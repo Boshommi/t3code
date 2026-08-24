@@ -130,13 +130,12 @@ class ByteReader {
   private buffer = Buffer.alloc(0);
   private readonly waiters: Array<() => void> = [];
   private failed: Error | undefined;
+  private readonly source: ByteSource;
 
-  constructor(
-    private readonly source: ByteSource,
-    initial?: Buffer,
-  ) {
+  constructor(source: ByteSource, initial?: Buffer) {
+    this.source = source;
     if (initial !== undefined && initial.byteLength > 0) {
-      this.buffer = initial;
+      this.buffer = Buffer.from(initial);
     }
     this.source.on("data", this.onData);
     this.source.on("error", this.onError);
@@ -373,7 +372,7 @@ export const runHttpForwardSession = async (
         requestMethodOf(header),
         destLeftover,
       );
-      destLeftover = forwarded.leftover;
+      destLeftover = Buffer.from(forwarded.leftover);
       if (forwarded.upgraded) {
         const leftover = clientReader.detach();
         if (leftover.byteLength > 0) dest.write(leftover);

@@ -173,7 +173,7 @@ export const acceptSocks5Connect = async (
     (result) => result.kind !== "incomplete",
   );
   if (request.kind !== "connect") {
-    socket.end(socks5Reply(request.reply));
+    socket.end(socks5Reply(request.kind === "error" ? request.reply : SOCKS5_REP.generalFailure));
     throw new Error("SOCKS5 request was not a supported CONNECT.");
   }
   return {
