@@ -31,7 +31,8 @@ export const MAX_STASH_ENTRY_ATTACHMENT_CHARS = 2_700_000;
 
 /**
  * Stashed files keep signed-upload references instead of storing their bytes.
- * Image payloads remain subject to the localStorage budget.
+ * Image payloads remain subject to the localStorage budget. Restore copies a
+ * saved prompt into the composer; entries stay until deleted.
  */
 const StashEntrySchema = Schema.Struct({
   id: Schema.String,
@@ -190,7 +191,7 @@ function readPersistedEntries(): ReadonlyArray<PromptStashEntry> | null {
 interface PromptStashStoreState {
   entries: ReadonlyArray<PromptStashEntry>;
   /**
-   * Prepends an entry to the queue, evicting the oldest entry past the cap.
+   * Prepends an entry to the saved list, evicting the oldest entry past the cap.
    * Returns the evicted entry (for messaging) if any.
    */
   stashEntry: (entry: PromptStashEntry) => {
@@ -204,16 +205,16 @@ interface PromptStashStoreState {
     durable: boolean;
   };
   /**
-   * Removes and returns an entry from the queue (restore + delete).
-   * `durable` is false when the removal could not be persisted, meaning a
-   * reload would resurrect the entry.
+   * Deletes an entry. Restore copies the prompt into the composer and leaves
+   * the saved entry in the list. `durable` is false when the removal could
+   * not be persisted, meaning a reload would resurrect the entry.
    */
   takeEntry: (entryId: string) => { entry: PromptStashEntry | null; durable: boolean };
   /**
    * Attaches the encoded images to an entry written earlier by `stashEntry`,
    * clearing its pending count. Returns attached=false when the entry is gone
-   * (restored or deleted while encoding was still running) so the caller can
-   * tell the user their images did not make it.
+   * (deleted while encoding was still running) so the caller can tell the
+   * user their images did not make it.
    */
   finalizeEntryImages: (
     entryId: string,
@@ -253,7 +254,7 @@ export const usePromptStashStore = create<PromptStashStoreState>()((set, get) =>
     const entries = get().entries;
     const index = entries.findIndex((candidate) => candidate.id === entryId);
     const existing = index === -1 ? undefined : entries[index];
-    // Restored or deleted mid-encode: nothing to attach to.
+    // Deleted mid-encode: nothing to attach to.
     if (!existing) return { attached: false, durable: true };
     const nextEntries = [...entries];
     nextEntries[index] = {

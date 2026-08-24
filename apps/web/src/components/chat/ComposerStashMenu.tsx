@@ -32,8 +32,9 @@ function stashEntrySnippet(entry: PromptStashEntry): string {
 /**
  * Attached banner listing the stashed prompts. Opened by the stash badge or ⌘S
  * when the empty composer cannot restore a single entry. Navigated with arrows,
- * restored with Enter, dismissed with Escape. The listener runs capture-phase
- * on window so it wins over the Lexical editor's handlers while the menu is open.
+ * restored with Enter, dismissed with Escape. Restore does not consume the
+ * entry. The listener runs capture-phase on window so it wins over the Lexical
+ * editor's handlers while the menu is open.
  */
 export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
   entries: ReadonlyArray<PromptStashEntry>;
@@ -124,7 +125,7 @@ export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
         <ComposerBanner.Icon>
           <BookmarkIcon />
         </ComposerBanner.Icon>
-        <ComposerBanner.Content className="text-muted-foreground">Stash</ComposerBanner.Content>
+        <ComposerBanner.Content className="text-muted-foreground">Saved</ComposerBanner.Content>
         <ComposerBanner.Actions>
           <ComposerBanner.Count>{entries.length}</ComposerBanner.Count>
           <ComposerBanner.ToggleIcon expanded />
