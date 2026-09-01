@@ -278,6 +278,47 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
     }),
   );
 
+  it.effect("rolls back in-memory Grok turns so checkpoint revert can finish", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("grok-rollback-thread");
+      const wrapperPath = yield* Effect.promise(() => makeMockGrokWrapper());
+      const adapter = yield* makeTestAdapter(wrapperPath);
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("grok"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+      });
+
+      const firstTurn = yield* adapter.sendTurn({
+        threadId,
+        input: "first",
+        attachments: [],
+      });
+      const secondTurn = yield* adapter.sendTurn({
+        threadId,
+        input: "second",
+        attachments: [],
+      });
+
+      const threadBeforeRollback = yield* adapter.readThread(threadId);
+      assert.equal(threadBeforeRollback.turns.length, 2);
+      assert.equal(String(threadBeforeRollback.turns[0]?.id), String(firstTurn.turnId));
+      assert.equal(String(threadBeforeRollback.turns[1]?.id), String(secondTurn.turnId));
+
+      const rolledBack = yield* adapter.rollbackThread(threadId, 1);
+      assert.equal(rolledBack.turns.length, 1);
+      assert.equal(String(rolledBack.turns[0]?.id), String(firstTurn.turnId));
+
+      const threadAfterRollback = yield* adapter.readThread(threadId);
+      assert.equal(threadAfterRollback.turns.length, 1);
+      assert.equal(String(threadAfterRollback.turns[0]?.id), String(firstTurn.turnId));
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("closes the ACP child process when a session stops", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("grok-stop-session-close");
