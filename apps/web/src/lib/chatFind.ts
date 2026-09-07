@@ -5,7 +5,7 @@ import type { TimelineEntry } from "../session-logic";
 
 export interface ChatFindDocument {
   readonly id: string;
-  readonly kind: "message" | "proposed-plan" | "turn-plan";
+  readonly kind: "message" | "proposed-plan";
   readonly turnId: TurnId | null;
   readonly text: string;
 }
@@ -66,24 +66,6 @@ export function collectChatFindDocuments(
         text,
       });
       continue;
-    }
-
-    if (entry.kind === "turn-plan") {
-      const text = [
-        entry.turnPlan.plan.explanation ?? "",
-        ...entry.turnPlan.plan.steps.map((step) => step.step),
-      ]
-        .filter((part) => part.length > 0)
-        .join("\n");
-      if (text.length === 0) {
-        continue;
-      }
-      documents.push({
-        id: entry.id,
-        kind: "turn-plan",
-        turnId: entry.turnPlan.turnId,
-        text,
-      });
     }
   }
 

@@ -127,6 +127,7 @@ export function previewPopupWindowBounds(input: {
   readonly width: number;
   readonly height: number;
   readonly autoHideMenuBar: true;
+  readonly show: true;
 } {
   return {
     width: input.width,

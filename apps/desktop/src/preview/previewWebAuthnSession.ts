@@ -1,4 +1,4 @@
-// @effect-diagnostics globalConsole:off - WebAuthn setup runs outside Effect; failures must not crash session create.
+// @effect-diagnostics globalConsole:off nodeBuiltinImport:off - WebAuthn setup runs outside Effect; plist/team-id reads are sync Electron startup, not Effect FileSystem.
 import { app, BrowserWindow, dialog, webContents, type Session } from "electron";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -46,8 +46,10 @@ export const configurePreviewWebAuthnPlatformAuthenticator = (
     app.configureWebAuthn({
       touchID: {
         keychainAccessGroup,
+        // Electron's published TouchId type omits this; Chromium still uses it
+        // as the passkey prompt template (`$1` is the relying party).
         promptReason: "sign in to $1",
-      },
+      } as { readonly keychainAccessGroup: string },
     });
     configuredPlatformAuthenticator = true;
     return true;
