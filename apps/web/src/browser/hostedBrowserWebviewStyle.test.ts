@@ -28,6 +28,7 @@ describe("resolveHostedBrowserWebviewWrapperStyle", () => {
     expect(
       resolveHostedBrowserWebviewWrapperStyle({
         active: true,
+        renderingActive: true,
         passThroughPointerEvents: true,
         rect: { x: 12, y: 34, width: 800, height: 600 },
         hiddenSize: { width: 1280, height: 800 },

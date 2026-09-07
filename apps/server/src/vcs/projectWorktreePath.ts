@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - these helpers are sync path math for git common-dir layout and have no Effect context.
 import * as NodePath from "node:path";
 
 import * as FileSystem from "effect/FileSystem";

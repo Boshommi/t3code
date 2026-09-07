@@ -75,11 +75,7 @@ export function HostedBrowserWebview(props: {
   const clientSettingsHydrated = useClientSettingsHydrated();
   const preparedConnection = usePreparedConnection(threadRef.environmentId);
   const environmentIsLoopback = previewEnvironmentIsLocal(Option.getOrNull(preparedConnection));
-  const config = usePreviewWebviewConfig(
-    threadRef.environmentId,
-    profileId,
-    environmentIsLoopback,
-  );
+  const config = usePreviewWebviewConfig(threadRef.environmentId, profileId, environmentIsLoopback);
   const [initialSrc] = useState(() => initialUrl ?? "about:blank");
   const tabLeaseRef = useRef<AcquiredDesktopTab | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -312,7 +308,6 @@ export function HostedBrowserWebview(props: {
           src={webviewGeneration === 0 ? initialSrc : recoverySrc}
           partition={config.partition}
           webpreferences={config.webPreferences}
-          allowpopups="true"
           {...(config.preloadUrl ? { preload: config.preloadUrl } : {})}
           data-preview-tab={runtimeTabId}
           data-preview-server-tab={tabId}
