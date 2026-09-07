@@ -3226,7 +3226,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         const existingFileKeys = new Set(composerFilesNow.map(composerFileDedupKey));
         const reattachMarkers = composerFilesNow.filter(composerFileNeedsReattach);
         const restoredMarkerIds = new Set<string>();
-        const duplicateFiles: PersistedComposerFileAttachment[] = [];
         const markerReplacements: ComposerFileAttachment[] = [];
         const appendedFiles: ComposerFileAttachment[] = [];
         for (const file of stashedFiles) {
@@ -3246,9 +3245,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               : { uploadedAttachmentId: file.attachmentId, uploadEnvironmentId: environmentId }),
           };
           if (existingFileIds.has(file.id)) {
-            if (!expired && !retainedUploadIds.has(file.attachmentId)) {
-              duplicateFiles.push(file);
-            }
             continue;
           }
           const reattachMarker = reattachMarkers.find(
@@ -3268,9 +3264,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             continue;
           }
           if (existingFileKeys.has(key)) {
-            if (!expired && !retainedUploadIds.has(file.attachmentId)) {
-              duplicateFiles.push(file);
-            }
             continue;
           }
           existingFileIds.add(file.id);
@@ -3293,26 +3286,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         const filesToAppend = appendedFiles.slice(0, capacity);
         const skippedFiles = appendedFiles.slice(capacity);
         unrestoredFileNames = skippedFiles.map((file) => file.name);
-        // A non-durable take can resurrect the stash entry after a reload;
-        // deleting these uploads would leave it pointing at nothing.
-        if (durable) {
-          for (const file of duplicateFiles) {
-            releasePersistedAttachmentUpload({
-              id: file.id,
-              environmentId,
-              attachmentId: file.attachmentId,
-            });
-          }
-          for (const file of skippedFiles) {
-            if (file.uploadedAttachmentId) {
-              releasePersistedAttachmentUpload({
-                id: file.id,
-                environmentId,
-                attachmentId: file.uploadedAttachmentId,
-              });
-            }
-          }
-        }
         const restoredFiles = [...markerReplacements, ...filesToAppend];
         if (restoredFiles.length > 0) {
           addComposerDraftFiles(composerDraftTarget, restoredFiles);
