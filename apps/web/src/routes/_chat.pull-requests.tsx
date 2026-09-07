@@ -114,6 +114,7 @@ import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { isElectron } from "../env";
 import { resolveShortcutCommand } from "../keybindings";
 import { isTerminalFocused } from "../lib/terminalFocus";
+import { useSyncWindowCloseRightPanelOpen } from "../lib/windowCloseConfirm";
 import { PanelLayoutControls } from "../components/chat/PanelLayoutControls";
 import { Button } from "../components/ui/button";
 import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../components/ui/menu";
@@ -1853,24 +1854,28 @@ function PullRequestsRouteView() {
   };
 
   // This page has no ChatView, so the shared panel handles `rightPanel.close`
-  // itself. With nothing open the event falls through to its native meaning.
+  // itself. With nothing open the desktop overlay confirms a second window close.
   const closeActiveSurfaceFromShortcut = useEffectEvent((event: KeyboardEvent) => {
     if (activePullRequestSurface === null) return;
     event.preventDefault();
     event.stopPropagation();
     if (!event.repeat) closeSurface(activePullRequestSurface);
   });
+  useSyncWindowCloseRightPanelOpen(activePullRequestSurface !== null);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isCommandPaletteOpen()) return;
       const command = resolveShortcutCommand(event, keybindings, {
-        context: { terminalFocus: isTerminalFocused() },
+        context: {
+          terminalFocus: isTerminalFocused(),
+          rightPanelOpen: activePullRequestSurface !== null,
+        },
       });
       if (command === "rightPanel.close") closeActiveSurfaceFromShortcut(event);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [keybindings]);
+  }, [activePullRequestSurface, keybindings]);
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">

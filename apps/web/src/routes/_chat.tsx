@@ -14,10 +14,15 @@ import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
+import { useSyncWindowCloseRightPanelOpen } from "../lib/windowCloseConfirm";
 import { resolveShortcutCommand } from "../keybindings";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { isPreviewSupportedInRuntime } from "../previewStateStore";
-import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
+import {
+  selectActiveRightPanel,
+  selectActiveRightPanelSurface,
+  useRightPanelStore,
+} from "../rightPanelStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { primaryServerKeybindingsAtom } from "~/state/server";
@@ -55,6 +60,12 @@ function ChatRouteGlobalShortcuts() {
       ? selectActiveRightPanel(state.byThreadKey, routeThreadRef) === "preview"
       : false,
   );
+  const rightPanelOpen = useRightPanelStore((state) =>
+    routeThreadRef
+      ? selectActiveRightPanelSurface(state.byThreadKey, routeThreadRef) !== null
+      : false,
+  );
+  useSyncWindowCloseRightPanelOpen(rightPanelOpen);
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
@@ -64,6 +75,7 @@ function ChatRouteGlobalShortcuts() {
           terminalOpen,
           previewFocus: isPreviewFocused(),
           previewOpen,
+          rightPanelOpen,
         },
       });
 
@@ -171,6 +183,7 @@ function ChatRouteGlobalShortcuts() {
     keybindings,
     defaultProjectRef,
     previewOpen,
+    rightPanelOpen,
     projectGroupCount,
     routeThreadRef,
     selectedThreadKeysSize,

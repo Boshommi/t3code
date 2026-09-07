@@ -65,7 +65,8 @@ does not fire while a terminal or the in-app preview has focus.
 ## Reserved shortcuts
 
 In the desktop app, `mod+w` closes the focused terminal or the active right-panel
-tab. When nothing remains to close, it closes the window. In a browser, `mod+w`
+tab. When nothing remains to close, it asks you to press the shortcut again to
+close the window. **File → Close Window** closes immediately. In a browser, `mod+w`
 closes the browser tab; rebind `rightPanel.close` and `terminal.close` to an available
 shortcut such as `alt+w`.
 

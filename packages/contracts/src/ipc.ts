@@ -1159,6 +1159,11 @@ export interface DesktopBridge {
    * them.
    */
   onQuitShortcut?: (listener: (event: QuitShortcutHintEvent) => void) => () => void;
+  /**
+   * Close the desktop window after the renderer has confirmed a second
+   * Cmd/Ctrl+W. Optional: older desktop builds never expose it.
+   */
+  requestWindowClose?: () => Promise<void>;
   getWindowFullscreenState: () => boolean;
   onWindowFullscreenStateChange: (listener: (fullscreen: boolean) => void) => () => void;
   getUpdateState: () => Promise<DesktopUpdateState>;
