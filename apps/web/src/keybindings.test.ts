@@ -117,7 +117,15 @@ const DEFAULT_BINDINGS = compile([
   {
     shortcut: modShortcut("w"),
     command: "rightPanel.close",
-    whenAst: whenNot(whenIdentifier("terminalFocus")),
+    whenAst: whenAnd(whenNot(whenIdentifier("terminalFocus")), whenIdentifier("rightPanelOpen")),
+  },
+  {
+    shortcut: modShortcut("w"),
+    command: "window.close",
+    whenAst: whenAnd(
+      whenNot(whenIdentifier("terminalFocus")),
+      whenNot(whenIdentifier("rightPanelOpen")),
+    ),
   },
   {
     shortcut: modShortcut("d"),
@@ -330,7 +338,7 @@ describe("split/new/close terminal shortcuts", () => {
     assert.equal(
       resolveShortcutCommand(event({ key: "w", metaKey: true }), DEFAULT_BINDINGS, {
         platform: "MacIntel",
-        context: { previewFocus: true, terminalFocus: false },
+        context: { previewFocus: true, terminalFocus: false, rightPanelOpen: true },
       }),
       "rightPanel.close",
     );
@@ -344,9 +352,16 @@ describe("split/new/close terminal shortcuts", () => {
     assert.equal(
       resolveShortcutCommand(event({ key: "w", metaKey: true }), DEFAULT_BINDINGS, {
         platform: "MacIntel",
-        context: { previewFocus: false, terminalFocus: false },
+        context: { previewFocus: false, terminalFocus: false, rightPanelOpen: true },
       }),
       "rightPanel.close",
+    );
+    assert.equal(
+      resolveShortcutCommand(event({ key: "w", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { previewFocus: false, terminalFocus: false },
+      }),
+      "window.close",
     );
   });
 
@@ -450,6 +465,7 @@ describe("shortcutLabelForCommand", () => {
       "⇧⌘F",
     );
     assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, "chat.find", "MacIntel"), "⌘F");
+    assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, "window.close", "MacIntel"), "⌘W");
     assert.strictEqual(
       shortcutLabelForCommand(DEFAULT_BINDINGS, "modelPicker.toggle", "Linux"),
       "Ctrl+Shift+M",
@@ -872,9 +888,16 @@ describe("resolveShortcutCommand", () => {
     assert.strictEqual(
       resolveShortcutCommand(closeEvent, DEFAULT_BINDINGS, {
         platform: "MacIntel",
-        context: { terminalFocus: false },
+        context: { terminalFocus: false, rightPanelOpen: true },
       }),
       "rightPanel.close",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(closeEvent, DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: false },
+      }),
+      "window.close",
     );
   });
 

@@ -87,6 +87,7 @@ const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
     prepareCaptureReveal: Effect.void,
     dispatchMenuAction: (action) => Deferred.succeed(selectedAction, action).pipe(Effect.asVoid),
     dispatchSnapShotEvent: () => Effect.void,
+    closeMain: Effect.void,
     zoomMain: (direction) =>
       Deferred.succeed(selectedAction, `zoom-${direction}`).pipe(Effect.asVoid),
     syncAppearance: Effect.void,
@@ -211,6 +212,24 @@ describe("DesktopApplicationMenu", () => {
         } as unknown as KeyboardEvent,
       );
       assert.isFalse(yield* Deferred.isDone(selectedAction));
+    }),
+  );
+
+  it.effect("does not give the native Close role Cmd+W", () =>
+    Effect.gen(function* () {
+      const selectedAction = yield* Deferred.make<string>();
+      const applicationMenuTemplate =
+        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+
+      yield* configureMenu(selectedAction, applicationMenuTemplate);
+
+      const template = yield* Deferred.await(applicationMenuTemplate);
+      const collectRoles = (items: ReadonlyArray<Electron.MenuItemConstructorOptions>): string[] =>
+        items.flatMap((item) => [
+          ...(typeof item.role === "string" ? [item.role.toLowerCase()] : []),
+          ...(Array.isArray(item.submenu) ? collectRoles(item.submenu) : []),
+        ]);
+      assert.notInclude(collectRoles(template), "close");
     }),
   );
 
