@@ -282,6 +282,7 @@ import {
 } from "./chat/composerProviderState";
 import { confirmTerminalClose, isTerminalCloseConfirmPending } from "../lib/terminalCloseConfirm";
 import { isPreviewFocused } from "../lib/previewFocus";
+import { useSyncWindowCloseRightPanelOpen } from "../lib/windowCloseConfirm";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";
 import {
   preventRepeatedTerminalCloseShortcut,
@@ -2041,6 +2042,7 @@ export default function ChatView(props: ChatViewProps) {
   const activeRightPanelSurface = useRightPanelStore((state) =>
     selectActiveRightPanelSurface(state.byThreadKey, activeThreadRef),
   );
+  useSyncWindowCloseRightPanelOpen(activeRightPanelSurface !== null);
   const activePreviewState = useThreadPreviewState(activeThreadRef);
   const activePreviewServerEpoch = activePreviewState.serverEpoch;
   const resolvePreviewRuntimeTabId = useMemo(
@@ -6695,11 +6697,12 @@ export default function ChatView(props: ChatViewProps) {
       previewFocus: isPreviewFocused(),
       previewOpen: previewPanelOpen,
       editableFocus: isEditableFocused(eventTarget),
+      rightPanelOpen: activeRightPanelSurface !== null,
       modelPickerOpen: composerRef.current?.isModelPickerOpen() ?? false,
       isWeb: !isElectron,
       isDesktop: isElectron,
     }),
-    [composerRef, previewPanelOpen, terminalUiState.terminalOpen],
+    [activeRightPanelSurface, composerRef, previewPanelOpen, terminalUiState.terminalOpen],
   );
 
   useEffect(() => {
@@ -6855,8 +6858,8 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       if (command === "rightPanel.close") {
-        // Nothing open: leave the event alone so the shortcut keeps its
-        // native meaning (close window on desktop, close tab in a browser).
+        // Nothing open: `window.close` is resolved instead so the desktop
+        // overlay can confirm a second press (browsers keep native tab-close).
         if (!activeRightPanelSurface) return;
         event.preventDefault();
         event.stopPropagation();
@@ -7032,6 +7035,7 @@ export default function ChatView(props: ChatViewProps) {
     chatFind.open,
     chatFind.openFind,
     previewPanelOpen,
+    activeRightPanelSurface,
   ]);
 
   // Paste-to-focus: the resting composer blurs on a click into the timeline,

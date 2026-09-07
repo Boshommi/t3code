@@ -39,6 +39,7 @@ export interface ShortcutMatchContext {
   /** A text field, textarea, select or rich-text editor owns the keyboard.
       Optional: only chords that collide with native editing consult it. */
   editableFocus?: boolean;
+  rightPanelOpen: boolean;
   [key: string]: boolean;
 }
 
@@ -153,6 +154,7 @@ function resolveContext(options: ShortcutMatchOptions | undefined): ShortcutMatc
     isWeb: !isElectron,
     isDesktop: isElectron,
     editableFocus: false,
+    rightPanelOpen: false,
     ...options?.context,
   };
 }

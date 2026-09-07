@@ -123,6 +123,7 @@ import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { isElectron } from "../env";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import { isTerminalFocused } from "../lib/terminalFocus";
+import { useSyncWindowCloseRightPanelOpen } from "../lib/windowCloseConfirm";
 import { PanelLayoutControls } from "../components/chat/PanelLayoutControls";
 import { Button } from "../components/ui/button";
 import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../components/ui/menu";
@@ -2023,6 +2024,7 @@ function PullRequestsRouteView() {
   };
 
   // This page has no ChatView, so it handles the shared panel shortcuts itself.
+  // With nothing open the desktop overlay confirms a second window close.
   const copyPullRequestFromShortcut = useEffectEvent((event: KeyboardEvent) => {
     if (!openPanelPullRequestUrl) return;
     event.preventDefault();
@@ -2055,11 +2057,15 @@ function PullRequestsRouteView() {
     event.stopPropagation();
     if (!event.repeat) toggleRightPanel();
   });
+  useSyncWindowCloseRightPanelOpen(activePullRequestSurface !== null);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isCommandPaletteOpen()) return;
       const command = resolveShortcutCommand(event, keybindings, {
-        context: getShortcutContext(),
+        context: {
+          ...getShortcutContext(),
+          rightPanelOpen: activePullRequestSurface !== null,
+        },
       });
       if (command === "rightPanel.close") closeActiveSurfaceFromShortcut(event);
       if (command === "rightPanel.toggle") toggleRightPanelFromShortcut(event);
@@ -2068,7 +2074,7 @@ function PullRequestsRouteView() {
     // Let panel shortcuts consume Escape before page navigation at window.
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [keybindings]);
+  }, [activePullRequestSurface, keybindings]);
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
