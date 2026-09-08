@@ -92,6 +92,10 @@ describe("parseMarkdownFileLink", () => {
     ["AGENTS.md", "AGENTS.md"],
     ["script.ts:10", "script.ts"],
     ["/tmp/clip%23one.mp4#t=2", "/tmp/clip#one.mp4"],
+    [
+      "/home/wsl.grok/sessions/%2Fhome%2Fwsl%2Fproj%2F.t3%2Fworktrees%2Ft3code-90f0a8fd/01a07e4e-b1fc-7173-afcc-8403670aa057/images/1.jpg",
+      "/home/wsl.grok/sessions/%2Fhome%2Fwsl%2Fproj%2F.t3%2Fworktrees%2Ft3code-90f0a8fd/01a07e4e-b1fc-7173-afcc-8403670aa057/images/1.jpg",
+    ],
   ])("recognizes %s as a file", (href, path) => {
     expect(parseMarkdownFileLink(href)?.path).toBe(path);
   });

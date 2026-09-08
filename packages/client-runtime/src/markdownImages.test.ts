@@ -34,6 +34,11 @@ describe("classifyMarkdownImageSource", () => {
     ["C:/Users/dara/project/image.png", null, "C:/Users/dara/project/image.png"],
     ["\\\\server\\share\\image.png", null, "\\\\server\\share\\image.png"],
     ["file:///workspace/project/image%20one.png", null, "/workspace/project/image one.png"],
+    [
+      "/home/wsl.grok/sessions/%2Fhome%2Fwsl%2Fproj%2F.t3%2Fworktrees%2Ft3code-90f0a8fd/01a07e4e-b1fc-7173-afcc-8403670aa057/images/1.jpg",
+      null,
+      "/home/wsl.grok/sessions/%2Fhome%2Fwsl%2Fproj%2F.t3%2Fworktrees%2Ft3code-90f0a8fd/01a07e4e-b1fc-7173-afcc-8403670aa057/images/1.jpg",
+    ],
     ["file:///C:/Users/dara/project/image.png", null, "C:/Users/dara/project/image.png"],
     ["file://localhost/C:/Users/dara/project/image.png", null, "C:/Users/dara/project/image.png"],
     ["file://server/share/image.png", null, "\\\\server\\share\\image.png"],

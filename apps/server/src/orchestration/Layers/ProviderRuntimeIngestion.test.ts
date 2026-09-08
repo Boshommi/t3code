@@ -272,6 +272,7 @@ describe("ProviderRuntimeIngestion", () => {
     });
     const workspaceRoot = NodePath.join(repositoryRoot, options?.workspaceSubdirectory ?? "");
     NodeFS.mkdirSync(workspaceRoot, { recursive: true });
+    const serverHome = makeTempDir("t3-provider-home-");
     const provider = createProviderServiceHarness();
     const sqlCounter = makeSqlStatementCounter();
     const orchestrationLayer = OrchestrationEngineLive.pipe(
@@ -309,7 +310,7 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provideMerge(makeTestServerSettingsLayer(options?.serverSettings)),
       Layer.provideMerge(CheckpointStore.layer.pipe(Layer.provide(VcsDriverRegistry.layer))),
       Layer.provideMerge(VcsProcess.layer),
-      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), serverHome)),
       Layer.provideMerge(NodeServices.layer),
       Layer.provideMerge(Layer.succeed(Tracer.Tracer, sqlCounter.tracer)),
     );
@@ -396,6 +397,7 @@ describe("ProviderRuntimeIngestion", () => {
       sqlCount: sqlCounter.count,
       setProviderSession: provider.setSession,
       drain,
+      attachmentsDir: NodePath.join(serverHome, "userdata", "attachments"),
     };
   }
 
@@ -1396,6 +1398,82 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(message?.text).toBe("hello world");
     expect(message?.streaming).toBe(false);
+  });
+
+  it("copies Grok session images into thread attachments when the assistant message completes", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    const grokRoot = makeTempDir("t3-grok-session-");
+    const sessionId = "01a07e4e-b1fc-7173-afcc-8403670aa057";
+    const encodedCwd = encodeURIComponent("/tmp/proj");
+    const grokImagePath = NodePath.join(
+      grokRoot,
+      "sessions",
+      encodedCwd,
+      sessionId,
+      "images",
+      "1.jpg",
+    );
+    NodeFS.mkdirSync(NodePath.dirname(grokImagePath), { recursive: true });
+    NodeFS.writeFileSync(grokImagePath, Buffer.from("jpeg-bytes"));
+
+    await harness.emitAndDrain([
+      {
+        type: "content.delta",
+        eventId: asEventId("evt-grok-image-delta"),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: now,
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-grok-image"),
+        itemId: asItemId("item-grok-image"),
+        payload: {
+          streamKind: "assistant_text",
+          delta: `See ![diagram](${grokImagePath})`,
+        },
+      },
+      {
+        type: "item.completed",
+        eventId: asEventId("evt-grok-image-completed"),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: now,
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-grok-image"),
+        itemId: asItemId("item-grok-image"),
+        payload: {
+          itemType: "assistant_message",
+          status: "completed",
+        },
+      },
+    ]);
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-grok-image" &&
+          !message.streaming &&
+          (message.attachments?.length ?? 0) > 0,
+      ),
+    );
+    const message = thread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-grok-image",
+    );
+    expect(message?.streaming).toBe(false);
+    expect(message?.text).toContain(`![diagram](${harness.attachmentsDir}/`);
+    expect(message?.text).not.toContain("/sessions/");
+    expect(message?.attachments).toEqual([
+      expect.objectContaining({
+        type: "image",
+        name: "1.jpg",
+        mimeType: "image/jpeg",
+        sizeBytes: "jpeg-bytes".length,
+      }),
+    ]);
+    expect(NodeFS.existsSync(grokImagePath)).toBe(true);
+    expect(
+      NodeFS.readFileSync(
+        NodePath.join(harness.attachmentsDir, `${message?.attachments?.[0]?.id}.jpg`),
+      ),
+    ).toEqual(Buffer.from("jpeg-bytes"));
   });
 
   it("uses assistant item completion detail when no assistant deltas were streamed", async () => {

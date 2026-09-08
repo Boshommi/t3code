@@ -49,6 +49,7 @@ import {
   type ProviderRuntimeIngestionShape,
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { projectActivityPayload } from "../ActivityPayloadProjection.ts";
+import { ingestGrokSessionMarkdownImages } from "../../assets/ingestGrokSessionMarkdownImages.ts";
 import { forkParked } from "../../serverActivation.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { canReplaceThreadTitle } from "../threadTitles.ts";
@@ -1231,6 +1232,8 @@ const make = Effect.gen(function* () {
             ? input.fallbackText!
             : "";
       const hasRenderableText = hasRenderableAssistantText(text);
+      const existingMessage = yield* getThreadMessageById(input.threadId, input.messageId);
+      const fullText = `${existingMessage?.text ?? ""}${text}`;
 
       if (hasRenderableText) {
         yield* orchestrationEngine.dispatch({
@@ -1245,11 +1248,18 @@ const make = Effect.gen(function* () {
       }
 
       if (input.hasProjectedMessage || hasRenderableText) {
+        const ingested = yield* ingestGrokSessionMarkdownImages({
+          threadId: input.threadId,
+          text: fullText,
+        });
         yield* orchestrationEngine.dispatch({
           type: "thread.message.assistant.complete",
           commandId: yield* providerCommandId(input.event, input.commandTag),
           threadId: input.threadId,
           messageId: input.messageId,
+          ...(ingested.attachments.length > 0
+            ? { text: ingested.text, attachments: ingested.attachments }
+            : {}),
           ...(input.turnId ? { turnId: input.turnId } : {}),
           createdAt: input.createdAt,
         });

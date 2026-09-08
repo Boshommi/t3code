@@ -49,6 +49,7 @@ import * as ServerConfig from "../config.ts";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as NativeAppIconResolver from "./NativeAppIconResolver.ts";
+import { encodedGrokSessionMediaPath } from "./grokSessionMediaPath.ts";
 import { openMediaFile, readMediaFileHeader, type OpenMediaFile } from "./MediaFile.ts";
 
 export const ASSET_ROUTE_PREFIX = "/api/assets";
@@ -288,11 +289,22 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
           );
         requestedPath = path.resolve(workspaceRoot, requestedPath);
       }
-      const canonicalFile = yield* resolveCanonicalFile(requestedPath).pipe(
+      let canonicalFile = yield* resolveCanonicalFile(requestedPath).pipe(
         Effect.mapError(
           (cause) => new AssetWorkspaceAssetInspectionError({ resource: input.resource, cause }),
         ),
       );
+      if (!canonicalFile) {
+        const grokSessionPath = encodedGrokSessionMediaPath(requestedPath);
+        canonicalFile = grokSessionPath
+          ? yield* resolveCanonicalFile(grokSessionPath).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new AssetWorkspaceAssetInspectionError({ resource: input.resource, cause }),
+              ),
+            )
+          : null;
+      }
       if (!canonicalFile) {
         return yield* new AssetWorkspaceAssetNotFoundError({ resource: input.resource });
       }

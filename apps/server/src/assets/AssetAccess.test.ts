@@ -107,6 +107,35 @@ describe("AssetAccess", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
+  it.effect("serves a Grok session image whose markdown path decoded the cwd segment", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const grokHome = yield* fs.makeTempDirectoryScoped({ prefix: "t3-grok-home-" });
+      const sessionId = "01a07e4e-b1fc-7173-afcc-8403670aa057";
+      const encodedCwd = encodeURIComponent("/home/wsl/proj/.t3/worktrees/t3code-90f0a8fd");
+      const imageDir = path.join(grokHome, "sessions", encodedCwd, sessionId, "images");
+      yield* fs.makeDirectory(imageDir, { recursive: true });
+      const imagePath = path.join(imageDir, "1.jpg");
+      yield* fs.writeFileString(imagePath, "jpeg-bytes");
+      const decodedPath = `${grokHome}/sessions/home/wsl/proj/.t3/worktrees/t3code-90f0a8fd/${sessionId}/images/1.jpg`;
+
+      const result = yield* issueAssetUrl({
+        resource: { _tag: "media-file", threadId: ThreadId.make("thread-1"), path: decodedPath },
+        workspaceRoot: grokHome,
+      });
+      const suffix = result.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+      const separator = suffix.indexOf("/");
+      expect(
+        yield* resolveAsset(suffix.slice(0, separator), suffix.slice(separator + 1)),
+      ).toMatchObject({
+        kind: "file",
+        path: yield* fs.realPath(imagePath),
+        mimeType: "image/jpeg",
+      });
+    }).pipe(Effect.provide(testLayer)),
+  );
+
   it.effect("resolves relative media paths from the thread workspace, including outside it", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

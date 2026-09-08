@@ -168,6 +168,22 @@ describe("ChatMarkdown workspace images", () => {
       { _tag: "media-file", threadId: threadRef.threadId, path: "/tmp/embed-test/2.png" },
       { _tag: "media-file", threadId: threadRef.threadId, path: "/tmp/embed-test/5.png" },
     ]);
+  });
+
+  it("keeps a Grok session image path encoded so the remote host can find the file", () => {
+    const grokPath =
+      "/home/wsl.grok/sessions/%2Fhome%2Fwsl%2Fproj%2F.t3%2Fworktrees%2Ft3code-90f0a8fd/01a07e4e-b1fc-7173-afcc-8403670aa057/images/1.jpg";
+    const html = renderToStaticMarkup(
+      <ChatMarkdown
+        cwd="/workspace/project"
+        threadRef={threadRef}
+        text={`![diagram](${grokPath})`}
+      />,
+    );
+
+    expect(testState.resources).toEqual([
+      { _tag: "media-file", threadId: threadRef.threadId, path: grokPath },
+    ]);
     expect(html).not.toContain("Image unavailable");
   });
 
