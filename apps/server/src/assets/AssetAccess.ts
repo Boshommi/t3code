@@ -52,6 +52,7 @@ import * as ServerConfig from "../config.ts";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as NativeAppIconResolver from "./NativeAppIconResolver.ts";
+import { encodedGrokSessionMediaPath } from "./grokSessionMediaPath.ts";
 import { openMediaFile, readMediaFileHeader, type OpenMediaFile } from "./MediaFile.ts";
 
 export const ASSET_ROUTE_PREFIX = "/api/assets";
@@ -285,11 +286,22 @@ const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMe
     readonly expiresAt: number;
   }) {
     const path = yield* Path.Path;
-    const canonicalFile = yield* resolveCanonicalFile(input.requestedPath).pipe(
+    let canonicalFile = yield* resolveCanonicalFile(input.requestedPath).pipe(
       Effect.mapError(
         (cause) => new AssetWorkspaceAssetInspectionError({ resource: input.resource, cause }),
       ),
     );
+    if (!canonicalFile) {
+      const grokSessionPath = encodedGrokSessionMediaPath(input.requestedPath);
+      canonicalFile = grokSessionPath
+        ? yield* resolveCanonicalFile(grokSessionPath).pipe(
+            Effect.mapError(
+              (cause) =>
+                new AssetWorkspaceAssetInspectionError({ resource: input.resource, cause }),
+            ),
+          )
+        : null;
+    }
     if (!canonicalFile) {
       return yield* new AssetWorkspaceAssetNotFoundError({ resource: input.resource });
     }

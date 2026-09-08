@@ -189,6 +189,22 @@ export function safeDecodeURIComponent(value: string): string {
   }
 }
 
+/**
+ * Decode a markdown filesystem destination without turning `%2F` into `/`.
+ * Grok session directories store the cwd as one percent-encoded segment
+ * (`%2Fhome%2Fproj`). Whole-string decodeURIComponent would collapse that
+ * into nested folders that do not exist on disk.
+ */
+export function decodeMarkdownFilesystemPath(value: string): string {
+  return value.replace(/%(?!2F)([0-9A-Fa-f]{2})/gi, (match, hex: string) => {
+    try {
+      return decodeURIComponent(`%${hex}`);
+    } catch {
+      return match;
+    }
+  });
+}
+
 export function normalizeMarkdownLinkDestination(value: string): string {
   const trimmed = value.trim();
   return trimmed.startsWith("<") && trimmed.endsWith(">") ? trimmed.slice(1, -1) : trimmed;
@@ -307,7 +323,7 @@ export function parseMarkdownFileLink(href: string): FilePathPosition | null {
     (normalized.toLowerCase().startsWith("file:") ? parseFileUrlHref(normalized) : null) ??
     splitMarkdownLinkSearchAndHash(normalized);
   // A percent-encoded drive colon (`/c%3A/`) only becomes strippable once decoded.
-  const path = stripSlashPrefixedWindowsDrive(safeDecodeURIComponent(source.path.trim()));
+  const path = stripSlashPrefixedWindowsDrive(decodeMarkdownFilesystemPath(source.path.trim()));
   const hash = safeDecodeURIComponent(source.hash.trim());
   if (path.length === 0 || hasExternalScheme(path)) return null;
 
