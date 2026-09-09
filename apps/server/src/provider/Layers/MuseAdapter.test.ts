@@ -244,6 +244,7 @@ it.layer(museAdapterTestLayer)("MuseAdapterLive", (it) => {
       const start = requests.find((request) => request.method === "session/start");
       assert.equal(start?.params?.approvalMode, "promptUnmatched");
       assert.equal(start?.params?.modelId, "muse-spark-1.3");
+      assert.equal(start?.params?.providerId, "meta");
       const turnStart = requests.find((request) => request.method === "turn/start");
       assert.deepEqual(turnStart?.params?.input, [{ type: "text", text: "hello muse" }]);
       assert.match(String(turnStart?.params?.commandId), /^[0-9a-f-]{36}$/);
@@ -451,7 +452,7 @@ it.layer(museAdapterTestLayer)("MuseAdapterLive", (it) => {
       yield* Deferred.await(collected.turnCompleted);
       const requests = yield* Effect.promise(() => readRequests(requestLogPath));
       const setModel = requests.find((request) => request.method === "session/setModel");
-      assert.deepEqual(setModel?.params?.model, { modelId: "muse-spark-1.2" });
+      assert.deepEqual(setModel?.params?.model, { modelId: "muse-spark-1.2", providerId: "meta" });
       const turnStart = requests.find((request) => request.method === "turn/start");
       assert.equal(turnStart?.params?.reasoningEffort, "low");
       const sessions = yield* adapter.listSessions();

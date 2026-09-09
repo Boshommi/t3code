@@ -59,6 +59,7 @@ it.layer(NodeServices.layer)("MuseTextGeneration", (it) => {
       const start = requests.find((request) => request.method === "session/start");
       assert.equal(start?.params.approvalMode, "denyUnmatched");
       assert.equal(start?.params.modelId, "muse-spark-1.3");
+      assert.equal(start?.params.providerId, "meta");
       const turn = requests.find((request) => request.method === "turn/start");
       assert.equal(turn?.params.reasoningEffort, "minimal");
     }),

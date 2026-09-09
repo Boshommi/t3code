@@ -38,7 +38,7 @@ import {
   sanitizePrTitle,
   sanitizeThreadTitle,
 } from "./TextGenerationUtils.ts";
-import { makeUuidV7, withMspHost } from "../provider/msp/MspConnection.ts";
+import { makeUuidV7, resolveMspModelRoute, withMspHost } from "../provider/msp/MspConnection.ts";
 import {
   MSP_REASONING_EFFORTS,
   MspItemLifecycleParams,
@@ -135,7 +135,7 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
                 commandId: yield* makeUuidV7(),
                 workspaceRoot: cwd,
                 approvalMode: "denyUnmatched",
-                modelId: modelSelection.model,
+                ...(yield* resolveMspModelRoute(connection, modelSelection.model)),
               },
               MspSessionStartResult,
             );
