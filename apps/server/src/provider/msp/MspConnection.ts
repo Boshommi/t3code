@@ -23,7 +23,12 @@ import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
-import { MSP_CLIENT_NAME, MspErrorData, MspInitializeResult } from "./MspProtocol.ts";
+import {
+  MSP_CLIENT_NAME,
+  MspErrorData,
+  MspInitializeResult,
+  MspModelListResult,
+} from "./MspProtocol.ts";
 
 export class MspSpawnError extends Schema.TaggedErrorClass<MspSpawnError>()("MspSpawnError", {
   command: Schema.String,
@@ -358,6 +363,21 @@ export const makeMspConnection = Effect.fn("makeMspConnection")(function* (
     awaitTermination: Deferred.await(termination),
     isTerminated: Ref.get(terminationRef).pipe(Effect.map(Option.isSome)),
   } satisfies MspConnection;
+});
+
+/**
+ * Muse routes a session by `{ modelId, providerId }`. Sending a bare `modelId` makes Muse 1.1.x
+ * fall back to an internal `muse` provider route that cannot replay image history, so every
+ * model selection is paired with the provider the host's own catalog lists for that model.
+ */
+export const resolveMspModelRoute = Effect.fn("resolveMspModelRoute")(function* (
+  connection: MspConnection,
+  modelId: string,
+) {
+  const catalog = yield* connection.request("model/list", {}, MspModelListResult);
+  const entry = catalog.models.find((model) => model.modelId === modelId);
+  const providerId = entry?.providerId ?? catalog.providerId;
+  return providerId ? { modelId, providerId } : { modelId };
 });
 
 /** LSP-style handshake: `initialize` request, then the `initialized` notification. */
