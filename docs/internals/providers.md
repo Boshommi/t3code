@@ -35,6 +35,18 @@ client connections and provider-instance rebuilds. Releases are immutable, with 
 selecting the version for new processes. Running processes hold leases on their version. Updates
 and removal must respect those leases instead of replacing executables under a running agent.
 
+Muse Code runs one `muse serve` host per thread. The host's sandbox posture is fixed for its
+lifetime and only approval mode is negotiable over the wire, so full access is the one runtime
+mode that changes the spawn arguments; every other mode keeps Muse's OS sandbox. Approvals are
+answered against the requirement reference from the latest `approval/requested` or
+`approval/updated` notification, not the one T3 first saw: multi-stage approvals advance that
+reference, and the host rejects a decide that names a stale stage. A turn stays open after the
+final reply while Muse runs its background reminder agents, so `turn/completed` can trail the
+answer by a minute; text generation therefore returns on the answer item instead. Muse's
+memory-only host (`--no-session-log`) accepts turns without running them, so throwaway sessions
+use a T3-owned data directory instead. See the
+[adapter](../../apps/server/src/provider/Layers/MuseAdapter.ts).
+
 ## Setup must not happen as a health-check side effect
 
 Opening a provider session can start MCP servers, run hooks, or launch a login browser.
