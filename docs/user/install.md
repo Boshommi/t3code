@@ -73,6 +73,7 @@ computer.
 | Claude      | Install [Claude Code](https://claude.com/product/claude-code), then run `claude auth login`. |
 | Cursor      | Install [Cursor CLI](https://cursor.com/cli), then run `agent login`.                        |
 | Grok Build  | Install [Grok Build CLI](https://x.ai/cli), then run `grok login`.                           |
+| Muse Code   | Install [Muse Code](https://dev.meta.ai/docs/muse-code/), then run `muse login`.             |
 | OpenCode    | Install [OpenCode](https://opencode.ai), then run `opencode auth login`.                     |
 | Antigravity | Install and sign in with Google from T3 Code's provider settings.                            |
 

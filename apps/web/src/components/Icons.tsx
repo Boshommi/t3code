@@ -219,6 +219,20 @@ export const GrokIcon: Icon = ({ className, ...props }) => (
   </svg>
 );
 
+export const MuseIcon: Icon = ({ className, ...props }) => (
+  <svg
+    {...props}
+    viewBox="0 0 24 24"
+    fill="none"
+    className={cn("stroke-[#0F0F0F] dark:stroke-[#F5F5F5]", className)}
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M4 19V5l8 9 8-9v14" />
+  </svg>
+);
+
 export const TraeIcon: Icon = (props) => (
   <svg {...props} viewBox="0 0 24 24" fill="currentColor">
     {/* Back rectangle: left strip + bottom strip drawn separately — empty bottom-left corner is the gap between them */}

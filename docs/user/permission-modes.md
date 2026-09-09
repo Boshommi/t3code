@@ -25,6 +25,9 @@ including OpenCode and Antigravity, fall back to asking.
 For Grok, **Always allow this session** remembers the matching command or tool input. Other
 actions still require approval.
 
+Muse Code keeps its own sandbox in every mode except **Full access**, and **Always allow** saves a
+workspace rule in Muse's own settings rather than in T3 Code.
+
 Antigravity can still send native approval requests in **Full access**. It only offers remembered
 approvals for actions that support them.
 
