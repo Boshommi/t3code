@@ -66,6 +66,7 @@ import {
   type MspError,
   type MspNotification,
   type MspTransportError,
+  resolveMspModelRoute,
 } from "../msp/MspConnection.ts";
 import {
   type MspApprovalChoice,
@@ -1250,13 +1251,16 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
     Effect.gen(function* () {
       const requested = nonEmpty(modelSelection?.model);
       if (!requested || requested === ctx.currentModelId) return;
+      const model = yield* resolveMspModelRoute(ctx.connection, requested).pipe(
+        Effect.mapError(toRequestError("model/list")),
+      );
       yield* ctx.connection
         .request(
           "session/setModel",
           {
             commandId: yield* commandId(),
             sessionId: ctx.museSessionId,
-            model: { modelId: requested },
+            model,
           },
           Schema.Unknown,
         )
@@ -1329,7 +1333,11 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
                     commandId: yield* commandId(),
                     workspaceRoot: cwd,
                     approvalMode,
-                    ...(requestedModel ? { modelId: requestedModel } : {}),
+                    ...(requestedModel
+                      ? yield* resolveMspModelRoute(connection, requestedModel).pipe(
+                          Effect.mapError(toRequestError("model/list")),
+                        )
+                      : {}),
                   },
                   MspSessionStartResult,
                 )

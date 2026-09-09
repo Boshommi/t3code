@@ -84,6 +84,7 @@ export const MspModelCatalogEntry = Schema.Struct({
   modelId: Schema.String,
   displayLabel: Schema.optional(Schema.String),
   description: Schema.optional(Schema.NullOr(Schema.String)),
+  providerId: Schema.optional(Schema.String),
   isDefault: Schema.optional(Schema.Boolean),
   isActive: Schema.optional(Schema.Boolean),
   contextLimit: Schema.optional(Schema.NullOr(Schema.Number)),
