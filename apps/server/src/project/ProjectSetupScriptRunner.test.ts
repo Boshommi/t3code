@@ -68,6 +68,7 @@ const makeTerminalManagerLayer = (overrides: TerminalOverrides) =>
     close: () => Effect.void,
     subscribe: () => Effect.succeed(() => undefined),
     subscribeMetadata: () => Effect.succeed(() => undefined),
+    list: () => Effect.succeed([]),
     ...overrides,
   });
 
