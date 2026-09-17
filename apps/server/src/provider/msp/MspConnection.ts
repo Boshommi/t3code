@@ -30,7 +30,7 @@ import {
   MspModelListResult,
 } from "./MspProtocol.ts";
 
-export class MspSpawnError extends Schema.TaggedErrorClass<MspSpawnError>()("MspSpawnError", {
+export class MspSpawnError extends Schema.TaggedError<MspSpawnError>()("MspSpawnError", {
   command: Schema.String,
   cause: Schema.optional(Schema.Defect()),
 }) {
@@ -40,7 +40,7 @@ export class MspSpawnError extends Schema.TaggedErrorClass<MspSpawnError>()("Msp
 }
 
 /** The host answered a request with a JSON-RPC error frame. */
-export class MspRequestError extends Schema.TaggedErrorClass<MspRequestError>()("MspRequestError", {
+export class MspRequestError extends Schema.TaggedError<MspRequestError>()("MspRequestError", {
   method: Schema.String,
   code: Schema.optional(Schema.Number),
   detail: Schema.String,
@@ -54,7 +54,7 @@ export class MspRequestError extends Schema.TaggedErrorClass<MspRequestError>()(
 }
 
 /** The host process ended or its stdio broke; every pending request fails with this. */
-export class MspTransportError extends Schema.TaggedErrorClass<MspTransportError>()(
+export class MspTransportError extends Schema.TaggedError<MspTransportError>()(
   "MspTransportError",
   {
     reason: Schema.Literals(["process-exited", "stream-ended", "write-failed", "read-failed"]),

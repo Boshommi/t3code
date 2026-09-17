@@ -23,7 +23,7 @@ import {
   failEnvironmentScopeRequired,
 } from "../auth/http.ts";
 
-export class PreviewLoopbackTunnelError extends Schema.TaggedErrorClass<PreviewLoopbackTunnelError>()(
+export class PreviewLoopbackTunnelError extends Schema.TaggedError<PreviewLoopbackTunnelError>()(
   "PreviewLoopbackTunnelError",
   {
     port: Schema.Number,

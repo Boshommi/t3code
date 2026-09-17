@@ -24,6 +24,7 @@ const makeThread = (
   interactionMode: "default",
   branch: "feature",
   worktreePath: "/repo",
+  pullRequests: [],
   latestTurn: null,
   createdAt: SIX_MINUTES_AGO,
   updatedAt: SIX_MINUTES_AGO,
