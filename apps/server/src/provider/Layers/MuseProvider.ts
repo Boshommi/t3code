@@ -2,8 +2,9 @@
  * MuseProvider — install, login, and model discovery for Meta's Muse Code CLI.
  *
  * The health check runs `muse --version`, reads login state from the credential
- * file Muse writes, and lists models over a throwaway MSP host. Listing needs no
- * session, so the probe never opens a browser or touches the workspace.
+ * file Muse writes, and lists models plus subscription usage over a throwaway
+ * MSP host. Neither read needs a session, so the probe never opens a browser
+ * or touches the workspace.
  *
  * @module provider/Layers/MuseProvider
  */
@@ -49,12 +50,14 @@ import {
   MSP_DEFAULT_REASONING_EFFORT,
   MSP_REASONING_EFFORTS,
   MspModelListResult,
+  MspUsageReadResult,
   type MspModelCatalogEntry,
+  type MspSubscriptionUsage,
 } from "../msp/MspProtocol.ts";
+import { museUsageToLimits } from "./museUsageLimits.ts";
 
 const MUSE_PRESENTATION = {
   displayName: "Muse Code",
-  badgeLabel: "Early Access",
   showInteractionModeToggle: false,
 } as const;
 
@@ -71,6 +74,7 @@ const REASONING_EFFORT_LABELS: Record<(typeof MSP_REASONING_EFFORTS)[number], st
   medium: "Medium",
   high: "High",
   xhigh: "Extra High",
+  max: "Max",
   ultra: "Ultra",
 };
 
@@ -92,7 +96,7 @@ export const MUSE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilitie
 const MUSE_BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
     slug: MUSE_DEFAULT_MODEL,
-    name: "Muse Spark 1.3 (contributor)",
+    name: "Muse Spark 1.3",
     isCustom: false,
     isDefault: true,
     capabilities: MUSE_MODEL_CAPABILITIES,
@@ -116,25 +120,37 @@ function displayNameFromMuseModelId(modelId: string): string {
   return contributor ? `${name} (contributor)` : name;
 }
 
-/** Catalog entries from `model/list`, with Muse's own default marked. */
+/**
+ * Catalog entries from `model/list`. Muse's catalog may mark no default row
+ * at all (1.3 ships a bundled catalog that does not), so T3's own default
+ * wins when listed and the first row otherwise. A label that merely repeats
+ * the id is prettified.
+ */
 export function buildMuseModelsFromCatalog(
   entries: ReadonlyArray<MspModelCatalogEntry>,
 ): ReadonlyArray<ServerProviderModel> {
   const seen = new Set<string>();
-  return entries.flatMap((entry): ServerProviderModel[] => {
+  const models = entries.flatMap((entry): ServerProviderModel[] => {
     const slug = entry.modelId.trim();
     if (!slug || seen.has(slug)) return [];
     seen.add(slug);
+    const label = entry.displayLabel?.trim();
     return [
       {
         slug,
-        name: entry.displayLabel?.trim() || displayNameFromMuseModelId(slug),
+        name: label && label !== slug ? label : displayNameFromMuseModelId(slug),
         isCustom: false,
         ...(entry.isDefault ? { isDefault: true } : {}),
         capabilities: MUSE_MODEL_CAPABILITIES,
       },
     ];
   });
+  if (models.length === 0 || models.some((model) => model.isDefault)) return models;
+  const preferred = models.findIndex((model) => model.slug === MUSE_DEFAULT_MODEL);
+  const index = preferred === -1 ? 0 : preferred;
+  return models.map((model, position) =>
+    position === index ? { ...model, isDefault: true } : model,
+  );
 }
 
 export function buildInitialMuseProviderSnapshot(
@@ -224,7 +240,12 @@ const detectMuseAuth = (environment: NodeJS.ProcessEnv) =>
       : { status: "unauthenticated" };
   });
 
-const discoverMuseModels = (
+interface MuseCatalog {
+  readonly models: ReadonlyArray<ServerProviderModel>;
+  readonly usage: MspSubscriptionUsage | undefined;
+}
+
+const discoverMuseCatalog = (
   museSettings: MuseSettings,
   environment: NodeJS.ProcessEnv,
   cwd: string,
@@ -237,8 +258,16 @@ const discoverMuseModels = (
       env: environment,
       clientVersion: "0.0.0",
     },
-    (connection) => connection.request("model/list", {}, MspModelListResult),
-  ).pipe(Effect.map((result) => buildMuseModelsFromCatalog(result.models)));
+    (connection) =>
+      Effect.gen(function* (): Generator<Effect.Effect<unknown, unknown>, MuseCatalog, unknown> {
+        const catalog = yield* connection.request("model/list", {}, MspModelListResult);
+        // Hosts older than 1.3 have no usage surface; the models still count.
+        const usage = yield* connection
+          .request("usage/read", {}, MspUsageReadResult)
+          .pipe(Effect.orElseSucceed((): MspUsageReadResult => ({})));
+        return { models: buildMuseModelsFromCatalog(catalog.models), usage: usage.usage };
+      }),
+  );
 
 export const checkMuseProviderStatus = Effect.fn("checkMuseProviderStatus")(function* (
   museSettings: MuseSettings,
@@ -344,22 +373,22 @@ export const checkMuseProviderStatus = Effect.fn("checkMuseProviderStatus")(func
     });
   }
 
-  const modelsExit = yield* discoverMuseModels(museSettings, environment, cwd).pipe(
+  const catalogExit = yield* discoverMuseCatalog(museSettings, environment, cwd).pipe(
     Effect.timeoutOption(MUSE_MODEL_LIST_TIMEOUT_MS),
     Effect.exit,
   );
-  const discoveredModels = Exit.isSuccess(modelsExit)
-    ? Option.getOrElse(modelsExit.value, () => [])
-    : [];
-  const listFailed = Exit.isFailure(modelsExit) || Option.isNone(modelsExit.value);
+  const catalog = Exit.isSuccess(catalogExit)
+    ? Option.getOrUndefined(catalogExit.value)
+    : undefined;
+  const listFailed = catalog === undefined;
   if (listFailed) {
     yield* Effect.logWarning("Muse Code model listing failed or timed out.", {
-      errorTag: Exit.isFailure(modelsExit) ? causeErrorTag(modelsExit.cause) : "Timeout",
+      errorTag: Exit.isFailure(catalogExit) ? causeErrorTag(catalogExit.cause) : "Timeout",
     });
   }
   const models =
-    discoveredModels.length > 0
-      ? museModelsFromSettings(museSettings.customModels, discoveredModels)
+    catalog && catalog.models.length > 0
+      ? museModelsFromSettings(museSettings.customModels, catalog.models)
       : fallbackModels;
 
   return buildServerProvider({
@@ -373,6 +402,7 @@ export const checkMuseProviderStatus = Effect.fn("checkMuseProviderStatus")(func
       version,
       status: listFailed ? "warning" : "ready",
       auth,
+      usageLimits: museUsageToLimits(catalog?.usage, checkedAt),
       ...(listFailed
         ? {
             message:

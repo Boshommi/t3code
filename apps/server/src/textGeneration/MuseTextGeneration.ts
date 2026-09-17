@@ -7,9 +7,9 @@
  * Muse's memory-only mode (`--no-session-log`) accepts turns without running
  * them, so a durable session in a private store is the only working option.
  * The session starts with `denyUnmatched` so the model cannot run tools while
- * answering a formatting prompt, and the call returns as soon as the answer
- * item completes: Muse keeps the turn open for background housekeeping agents
- * long after the reply is final.
+ * answering a formatting prompt, Muse's reminder agents are switched off
+ * because nothing after the reply is read, and the call returns as soon as
+ * the answer item completes.
  *
  * @module textGeneration/MuseTextGeneration
  */
@@ -39,6 +39,7 @@ import {
   sanitizeThreadTitle,
 } from "./TextGenerationUtils.ts";
 import { makeUuidV7, resolveMspModelRoute, withMspHost } from "../provider/msp/MspConnection.ts";
+import { museHostEnvironment } from "../provider/msp/museHostEnvironment.ts";
 import {
   MSP_REASONING_EFFORTS,
   MspItemLifecycleParams,
@@ -72,9 +73,10 @@ export const makeMuseTextGeneration = Effect.fn("makeMuseTextGeneration")(functi
   const crypto = yield* Crypto.Crypto;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const clientVersion = options?.clientVersion ?? "0.0.0";
-  const hostEnvironment: NodeJS.ProcessEnv = options?.dataHome
-    ? { ...environment, XDG_DATA_HOME: options.dataHome }
-    : environment;
+  const hostEnvironment = museHostEnvironment(
+    options?.dataHome ? { ...environment, XDG_DATA_HOME: options.dataHome } : environment,
+    { reminderAgents: false },
+  );
 
   const runMuseJson = <S extends Schema.Top>({
     operation,

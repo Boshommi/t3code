@@ -121,6 +121,10 @@ Provider CLIs must be on the server's `PATH`. If T3 Code cannot find one, set it
 Cursor's executable is `cursor-agent`, although its login command is
 `agent login`. Antigravity can use its managed runtime without a `PATH` entry.
 
+Muse Code's background reminder agents are off by default in T3 Code because
+they hold each turn open for up to a minute after the reply. Turn on **Reminder
+agents** in the provider's settings to run them.
+
 When a provider CLI is behind its latest release, its provider card shows the
 available version. **Update now** appears only when T3 Code can tell which
 installer owns the CLI (its own update command, Homebrew, or a global npm, pnpm,

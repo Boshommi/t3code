@@ -3,8 +3,9 @@
  *
  * One `muse serve` host per thread. The host persists sessions on disk, so
  * `resumeCursor` only needs the Muse session id; a restart reattaches through
- * `session/resume`. Approvals and questions are notifications answered by
- * client requests, so nothing here blocks a JSON-RPC reply.
+ * `session/resume`. Approvals and questions arrive as notifications (or as
+ * receipt-only server requests the connection acknowledges) and are answered
+ * by client requests, so nothing here blocks a JSON-RPC reply.
  *
  * @module provider/Layers/MuseAdapter
  */
@@ -70,6 +71,7 @@ import {
 } from "../msp/MspConnection.ts";
 import {
   type MspApprovalChoice,
+  MspApprovalDecideResult,
   type MspApprovalMode,
   MspApprovalRequestedParams,
   MspApprovalResolvedParams,
@@ -85,6 +87,7 @@ import {
   MspSessionStartResult,
   MspSessionTodoListChangedParams,
   MspSessionTokenUsageParams,
+  MspSubscriptionUsage,
   type MspTokenUsage,
   MspTurnCompletedParams,
   MspTurnStartResult,
@@ -94,6 +97,8 @@ import {
   MspUserInputSettledParams,
   MSP_REASONING_EFFORTS,
 } from "../msp/MspProtocol.ts";
+import { museHostEnvironment } from "../msp/museHostEnvironment.ts";
+import { museUsageToUpdate } from "./museUsageLimits.ts";
 
 const PROVIDER = ProviderDriverKind.make("muse");
 const MUSE_RESUME_VERSION = 1;
@@ -252,6 +257,20 @@ function nonEmpty(value: string | null | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+/** `summary.3` -> 3; anything else is not a reasoning summary part. */
+export function parseSummaryField(field: string | undefined): number | undefined {
+  const match = field === undefined ? null : /^summary\.(\d+)$/.exec(field);
+  return match ? Number(match[1]) : undefined;
+}
+
+/** `verify-reminder` -> "Verify reminder agent". */
+export function reminderAgentDescription(reminderAgentId: string | undefined): string {
+  const name = nonEmpty(reminderAgentId)?.replace(/[-_]+/g, " ");
+  if (!name) return "Reminder agent";
+  const words = name.endsWith(" reminder") ? name : `${name} reminder`;
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)} agent`;
+}
+
 function toolDetail(
   itemType: ToolLifecycleItemType,
   tool: string | undefined,
@@ -380,6 +399,8 @@ interface PendingApproval {
   requirement: MspApprovalRequirementRef;
   choices: ReadonlyArray<MspApprovalChoice>;
   answered: boolean;
+  /** The host said the last decision settled every stage; no update reopens it. */
+  terminal: boolean;
 }
 
 interface PendingUserInput {
@@ -387,6 +408,13 @@ interface PendingUserInput {
   readonly turnId: TurnId;
   readonly questions: ReadonlyArray<MspUserInputQuestion>;
   answered: boolean;
+}
+
+interface TurnUsageTotals {
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  reasoningTokens: number;
 }
 
 interface TrackedItem {
@@ -414,6 +442,8 @@ interface MuseSessionContext {
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
   readonly items: Map<string, TrackedItem>;
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
+  /** Raw counters summed per turn from `session/tokenUsage`; `turn/completed` omits them. */
+  readonly turnUsage: Map<TurnId, TurnUsageTotals>;
   readonly usage: {
     inputTokens: number;
     outputTokens: number;
@@ -432,7 +462,9 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
   const fileSystem = yield* FileSystem.FileSystem;
   const serverConfig = yield* ServerConfig;
   const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("muse");
-  const environment = options?.environment ?? process.env;
+  const environment = museHostEnvironment(options?.environment ?? process.env, {
+    reminderAgents: museSettings.reminderAgents,
+  });
   const nativeEventLogger = options?.nativeEventLogger;
   const clientVersion = options?.clientVersion ?? DEFAULT_CLIENT_VERSION;
 
@@ -577,6 +609,7 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
       for (const [museItemId, item] of ctx.items) {
         if (item.turnId === turnId) ctx.items.delete(museItemId);
       }
+      ctx.turnUsage.delete(turnId);
       yield* updateSession(ctx, {
         status: ctx.stopped ? "closed" : "ready",
         activeTurnId: undefined,
@@ -645,8 +678,8 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
   ) =>
     Effect.gen(function* () {
       const item = params.item;
-      if (item.kind === "subagent") {
-        yield* handleSubagentItem(ctx, lifecycle, item, raw);
+      if (item.kind === "subagent" || item.kind === "reminderChild") {
+        yield* handleChildItem(ctx, lifecycle, item, raw);
         return;
       }
       if (item.kind === "compaction") {
@@ -687,7 +720,11 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
         }
         if (!terminal) return;
         tracked.completed = true;
-        const text = item.text ?? "";
+        // Reasoning carries its text in `summary` parts; `text` is only set when the
+        // provider exposes raw reasoning, which Muse's own model does not.
+        const text =
+          nonEmpty(item.text) ??
+          (tracked.itemType === "reasoning" ? (item.summary ?? []).join("\n\n") : "");
         if (tracked.turnId) {
           const turn = ctx.turns.find((entry) => entry.id === tracked.turnId);
           turn?.items.push({ kind: item.kind, itemId: item.itemId, text });
@@ -778,18 +815,25 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
       }
     });
 
-  const handleSubagentItem = (
+  /**
+   * Subagents and reminder children are both child sessions that hold the turn
+   * open; surfacing them as tasks keeps the spinner honest while they run.
+   */
+  const handleChildItem = (
     ctx: MuseSessionContext,
     lifecycle: "started" | "updated" | "completed",
     item: MspItem,
     raw: unknown,
   ) =>
     Effect.gen(function* () {
-      const taskId = RuntimeTaskId.make(item.subagentId ?? item.itemId);
-      const description = nonEmpty(item.objective) ?? nonEmpty(item.displayText) ?? "Subagent";
+      const reminder = item.kind === "reminderChild";
+      const taskId = RuntimeTaskId.make((reminder ? item.taskId : item.subagentId) ?? item.itemId);
+      const description = reminder
+        ? reminderAgentDescription(item.reminderAgentId)
+        : (nonEmpty(item.objective) ?? nonEmpty(item.displayText) ?? "Subagent");
       const turnId = item.turnId ? TurnId.make(item.turnId) : ctx.activeTurnId;
       const linkage = {
-        taskType: "subagent",
+        taskType: reminder ? "reminder" : "subagent",
         agentKind: "agent" as const,
         ...(item.agentPath ? { agentPath: item.agentPath } : {}),
       };
@@ -839,8 +883,14 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
     Effect.gen(function* () {
       const tracked = ctx.items.get(params.itemId);
       if (!tracked || tracked.completed) return;
-      if (params.field !== undefined && params.field !== "text") return;
       if (tracked.itemType !== "assistant_message" && tracked.itemType !== "reasoning") return;
+      // Assistant text streams on the default field; reasoning streams one
+      // `summary.N` part at a time. Tool output deltas have no stream here.
+      const summaryIndex = parseSummaryField(params.field);
+      if (params.field !== undefined && params.field !== "text" && summaryIndex === undefined) {
+        return;
+      }
+      if (summaryIndex !== undefined && tracked.itemType !== "reasoning") return;
       yield* emit({
         type: "content.delta",
         ...(yield* stamp()),
@@ -852,6 +902,7 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
           streamKind:
             tracked.itemType === "assistant_message" ? "assistant_text" : "reasoning_text",
           delta: params.delta,
+          ...(summaryIndex !== undefined ? { summaryIndex } : {}),
         },
       });
     });
@@ -860,13 +911,13 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
 
   const openApproval = (
     ctx: MuseSessionContext,
-    pending: Omit<PendingApproval, "answered">,
+    pending: Omit<PendingApproval, "answered" | "terminal">,
     raw: unknown,
     method: string,
   ) =>
     Effect.gen(function* () {
       const requestId = ApprovalRequestId.make(yield* randomUUIDv4);
-      ctx.pendingApprovals.set(requestId, { ...pending, answered: false });
+      ctx.pendingApprovals.set(requestId, { ...pending, answered: false, terminal: false });
       const { turnId, requestType, detail, args } = pending;
       yield* updateSession(ctx, { status: "running" });
       yield* emit({
@@ -896,8 +947,17 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
     ctx: MuseSessionContext,
     params: MspApprovalRequestedParams,
     raw: unknown,
-  ) =>
-    openApproval(
+    method: string,
+  ) => {
+    // The same approval can arrive twice: as a server request and as its
+    // notification twin, or re-issued after a resume. One T3 request per id.
+    const existing = findPendingApproval(ctx, params.approvalId);
+    if (existing) {
+      existing.pending.requirement = params.currentRequirementId;
+      existing.pending.choices = params.availableChoices;
+      return Effect.void;
+    }
+    return openApproval(
       ctx,
       {
         approvalId: params.approvalId,
@@ -917,8 +977,9 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
         choices: params.availableChoices,
       },
       raw,
-      "approval/requested",
+      method,
     );
+  };
 
   const findPendingApproval = (ctx: MuseSessionContext, approvalId: string) => {
     for (const [requestId, pending] of ctx.pendingApprovals) {
@@ -935,13 +996,19 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
     Effect.gen(function* () {
       const found = findPendingApproval(ctx, params.approvalId);
       if (!found) return;
+      const previous = found.pending.requirement;
       if (params.currentRequirementId) found.pending.requirement = params.currentRequirementId;
       if (params.availableChoices) found.pending.choices = params.availableChoices;
-      // A multi-stage approval asks again after the first stage is granted. The
-      // previous request is already resolved on T3's side, so open a new one.
-      if (found.pending.answered && params.currentRequirementId) {
+      // A multi-stage approval asks again after one stage is granted, and the host
+      // advances `currentRequirementId` when it does. An update that keeps the
+      // requirement (Muse 1.3 echoes every decision as `stageResolved`) is
+      // bookkeeping for a request T3 already answered, not a new question.
+      const advanced =
+        params.currentRequirementId !== undefined &&
+        params.currentRequirementId.sourceIndex !== previous.sourceIndex;
+      if (found.pending.answered && !found.pending.terminal && advanced) {
         ctx.pendingApprovals.delete(found.requestId);
-        const { answered: _answered, ...stage } = found.pending;
+        const { answered: _answered, terminal: _terminal, ...stage } = found.pending;
         yield* openApproval(ctx, stage, raw, "approval/updated");
       }
     });
@@ -976,6 +1043,9 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
     raw: unknown,
   ) =>
     Effect.gen(function* () {
+      for (const pending of ctx.pendingUserInputs.values()) {
+        if (pending.userInputId === params.userInputId) return;
+      }
       const requestId = ApprovalRequestId.make(yield* randomUUIDv4);
       const turnId = TurnId.make(params.turnId);
       ctx.pendingUserInputs.set(requestId, {
@@ -1082,7 +1152,9 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
           const terminal = decoded.value.terminal;
           const errorMessage =
             nonEmpty(decoded.value.error?.message) ?? nonEmpty(decoded.value.reason);
-          const tokenUsage = turnTokenUsageFromMsp(decoded.value.usage);
+          const tokenUsage = turnTokenUsageFromMsp(
+            decoded.value.usage ?? ctx.turnUsage.get(turnId),
+          );
           yield* completeTurn(ctx, turnId, {
             state:
               terminal === "completed"
@@ -1096,9 +1168,12 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
           });
           return;
         }
+        case "approval/request":
         case "approval/requested": {
           const decoded = decode(MspApprovalRequestedParams, params);
-          if (Option.isSome(decoded)) yield* handleApprovalRequested(ctx, decoded.value, params);
+          if (Option.isSome(decoded)) {
+            yield* handleApprovalRequested(ctx, decoded.value, params, notification.method);
+          }
           return;
         }
         case "approval/updated": {
@@ -1111,6 +1186,7 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
           if (Option.isSome(decoded)) yield* handleApprovalResolved(ctx, decoded.value);
           return;
         }
+        case "userInput/request":
         case "userInput/requested": {
           const decoded = decode(MspUserInputRequestedParams, params);
           if (Option.isSome(decoded)) yield* openUserInput(ctx, decoded.value, params);
@@ -1134,7 +1210,37 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
           if (value.usage?.reasoningTokens !== undefined)
             ctx.usage.reasoningOutputTokens += value.usage.reasoningTokens;
           if (value.promptTokens !== undefined) ctx.usage.usedTokens = value.promptTokens;
+          if (value.turnId && value.usage) {
+            const turnId = TurnId.make(value.turnId);
+            const total = ctx.turnUsage.get(turnId) ?? {
+              inputTokens: 0,
+              outputTokens: 0,
+              cachedTokens: 0,
+              reasoningTokens: 0,
+            };
+            ctx.turnUsage.set(turnId, {
+              inputTokens: total.inputTokens + (value.usage.inputTokens ?? 0),
+              outputTokens: total.outputTokens + (value.usage.outputTokens ?? 0),
+              cachedTokens: total.cachedTokens + (value.usage.cachedTokens ?? 0),
+              reasoningTokens: total.reasoningTokens + (value.usage.reasoningTokens ?? 0),
+            });
+          }
           yield* emitTokenUsage(ctx);
+          return;
+        }
+        case "usage/changed": {
+          const decoded = decode(MspSubscriptionUsage, params);
+          if (Option.isNone(decoded)) return;
+          const limits = museUsageToUpdate(decoded.value);
+          if (!limits) return;
+          yield* emit({
+            type: "account.rate-limits.updated",
+            ...(yield* stamp()),
+            provider: PROVIDER,
+            threadId,
+            ...(ctx.activeTurnId ? { turnId: ctx.activeTurnId } : {}),
+            payload: { limits },
+          });
           return;
         }
         case "session/contextUsage": {
@@ -1264,7 +1370,18 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
           },
           Schema.Unknown,
         )
-        .pipe(Effect.mapError(toRequestError("session/setModel")));
+        .pipe(
+          Effect.mapError((cause) =>
+            cause._tag === "MspRequestError" && cause.detail.includes("invalid_model")
+              ? new ProviderAdapterRequestError({
+                  provider: PROVIDER,
+                  method: "session/setModel",
+                  detail: `Muse Code does not offer the model '${requested}'.`,
+                  cause,
+                })
+              : toRequestError("session/setModel")(cause),
+          ),
+        );
       ctx.currentModelId = requested;
       yield* updateSession(ctx, { model: requested });
     });
@@ -1374,6 +1491,7 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
           pendingUserInputs: new Map(),
           items: new Map(),
           turns: [],
+          turnUsage: new Map(),
           usage: {
             inputTokens: 0,
             outputTokens: 0,
@@ -1580,7 +1698,7 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
         });
       }
       pending.answered = true;
-      yield* ctx.connection
+      const decided = yield* ctx.connection
         .request(
           "approval/decide",
           {
@@ -1591,7 +1709,7 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
             choiceId,
             feedback: null,
           },
-          Schema.Unknown,
+          MspApprovalDecideResult,
         )
         .pipe(
           Effect.tapError(() =>
@@ -1601,6 +1719,8 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
           ),
           Effect.mapError(toRequestError("approval/decide")),
         );
+      // Hosts that omit `terminal` may still advance a stage; only an explicit `true` settles it.
+      pending.terminal = decided.terminal === true;
       yield* emit({
         type: "request.resolved",
         ...(yield* stamp()),
@@ -1667,7 +1787,19 @@ export const makeMuseAdapter = Effect.fn("makeMuseAdapter")(function* (
           { commandId: yield* commandId(), sessionId: ctx.museSessionId },
           Schema.Unknown,
         )
-        .pipe(Effect.mapError(toRequestError("session/compact")));
+        .pipe(
+          Effect.mapError((cause) =>
+            // The host refuses to compact a history too short to summarize.
+            cause._tag === "MspRequestError" && cause.detail.includes("compaction_unavailable")
+              ? new ProviderAdapterRequestError({
+                  provider: PROVIDER,
+                  method: "session/compact",
+                  detail: "Muse Code has nothing to compact yet.",
+                  cause,
+                })
+              : toRequestError("session/compact")(cause),
+          ),
+        );
     });
 
   const stopSession: MuseAdapterShape["stopSession"] = (threadId) =>

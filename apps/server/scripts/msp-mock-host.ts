@@ -15,6 +15,20 @@ const exitAfterTurnStart = process.env.T3_MSP_EXIT_AFTER_TURN_START === "1";
 const hangTurnForever = process.env.T3_MSP_HANG_TURN === "1";
 const resumeActiveTurnId = process.env.T3_MSP_RESUME_ACTIVE_TURN_ID;
 const responseText = process.env.T3_MSP_RESPONSE_TEXT ?? "Hello from Muse";
+// Muse 1.3 behaviours, each opt-in so older-shaped runs stay covered.
+const approvalAsServerRequest = process.env.T3_MSP_APPROVAL_AS_REQUEST === "1";
+const emitReasoningItems = process.env.T3_MSP_EMIT_REASONING === "1";
+const emitReminder = process.env.T3_MSP_EMIT_REMINDER === "1";
+const emitUsage = process.env.T3_MSP_EMIT_USAGE === "1";
+const omitTurnUsage = process.env.T3_MSP_OMIT_TURN_USAGE === "1";
+const modelCatalogDefault = process.env.T3_MSP_CATALOG_DEFAULT !== "0";
+const usageObserved = {
+  observedAtMs: 1_789_621_482_379,
+  tier: "27681631238169137",
+  weekly: { resetsAtMs: 1_789_948_800_000, usedPercent: 12 },
+  window: { resetsAtMs: 1_789_639_428_000, usedPercent: 37, windowDurationMins: 300 },
+};
+let usageSeen = process.env.T3_MSP_USAGE_PREOBSERVED === "1";
 
 let sequence = 0;
 const uuid7 = (): string => {
@@ -58,13 +72,15 @@ const MODELS = [
     modelId: "muse-spark-1.3",
     displayLabel: "muse-spark-1.3",
     isDefault: false,
-    contextLimit: 1_000_000,
+    contextLimit: null,
+    providerId: "meta",
   },
   {
     modelId: "muse-spark-1.3-contributor",
     displayLabel: "muse-spark-1.3-contributor",
-    isDefault: true,
-    contextLimit: 1_000_000,
+    isDefault: modelCatalogDefault,
+    contextLimit: null,
+    providerId: "meta",
   },
 ];
 
@@ -105,19 +121,93 @@ function sessionView(session: SessionState) {
 function finishTurn(session: SessionState, turnId: string, terminal: "completed" | "cancelled") {
   if (session.activeTurnId !== turnId) return;
   session.activeTurnId = null;
+  if (emitReminder) {
+    const itemId = NodeCrypto.randomUUID();
+    const reminder = {
+      itemId,
+      kind: "reminderChild",
+      revision: 1,
+      turnId,
+      reminderAgentId: "verify-reminder",
+      taskId: NodeCrypto.randomUUID(),
+      childSessionId: NodeCrypto.randomUUID(),
+      fallbackText: "Reminder child session",
+    };
+    notify("item/started", {
+      sessionId: session.sessionId,
+      item: { ...reminder, status: "inProgress" },
+      viewCursor: cursor(session.sessionId),
+    });
+    notify("item/completed", {
+      sessionId: session.sessionId,
+      item: { ...reminder, revision: 2, status: "cancelled", failureReason: "main run completed" },
+      viewCursor: cursor(session.sessionId),
+      sourceRange: {},
+    });
+  }
   notify("turn/completed", {
     sessionId: session.sessionId,
     turnId,
     terminal,
     ...(terminal === "cancelled" ? { reason: "interrupted" } : {}),
     durationMs: 5,
-    usage: { inputTokens: 120, outputTokens: 12, cachedTokens: 40, reasoningTokens: 3 },
+    ...(omitTurnUsage
+      ? {}
+      : { usage: { inputTokens: 120, outputTokens: 12, cachedTokens: 40, reasoningTokens: 3 } }),
+    viewCursor: cursor(session.sessionId),
+    sourceRange: {},
+  });
+  if (emitUsage && terminal === "completed") {
+    usageSeen = true;
+    notify("usage/changed", usageObserved);
+  }
+}
+
+function emitReasoning(session: SessionState, turnId: string) {
+  const itemId = NodeCrypto.randomUUID();
+  notify("item/started", {
+    sessionId: session.sessionId,
+    item: { itemId, kind: "reasoning", status: "inProgress", revision: 1, turnId, summary: [] },
+    viewCursor: cursor(session.sessionId),
+  });
+  notify("item/delta", {
+    sessionId: session.sessionId,
+    itemId,
+    delta: "Weighing ",
+    field: "summary.0",
+    viewCursor: cursor(session.sessionId),
+  });
+  notify("item/delta", {
+    sessionId: session.sessionId,
+    itemId,
+    delta: "options",
+    field: "summary.0",
+    viewCursor: cursor(session.sessionId),
+  });
+  notify("item/delta", {
+    sessionId: session.sessionId,
+    itemId,
+    delta: "Picking one",
+    field: "summary.1",
+    viewCursor: cursor(session.sessionId),
+  });
+  notify("item/completed", {
+    sessionId: session.sessionId,
+    item: {
+      itemId,
+      kind: "reasoning",
+      status: "completed",
+      revision: 2,
+      turnId,
+      summary: ["Weighing options", "Picking one"],
+    },
     viewCursor: cursor(session.sessionId),
     sourceRange: {},
   });
 }
 
 function emitAssistantMessage(session: SessionState, turnId: string) {
+  if (emitReasoningItems) emitReasoning(session, turnId);
   const itemId = NodeCrypto.randomUUID();
   notify("item/started", {
     sessionId: session.sessionId,
@@ -260,7 +350,7 @@ function startTurn(session: SessionState, turnId: string) {
   if (emitApproval) {
     const approvalId = NodeCrypto.randomUUID();
     session.pendingApproval = { approvalId, turnId, stage: 0 };
-    notify("approval/requested", {
+    const approvalParams = {
       sessionId: session.sessionId,
       turnId,
       approvalId,
@@ -290,7 +380,15 @@ function startTurn(session: SessionState, turnId: string) {
       protectedWrite: false,
       viewCursor: cursor(session.sessionId),
       sourceRange: {},
-    });
+    };
+    if (approvalAsServerRequest) {
+      // Muse may present the approval as a request expecting a receipt, and then
+      // also send the notification twin; the client must open it once.
+      send({ id: `srv-${approvalId}`, method: "approval/request", params: approvalParams });
+      notify("approval/requested", approvalParams);
+    } else {
+      notify("approval/requested", approvalParams);
+    }
     return;
   }
   continueAfterGates(session, turnId);
@@ -302,13 +400,29 @@ function handle(frame: Record<string, unknown>) {
     method?: string;
     params?: Record<string, unknown>;
   };
-  if (typeof method !== "string") return;
+  if (typeof method !== "string") {
+    // A response to one of this host's own server requests: the receipt carries no
+    // decision, so there is nothing to do beyond noting it was answered.
+    if (typeof id === "string" && id.startsWith("srv-")) {
+      log({
+        method: "receipt",
+        params: { id, result: (frame as { result?: unknown }).result ?? null },
+      });
+    }
+    return;
+  }
   log({ method, params: params ?? null });
   if (id === undefined) {
     if (method === "initialized") initialized = true;
     return;
   }
   if (method === "initialize") {
+    log({
+      method: "initialize/env",
+      params: {
+        MUSE_EXPERIMENTAL_VERIFY_REMINDER: process.env.MUSE_EXPERIMENTAL_VERIFY_REMINDER ?? null,
+      },
+    });
     respond(id, {
       experimentalApi: false,
       grantedCapabilities: [],
@@ -333,8 +447,11 @@ function handle(frame: Record<string, unknown>) {
         models: MODELS,
         providerId: "meta",
         profileId: "tbh",
-        source: "providerCatalog",
+        source: "bundledCatalog",
       });
+      return;
+    case "usage/read":
+      respond(id, usageSeen ? { usage: usageObserved } : {});
       return;
     case "session/start": {
       const session = makeSession(
@@ -456,6 +573,20 @@ function handle(frame: Record<string, unknown>) {
         terminal: true,
       });
       const approved = p.choiceId !== "abort";
+      notify("approval/updated", {
+        sessionId: session.sessionId,
+        approvalId: pending.approvalId,
+        availableChoices: [],
+        change: {
+          kind: "stageResolved",
+          choiceId: p.choiceId,
+          requirementId: { approvalId: pending.approvalId, sourceIndex: 1 },
+        },
+        currentRequirementId: { approvalId: pending.approvalId, sourceIndex: 1 },
+        subject: { kind: "shell", command: "rm -rf build" },
+        viewCursor: cursor(session.sessionId),
+        sourceRange: {},
+      });
       notify("approval/resolved", {
         sessionId: session.sessionId,
         approvalId: pending.approvalId,

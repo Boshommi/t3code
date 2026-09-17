@@ -752,13 +752,25 @@ export const MuseSettings = makeProviderSettingsSchema(
         providerSettingsForm: { placeholder: "muse", clearWhenEmpty: "omit" },
       }),
     ),
+    // Muse spawns verify/goal/todo/memory/skill/scope reminder agents after every
+    // reply and holds the turn open until they finish, which is typically 45-65s
+    // of silence after the answer. Off by default so turns settle when the reply does.
+    reminderAgents: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({
+        title: "Reminder agents",
+        description:
+          "Run Muse's background reminder agents after each reply. They can hold a turn open for up to a minute after the answer.",
+        providerSettingsForm: { control: "switch" },
+      }),
+    ),
     customModels: Schema.Array(CustomModelSetting).pipe(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
   },
   {
-    order: ["binaryPath"],
+    order: ["binaryPath", "reminderAgents"],
   },
 );
 export type MuseSettings = typeof MuseSettings.Type;

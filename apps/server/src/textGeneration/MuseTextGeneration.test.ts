@@ -62,6 +62,8 @@ it.layer(NodeServices.layer)("MuseTextGeneration", (it) => {
       assert.equal(start?.params.providerId, "meta");
       const turn = requests.find((request) => request.method === "turn/start");
       assert.equal(turn?.params.reasoningEffort, "minimal");
+      const hostEnv = requests.find((request) => request.method === "initialize/env");
+      assert.equal(hostEnv?.params.MUSE_EXPERIMENTAL_VERIFY_REMINDER, "0");
     }),
   );
 

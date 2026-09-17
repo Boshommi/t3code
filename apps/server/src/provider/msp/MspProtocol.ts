@@ -26,6 +26,7 @@ export const MspReasoningEffort = Schema.Literals([
   "medium",
   "high",
   "xhigh",
+  "max",
   "ultra",
 ]);
 export type MspReasoningEffort = typeof MspReasoningEffort.Type;
@@ -140,6 +141,9 @@ export const MspItem = Schema.Struct({
   childSessionId: Schema.optional(Schema.String),
   subagentId: Schema.optional(Schema.String),
   agentPath: Schema.optional(Schema.String),
+  reminderAgentId: Schema.optional(Schema.String),
+  taskId: Schema.optional(Schema.String),
+  truncated: Schema.optional(Schema.Boolean),
   tokensBefore: Schema.optional(Schema.Number),
   tokensAfter: Schema.optional(Schema.Number),
   usage: Schema.optional(MspTokenUsage),
@@ -233,8 +237,21 @@ export const MspApprovalUpdatedParams = Schema.Struct({
   approvalId: Schema.String,
   currentRequirementId: Schema.optional(MspApprovalRequirementRef),
   availableChoices: Schema.optional(Schema.Array(MspApprovalChoice)),
+  /** What moved: `stageResolved` echoes a decision the client already made. */
+  change: Schema.optional(
+    Schema.Struct({
+      kind: Schema.optional(Schema.String),
+      requirementId: Schema.optional(MspApprovalRequirementRef),
+    }),
+  ),
 });
 export type MspApprovalUpdatedParams = typeof MspApprovalUpdatedParams.Type;
+
+/** `terminal: false` means the approval stays pending for a later stage. */
+export const MspApprovalDecideResult = Schema.Struct({
+  terminal: Schema.optional(Schema.Boolean),
+});
+export type MspApprovalDecideResult = typeof MspApprovalDecideResult.Type;
 
 export const MspApprovalResolvedParams = Schema.Struct({
   sessionId: Schema.String,
@@ -326,6 +343,36 @@ export const MspSessionTodoListChangedParams = Schema.Struct({
   items: Schema.Array(MspTodoItem),
 });
 export type MspSessionTodoListChangedParams = typeof MspSessionTodoListChangedParams.Type;
+
+/**
+ * Subscription usage as the host last observed it from the provider. The
+ * same shape is the `usage/read` result member and the `usage/changed`
+ * params; `usedPercent` may exceed 100 when the account is over quota.
+ */
+export const MspSubscriptionUsage = Schema.Struct({
+  observedAtMs: Schema.optional(Schema.Number),
+  tier: Schema.optional(Schema.String),
+  window: Schema.optional(
+    Schema.Struct({
+      resetsAtMs: Schema.optional(Schema.Number),
+      usedPercent: Schema.optional(Schema.Number),
+      windowDurationMins: Schema.optional(Schema.Number),
+    }),
+  ),
+  weekly: Schema.optional(
+    Schema.Struct({
+      resetsAtMs: Schema.optional(Schema.Number),
+      usedPercent: Schema.optional(Schema.Number),
+    }),
+  ),
+});
+export type MspSubscriptionUsage = typeof MspSubscriptionUsage.Type;
+
+/** `usage/read` omits `usage` until the host has seen a provider frame. */
+export const MspUsageReadResult = Schema.Struct({
+  usage: Schema.optional(MspSubscriptionUsage),
+});
+export type MspUsageReadResult = typeof MspUsageReadResult.Type;
 
 /** Client-visible failure detail carried on a JSON-RPC error frame. */
 export const MspErrorData = Schema.Struct({
