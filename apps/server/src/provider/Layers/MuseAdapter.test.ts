@@ -33,6 +33,8 @@ import {
   museToolItemType,
   museUserInputAnswers,
   parseMuseResume,
+  parseSummaryField,
+  reminderAgentDescription,
   selectMuseChoiceId,
 } from "./MuseAdapter.ts";
 
@@ -149,6 +151,17 @@ it("turns T3 user-input answers into Muse answers by label or free text", () => 
   ]);
 });
 
+it("recognises reasoning summary parts and names reminder agents", () => {
+  assert.equal(parseSummaryField("summary.0"), 0);
+  assert.equal(parseSummaryField("summary.12"), 12);
+  assert.isUndefined(parseSummaryField("text"));
+  assert.isUndefined(parseSummaryField("output"));
+  assert.isUndefined(parseSummaryField(undefined));
+  assert.equal(reminderAgentDescription("verify-reminder"), "Verify reminder agent");
+  assert.equal(reminderAgentDescription("memory"), "Memory reminder agent");
+  assert.equal(reminderAgentDescription(undefined), "Reminder agent");
+});
+
 it("parses only its own resume cursor", () => {
   assert.deepEqual(parseMuseResume({ schemaVersion: 1, sessionId: "abc" }), { sessionId: "abc" });
   assert.isUndefined(parseMuseResume({ schemaVersion: 2, sessionId: "abc" }));
@@ -160,8 +173,10 @@ const museAdapterTestLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3code-muse-adapter-test-",
 }).pipe(Layer.provideMerge(NodeServices.layer));
 
-const makeTestAdapter = (binaryPath: string) =>
-  makeMuseAdapter(decodeMuseSettings({ binaryPath }), { instanceId: INSTANCE }).pipe(Effect.orDie);
+const makeTestAdapter = (binaryPath: string, settings?: { readonly reminderAgents?: boolean }) =>
+  makeMuseAdapter(decodeMuseSettings({ binaryPath, ...settings }), { instanceId: INSTANCE }).pipe(
+    Effect.orDie,
+  );
 
 const collectEvents = (adapter: { readonly streamEvents: Stream.Stream<ProviderRuntimeEvent> }) =>
   Effect.gen(function* () {
@@ -170,17 +185,28 @@ const collectEvents = (adapter: { readonly streamEvents: Stream.Stream<ProviderR
     const requestOpened = yield* Deferred.make<ProviderRuntimeEvent>();
     const userInputRequested = yield* Deferred.make<ProviderRuntimeEvent>();
     const sessionExited = yield* Deferred.make<void>();
+    const rateLimitsUpdated = yield* Deferred.make<void>();
     const fiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
       Effect.gen(function* () {
         events.push(event);
         if (event.type === "turn.completed") yield* Deferred.succeed(turnCompleted, undefined);
+        if (event.type === "account.rate-limits.updated")
+          yield* Deferred.succeed(rateLimitsUpdated, undefined);
         if (event.type === "request.opened") yield* Deferred.succeed(requestOpened, event);
         if (event.type === "user-input.requested")
           yield* Deferred.succeed(userInputRequested, event);
         if (event.type === "session.exited") yield* Deferred.succeed(sessionExited, undefined);
       }),
     ).pipe(Effect.forkChild);
-    return { events, turnCompleted, requestOpened, userInputRequested, sessionExited, fiber };
+    return {
+      events,
+      turnCompleted,
+      requestOpened,
+      userInputRequested,
+      sessionExited,
+      rateLimitsUpdated,
+      fiber,
+    };
   });
 
 it.layer(museAdapterTestLayer)("MuseAdapterLive", (it) => {
@@ -248,6 +274,118 @@ it.layer(museAdapterTestLayer)("MuseAdapterLive", (it) => {
       const turnStart = requests.find((request) => request.method === "turn/start");
       assert.deepEqual(turnStart?.params?.input, [{ type: "text", text: "hello muse" }]);
       assert.match(String(turnStart?.params?.commandId), /^[0-9a-f-]{36}$/);
+      // Reminder agents are off unless the user opts in; the host sees the gate.
+      const hostEnv = requests.find((request) => request.method === "initialize/env");
+      assert.equal(hostEnv?.params?.MUSE_EXPERIMENTAL_VERIFY_REMINDER, "0");
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect(
+    "streams reasoning summary parts, sums turn usage the host omits, and surfaces reminder agents",
+    () =>
+      Effect.gen(function* () {
+        const threadId = ThreadId.make("muse-mock-reasoning");
+        const { command, requestLogPath } = yield* Effect.promise(() =>
+          makeMockMuse({
+            T3_MSP_EMIT_REASONING: "1",
+            T3_MSP_EMIT_REMINDER: "1",
+            T3_MSP_OMIT_TURN_USAGE: "1",
+            T3_MSP_EMIT_USAGE: "1",
+          }),
+        );
+        const adapter = yield* makeTestAdapter(command, { reminderAgents: true });
+        const collected = yield* collectEvents(adapter);
+        yield* adapter.startSession({ threadId, cwd: process.cwd(), runtimeMode: "full-access" });
+        yield* adapter.sendTurn({ threadId, input: "think then answer" });
+        yield* Deferred.await(collected.turnCompleted);
+        // Muse reports subscription usage once the turn has settled.
+        yield* Deferred.await(collected.rateLimitsUpdated);
+        yield* Fiber.interrupt(collected.fiber);
+
+        const reasoningDeltas = collected.events.flatMap((event) =>
+          event.type === "content.delta" && event.payload.streamKind === "reasoning_text"
+            ? [[event.payload.summaryIndex, event.payload.delta] as const]
+            : [],
+        );
+        assert.deepEqual(reasoningDeltas, [
+          [0, "Weighing "],
+          [0, "options"],
+          [1, "Picking one"],
+        ]);
+        const reasoning = collected.events.find(
+          (event) => event.type === "item.completed" && event.payload.itemType === "reasoning",
+        );
+        if (reasoning?.type === "item.completed") {
+          assert.equal(
+            (reasoning.payload.data as { text?: string }).text,
+            "Weighing options\n\nPicking one",
+          );
+        }
+        const completed = collected.events.find((event) => event.type === "turn.completed");
+        if (completed?.type === "turn.completed") {
+          assert.equal(completed.payload.tokenUsage?.usageStatus, "complete");
+          assert.equal(completed.payload.tokenUsage?.inputTokens, 120);
+          assert.equal(completed.payload.tokenUsage?.outputTokens, 12);
+          assert.equal(completed.payload.tokenUsage?.cachedInputTokens, 40);
+        }
+        const task = collected.events.find((event) => event.type === "task.started");
+        if (task?.type === "task.started") {
+          assert.equal(task.payload.description, "Verify reminder agent");
+          assert.equal(task.payload.taskType, "reminder");
+        }
+        const taskDone = collected.events.find((event) => event.type === "task.completed");
+        if (taskDone?.type === "task.completed") {
+          assert.equal(taskDone.payload.status, "stopped");
+        }
+        const limits = collected.events.find(
+          (event) => event.type === "account.rate-limits.updated",
+        );
+        assert.isDefined(limits);
+        if (limits?.type === "account.rate-limits.updated") {
+          assert.deepEqual(
+            limits.payload.limits.windows.map((window) => [window.id, window.usedPercent]),
+            [
+              ["window", 37],
+              ["weekly", 12],
+            ],
+          );
+        }
+        const requests = yield* Effect.promise(() => readRequests(requestLogPath));
+        const hostEnv = requests.find((request) => request.method === "initialize/env");
+        assert.isNull(hostEnv?.params?.MUSE_EXPERIMENTAL_VERIFY_REMINDER);
+        yield* adapter.stopSession(threadId);
+      }),
+  );
+
+  it.effect("opens an approval presented as a server request exactly once", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("muse-mock-approval-request");
+      const { command, requestLogPath } = yield* Effect.promise(() =>
+        makeMockMuse({ T3_MSP_EMIT_APPROVAL: "1", T3_MSP_APPROVAL_AS_REQUEST: "1" }),
+      );
+      const adapter = yield* makeTestAdapter(command);
+      const collected = yield* collectEvents(adapter);
+      yield* adapter.startSession({
+        threadId,
+        cwd: process.cwd(),
+        runtimeMode: "approval-required",
+      });
+      yield* adapter.sendTurn({ threadId, input: "delete the build folder" });
+      const opened = yield* Deferred.await(collected.requestOpened);
+      yield* adapter.respondToRequest(
+        threadId,
+        ApprovalRequestId.make(String(opened.requestId)),
+        "accept",
+      );
+      yield* Deferred.await(collected.turnCompleted);
+      yield* Fiber.interrupt(collected.fiber);
+      assert.equal(collected.events.filter((event) => event.type === "request.opened").length, 1);
+      assert.equal(collected.events.filter((event) => event.type === "request.resolved").length, 1);
+      const requests = yield* Effect.promise(() => readRequests(requestLogPath));
+      const receipt = requests.find((request) => request.method === "receipt");
+      assert.isDefined(receipt);
+      assert.deepEqual(receipt?.params?.result, {});
       yield* adapter.stopSession(threadId);
     }),
   );
@@ -288,6 +426,9 @@ it.layer(museAdapterTestLayer)("MuseAdapterLive", (it) => {
         yield* Deferred.await(collected.turnCompleted);
         yield* Fiber.interrupt(collected.fiber);
 
+        // The host echoes the decision as an `approval/updated` with the same
+        // requirement before `approval/resolved`; neither reopens the request.
+        assert.equal(collected.events.filter((event) => event.type === "request.opened").length, 1);
         const resolved = collected.events.filter((event) => event.type === "request.resolved");
         assert.equal(resolved.length, 1);
         if (resolved[0]?.type === "request.resolved") {

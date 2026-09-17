@@ -1,10 +1,12 @@
 /**
  * MspConnection — one `muse serve` process and the JSON-RPC 2.0 peer on its stdio.
  *
- * MSP frames are newline-delimited JSON. The host never sends requests to the
- * client: approvals and questions arrive as notifications and are answered by
- * client requests, so this peer only correlates responses and fans out
- * notifications. The child process lives in the scope this is built in.
+ * MSP frames are newline-delimited JSON. Approvals and questions arrive as
+ * notifications and are answered by client requests. The host may also
+ * present them as server-initiated requests whose reply is only a
+ * presentation receipt (an empty object), so those are acknowledged here and
+ * handed to the notification path. The child process lives in the scope this
+ * is built in.
  *
  * @module provider/msp/MspConnection
  */
@@ -118,6 +120,11 @@ const decodeErrorFrame = Schema.decodeUnknownOption(JsonRpcErrorFrame);
 const decodeJsonLine = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
 const encodeJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 const MAX_STDERR_CHUNK = 4_000;
+/** Server-initiated requests whose reply is a presentation receipt, not an answer. */
+const MSP_SERVER_REQUEST_RECEIPTS: ReadonlySet<string> = new Set([
+  "approval/request",
+  "userInput/request",
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -264,13 +271,17 @@ export const makeMspConnection = Effect.fn("makeMspConnection")(function* (
       yield* log({ direction: "incoming", payload: frame });
       if (typeof frame.method === "string") {
         if (isJsonRpcId(frame.id)) {
-          // MSP v1 never sends server-initiated requests. Refuse loudly instead of hanging the host.
-          yield* send({
-            jsonrpc: "2.0",
-            id: frame.id,
-            error: { code: -32601, message: "T3 Code does not serve MSP requests." },
-          }).pipe(Effect.ignore);
-          return;
+          if (!MSP_SERVER_REQUEST_RECEIPTS.has(frame.method)) {
+            yield* send({
+              jsonrpc: "2.0",
+              id: frame.id,
+              error: { code: -32601, message: "T3 Code does not serve MSP requests." },
+            }).pipe(Effect.ignore);
+            return;
+          }
+          // The receipt only says "a surface will show this"; the decision travels as
+          // `approval/decide` or `userInput/answer` like it does for the notification.
+          yield* send({ jsonrpc: "2.0", id: frame.id, result: {} }).pipe(Effect.ignore);
         }
         yield* options.onNotification({ method: frame.method, params: frame.params });
         return;

@@ -132,6 +132,10 @@ version or range. When its package manager supports installing a specific versio
 you can install the recommendation there. Otherwise use the provider's installer
 on the environment's machine. An unlisted version is unverified.
 
+Muse Code's background reminder agents are off by default in T3 Code because
+they hold each turn open for up to a minute after the reply. Turn on **Reminder
+agents** in the provider's settings to run them.
+
 When a provider CLI is behind its latest release, its provider card shows the
 available version. **Update now** appears only when T3 Code can tell which
 installer owns the CLI (its own update command, Homebrew, or a global npm, pnpm,
