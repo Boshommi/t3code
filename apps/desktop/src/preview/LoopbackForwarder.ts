@@ -22,7 +22,7 @@ import {
 import { pipeWithPreviewLoopbackAliasRewrite } from "./previewLoopbackAlias.ts";
 import { acceptSocks5Connect, SOCKS5_REP, SOCKS5_VERSION, socks5Reply } from "./socks5.ts";
 
-export class PreviewLoopbackForwardError extends Schema.TaggedErrorClass<PreviewLoopbackForwardError>()(
+export class PreviewLoopbackForwardError extends Schema.TaggedError<PreviewLoopbackForwardError>()(
   "PreviewLoopbackForwardError",
   {
     detail: Schema.String,
