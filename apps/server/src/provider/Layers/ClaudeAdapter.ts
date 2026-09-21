@@ -92,7 +92,8 @@ import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { claudeSignedOutMessage, makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import { planClaudeSkillDispatch } from "../Drivers/ClaudeSkillDispatch.ts";
-import { discoverClaudeSkills } from "../Drivers/ClaudeSkills.ts";
+import { resolveClaudeAgentDefinition } from "../Drivers/ClaudeAgentDefinitions.ts";
+import { discoverClaudeSkills, resolveClaudeConfigDirPath } from "../Drivers/ClaudeSkills.ts";
 import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
 import {
   BUNDLED_CLAUDE_MODEL_CATALOG,
@@ -3723,28 +3724,50 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ) {
           context.turnState.hasSubagents = true;
         }
-        // Model/effort: the Agent tool's input carries explicit overrides;
-        // absent ones inherit the session's selection (SDK behavior).
-        // Subagent assistant snapshots refine model with the authoritative API
-        // id: one that already arrived is buffered and outranks the seed here,
-        // later ones refine the record in place. AgentInput.effort may be a
-        // named level or an integer.
+        // Model/effort follow Claude Code's own resolution: the Agent tool's
+        // explicit overrides, then the subagent definition's frontmatter
+        // (`.claude/agents/<type>.md`, project over user config dir), then
+        // CLAUDE_CODE_SUBAGENT_MODEL for the model, then the session's
+        // selection. The SDK's task_started carries none of the definition's
+        // values, so this row — which is persisted and rehydrated — would
+        // otherwise claim the session's model/effort for an agent pinned to
+        // another. Subagent assistant snapshots still refine the model with
+        // the authoritative API id: one that already arrived is buffered and
+        // outranks the seed here, later ones refine the record in place.
+        // AgentInput.effort may be a named level or an integer.
         const launchInput = launchingTool?.input;
         const toolUseId = message.tool_use_id;
         const bufferedModel = toolUseId ? context.pendingTaskModels.get(toolUseId) : undefined;
         if (toolUseId) {
           context.pendingTaskModels.delete(toolUseId);
         }
+        const sessionCwd = context.session.cwd ?? undefined;
+        const definition = message.subagent_type
+          ? yield* resolveClaudeAgentDefinition({
+              subagentType: message.subagent_type,
+              cwd: sessionCwd,
+              configDir: yield* resolveClaudeConfigDirPath(
+                claudeSettings,
+                claudeEnvironment,
+                sessionCwd,
+              ).pipe(Effect.provideService(Path.Path, path)),
+            }).pipe(
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+              Effect.provideService(Path.Path, path),
+            )
+          : {};
         const model =
           bufferedModel ??
           trimmedString(launchInput?.model) ??
+          definition.model ??
+          trimmedString(claudeEnvironment.CLAUDE_CODE_SUBAGENT_MODEL) ??
           trimmedString(context.session.model ?? undefined);
         const rawLaunchEffort = launchInput?.effort;
         const effort =
           trimmedString(rawLaunchEffort) ??
           (typeof rawLaunchEffort === "number" && Number.isFinite(rawLaunchEffort)
             ? String(rawLaunchEffort)
-            : context.currentEffort);
+            : (definition.effort ?? context.currentEffort));
         // Remember the agent identity so every later task.* payload for this
         // taskId is self-describing (identity must survive activity retention).
         context.taskAgents.set(message.task_id, {

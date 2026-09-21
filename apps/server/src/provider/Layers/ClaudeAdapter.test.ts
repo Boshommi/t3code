@@ -3918,6 +3918,92 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("task.started takes model/effort from the subagent definition file", () => {
+    // Claude Code resolves a subagent's model/effort from its definition's
+    // frontmatter before falling back to the session; task_started does not
+    // carry those values, so the adapter reads the file the CLI would.
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "claude-agent-defs-"));
+    const project = NodePath.join(root, "project");
+    const configDir = NodePath.join(root, "config");
+    NodeFS.mkdirSync(NodePath.join(project, ".claude", "agents"), { recursive: true });
+    NodeFS.mkdirSync(NodePath.join(configDir, "agents"), { recursive: true });
+    NodeFS.writeFileSync(
+      NodePath.join(project, ".claude", "agents", "scout.md"),
+      "---\nname: scout\nmodel: claude-sidekick-luna\neffort: low\n---\nYou scout.\n",
+    );
+    NodeFS.writeFileSync(
+      NodePath.join(configDir, "agents", "reviewer.md"),
+      "---\nname: reviewer\nmodel: claude-reviewer-astra\neffort: high\n---\nYou review.\n",
+    );
+    const harness = makeHarness({ cwd: project, claudeConfig: { homePath: configDir } });
+    return Effect.gen(function* () {
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => NodeFS.rmSync(root, { recursive: true, force: true })),
+      );
+      const adapter = yield* ClaudeAdapter;
+
+      const taskEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.type === "task.started"),
+        Stream.take(3),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("claudeAgent"),
+          SYNTHETIC_CLAUDE_CAPABLE_MODEL,
+          [{ id: "effort", value: "max" }],
+        ),
+        runtimeMode: "full-access",
+        cwd: project,
+      });
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "spawn agents",
+        attachments: [],
+      });
+
+      const emitStart = (taskId: string, subagentType: string) =>
+        harness.query.emit({
+          type: "system",
+          subtype: "task_started",
+          task_id: taskId,
+          description: `Agent ${subagentType}`,
+          task_type: "local_agent",
+          subagent_type: subagentType,
+          tool_use_id: `toolu_${taskId}`,
+          uuid: `${taskId}-uuid`,
+          session_id: "sdk-session",
+        } as unknown as SDKMessage);
+      // Project definition wins for `scout`; the user config dir supplies
+      // `reviewer`; an agent with no definition keeps the session's values.
+      emitStart("task-scout", "scout");
+      emitStart("task-reviewer", "reviewer");
+      emitStart("task-plain", "general-purpose");
+
+      const started = Array.from(yield* Fiber.join(taskEventsFiber));
+      const byTask = new Map(
+        started.map((event) => [
+          event.type === "task.started" ? event.payload.taskId : "",
+          event.type === "task.started" ? event.payload : undefined,
+        ]),
+      );
+      assert.equal(byTask.get("task-scout")?.model, "claude-sidekick-luna");
+      assert.equal(byTask.get("task-scout")?.effort, "low");
+      assert.equal(byTask.get("task-reviewer")?.model, "claude-reviewer-astra");
+      assert.equal(byTask.get("task-reviewer")?.effort, "high");
+      assert.equal(byTask.get("task-plain")?.model, SYNTHETIC_CLAUDE_CAPABLE_MODEL);
+      assert.equal(byTask.get("task-plain")?.effort, "max");
+    }).pipe(
+      Effect.scoped,
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("a subagent snapshot that beats task_started still wins over the seed", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
