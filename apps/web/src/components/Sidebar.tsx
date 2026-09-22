@@ -21,6 +21,7 @@ import {
   effectiveSnoozed,
   threadWokeAt,
 } from "@t3tools/client-runtime/state/thread-settled";
+import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import { resolveSettledThreadTimestamp } from "@t3tools/client-runtime/state/thread-sort";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import {
@@ -134,6 +135,7 @@ import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../s
 import { vcsEnvironment } from "../state/vcs";
 import { threadEnvironment } from "../state/threads";
 import { useEnvironmentQuery } from "../state/query";
+import { useThreadSearch } from "../state/queries";
 import { useAtomCommand } from "../state/use-atom-command";
 import {
   buildThreadRouteParams,
@@ -159,6 +161,7 @@ import {
   hasUnseenCompletion,
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
+  mergeSidebarThreadSearchResults,
   orderItemsByPreferredIds,
   planSidebarThreadDrop,
   reduceSidebarProjectScopeMenuState,
@@ -2001,6 +2004,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   isHighlighted: boolean;
   isRouteActive: boolean;
   resultId: string;
+  contentMatch?: { readonly source: "user" | "assistant"; readonly snippet: string } | null;
   onHighlight: () => void;
   onSelect: () => void;
   onFileDropThreads: (threadRef: ScopedThreadRef, files: File[]) => void;
@@ -2091,7 +2095,8 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
               onMouseMove={props.onHighlight}
               onClick={props.onSelect}
               className={cn(
-                "flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm outline-none",
+                "flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm outline-none",
+                props.contentMatch ? "min-h-9 py-1.5" : "h-9",
                 props.isHighlighted || props.isRouteActive
                   ? "bg-sidebar-row-active text-sidebar-foreground"
                   : "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
@@ -2102,11 +2107,23 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
           }
         >
           {props.project ? (
-            <ProjectFavicon project={props.project} className="size-4 shrink-0" />
+            <ProjectFavicon project={props.project} className="size-4 shrink-0 self-start pt-0.5" />
           ) : null}
-          <span className="min-w-0 flex-1 truncate">{thread.title}</span>
-          <span className="shrink-0 text-xs text-muted-foreground/55 tabular-nums">
-            {threadTimeLabel(thread)}
+          <span className="min-w-0 flex-1">
+            <span className="flex items-baseline gap-2">
+              <span className="min-w-0 flex-1 truncate">{thread.title}</span>
+              <span className="shrink-0 text-xs text-muted-foreground/55 tabular-nums">
+                {threadTimeLabel(thread)}
+              </span>
+            </span>
+            {props.contentMatch ? (
+              <span className="mt-0.5 block truncate text-xs text-muted-foreground/75">
+                <span className="font-medium">
+                  {props.contentMatch.source === "user" ? "You: " : "Agent: "}
+                </span>
+                {props.contentMatch.snippet}
+              </span>
+            ) : null}
           </span>
         </TooltipTrigger>
         <SidebarThreadTooltip
@@ -2625,10 +2642,54 @@ export default function Sidebar() {
     () => [...pinnedThreads, ...activeThreads, ...snoozedThreads, ...settledThreads],
     [activeThreads, pinnedThreads, settledThreads, snoozedThreads],
   );
-  const threadSearchResults = useMemo(
-    () => searchSidebarThreads(searchableThreads, threadSearchQuery),
-    [searchableThreads, threadSearchQuery],
+  // Conversation-content search, cs-style: the same orchestration.searchThreads
+  // RPC the command palette and mobile use, scoped to connected environments.
+  // Title hits stay first (lifecycle order); content-only hits follow in
+  // server rank order.
+  const threadContentSearchEnvironmentIds = useMemo(
+    () =>
+      environments
+        .filter((environment) => environment.connection.phase === "connected")
+        .map((environment) => environment.environmentId),
+    [environments],
   );
+  const threadContentSearch = useThreadSearch(threadContentSearchEnvironmentIds, threadSearchQuery);
+  const threadSearchResults = useMemo(() => {
+    const titleMatches = searchSidebarThreads(searchableThreads, threadSearchQuery);
+    if (!isSearchingThreads) return titleMatches;
+    const threadByKey = new Map(
+      searchableThreads.map(
+        (thread) =>
+          [
+            threadSearchMatchKey({ environmentId: thread.environmentId, threadId: thread.id }),
+            thread,
+          ] as const,
+      ),
+    );
+    return mergeSidebarThreadSearchResults({
+      titleMatches,
+      threadByKey,
+      contentMatches: threadContentSearch.matches,
+      matchKeyForThread: (thread) =>
+        threadSearchMatchKey({ environmentId: thread.environmentId, threadId: thread.id }),
+      matchKeyForContent: threadSearchMatchKey,
+    }).threads;
+  }, [isSearchingThreads, searchableThreads, threadContentSearch.matches, threadSearchQuery]);
+  const threadContentMatchByKey = useMemo(() => {
+    const matches = new Map<
+      string,
+      { readonly source: "user" | "assistant"; readonly snippet: string }
+    >();
+    for (const match of threadContentSearch.matches) {
+      if (match.source !== "user" && match.source !== "assistant") continue;
+      const key = threadSearchMatchKey(match);
+      if (!matches.has(key)) {
+        matches.set(key, { source: match.source, snippet: match.snippet });
+      }
+    }
+    return matches;
+  }, [threadContentSearch.matches]);
+  const isSearchingThreadContents = isSearchingThreads && threadContentSearch.isPending;
   const threadSearchResultOrderKey = threadSearchResults
     .map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)))
     .join("\0");
@@ -4575,6 +4636,14 @@ export default function Sidebar() {
                         isHighlighted={activeSearchResultIndex === index}
                         isRouteActive={routeThreadKey === threadKey}
                         resultId={`sidebar-thread-search-result-${index}`}
+                        contentMatch={
+                          threadContentMatchByKey.get(
+                            threadSearchMatchKey({
+                              environmentId: thread.environmentId,
+                              threadId: thread.id,
+                            }),
+                          ) ?? null
+                        }
                         onHighlight={() => setActiveSearchResultIndex(index)}
                         onSelect={() => selectThreadSearchResult(thread)}
                         onFileDropThreads={handleThreadFileDrop}
@@ -4583,6 +4652,13 @@ export default function Sidebar() {
                   })}
                 </ul>
               </TooltipProvider>
+            ) : isSearchingThreadContents ? (
+              <p
+                role="status"
+                className="px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
+              >
+                Searching conversation contents…
+              </p>
             ) : (
               <p
                 role="status"

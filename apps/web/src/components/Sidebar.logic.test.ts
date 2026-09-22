@@ -21,6 +21,7 @@ import {
   isContextMenuPointerDown,
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
+  mergeSidebarThreadSearchResults,
   orderItemsByPreferredIds,
   resolveProjectStatusIndicator,
   resolveThreadRowClassName,
@@ -832,6 +833,51 @@ describe("searchSidebarThreads", () => {
 
   it("returns no results for an empty query", () => {
     expect(searchSidebarThreads(threads, "   ")).toEqual([]);
+  });
+});
+
+describe("mergeSidebarThreadSearchResults", () => {
+  const threads = [
+    { id: "thread-1", environmentId: "env-a" },
+    { id: "thread-2", environmentId: "env-a" },
+    { id: "thread-3", environmentId: "env-a" },
+  ];
+  const keyOf = (entry: { id: string; environmentId: string }) =>
+    JSON.stringify([entry.environmentId, entry.id]);
+  const matchKeyOf = (match: { environmentId: string; threadId: string }) =>
+    JSON.stringify([match.environmentId, match.threadId]);
+  const threadByKey = new Map(threads.map((thread) => [keyOf(thread), thread]));
+
+  it("lists title matches first, then content-only matches in server order", () => {
+    const merged = mergeSidebarThreadSearchResults({
+      titleMatches: [threads[0]!],
+      threadByKey,
+      contentMatches: [
+        { environmentId: "env-a", threadId: "thread-2" },
+        { environmentId: "env-a", threadId: "thread-1" },
+        { environmentId: "env-a", threadId: "thread-3" },
+      ],
+      matchKeyForThread: keyOf,
+      matchKeyForContent: matchKeyOf,
+    });
+    expect(merged.threads).toEqual([threads[0], threads[1], threads[2]]);
+    expect([...merged.contentMatchByKey.keys()]).toEqual([
+      keyOf(threads[1]!),
+      keyOf(threads[0]!),
+      keyOf(threads[2]!),
+    ]);
+  });
+
+  it("drops content matches outside the searchable set", () => {
+    const merged = mergeSidebarThreadSearchResults({
+      titleMatches: [],
+      threadByKey,
+      contentMatches: [{ environmentId: "env-a", threadId: "thread-gone" }],
+      matchKeyForThread: keyOf,
+      matchKeyForContent: matchKeyOf,
+    });
+    expect(merged.threads).toEqual([]);
+    expect(merged.contentMatchByKey.size).toBe(0);
   });
 });
 
