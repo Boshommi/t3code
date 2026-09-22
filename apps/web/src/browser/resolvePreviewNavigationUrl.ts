@@ -8,7 +8,7 @@ import { readPreparedConnection } from "~/state/session";
 
 import { previewEnvironmentIsLocal, resolveBrowserNavigationTarget } from "./browserTargetResolver";
 
-const issuePreviewTunnelWebsocketUrl = async (
+export const issuePreviewTunnelWebsocketUrl = async (
   httpBaseUrl: string,
   authorization:
     | { readonly _tag: "Bearer"; readonly token: string }

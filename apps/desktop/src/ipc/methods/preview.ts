@@ -11,6 +11,9 @@ import {
   DesktopPreviewConfigInputSchema,
   DesktopPreviewLoopbackForwardInputSchema,
   DesktopPreviewLoopbackForwardResultSchema,
+  DesktopPortForwardInputSchema,
+  DesktopPortForwardSchema,
+  DesktopPortForwardStopInputSchema,
   DesktopPreviewNavigateInputSchema,
   DesktopPreviewRecordingArtifactSchema,
   DesktopPreviewRecordingSaveInputSchema,
@@ -38,6 +41,7 @@ import * as NodeURL from "node:url";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
 import * as PreviewLoopbackForwarder from "../../preview/LoopbackForwarder.ts";
+import * as PortForwarder from "../../preview/PortForwarder.ts";
 import {
   attachPreviewLoopbackSession,
   attachPreviewLoopbackSessionIfRemote,
@@ -120,6 +124,36 @@ export const ensureLoopbackForward = DesktopIpc.makeIpcMethod({
       yield* Effect.promise(() => attachPreviewLoopbackSession(session, forwarder));
     }
     return result;
+  }),
+});
+
+export const forwardPort = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_FORWARD_PORT_CHANNEL,
+  payload: DesktopPortForwardInputSchema,
+  result: DesktopPortForwardSchema,
+  handler: Effect.fn("desktop.ipc.preview.forwardPort")(function* (input) {
+    const forwarder = yield* PortForwarder.PortForwarder;
+    return yield* forwarder.forward(input);
+  }),
+});
+
+export const stopPortForward = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_STOP_PORT_FORWARD_CHANNEL,
+  payload: DesktopPortForwardStopInputSchema,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.preview.stopPortForward")(function* (input) {
+    const forwarder = yield* PortForwarder.PortForwarder;
+    yield* forwarder.stop(input);
+  }),
+});
+
+export const listPortForwards = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_LIST_PORT_FORWARDS_CHANNEL,
+  payload: Schema.Void,
+  result: Schema.Array(DesktopPortForwardSchema),
+  handler: Effect.fn("desktop.ipc.preview.listPortForwards")(function* () {
+    const forwarder = yield* PortForwarder.PortForwarder;
+    return yield* forwarder.list;
   }),
 });
 

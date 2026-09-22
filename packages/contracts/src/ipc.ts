@@ -1147,6 +1147,27 @@ export const DesktopPreviewLoopbackForwardResultSchema = Schema.Struct({
 export type DesktopPreviewLoopbackForwardResult =
   typeof DesktopPreviewLoopbackForwardResultSchema.Type;
 
+const DesktopPortNumberSchema = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65_535 }));
+
+export const DesktopPortForwardInputSchema = Schema.Struct({
+  environmentId: EnvironmentId,
+  remotePort: DesktopPortNumberSchema,
+  tunnelWebsocketUrl: Schema.String,
+});
+
+export const DesktopPortForwardStopInputSchema = Schema.Struct({
+  environmentId: EnvironmentId,
+  remotePort: DesktopPortNumberSchema,
+});
+
+export const DesktopPortForwardSchema = Schema.Struct({
+  environmentId: EnvironmentId,
+  remotePort: DesktopPortNumberSchema,
+  /** Port on this machine's 127.0.0.1; equals `remotePort` unless it was taken. */
+  localPort: DesktopPortNumberSchema,
+});
+export type DesktopPortForward = typeof DesktopPortForwardSchema.Type;
+
 export const DesktopPreviewConfigInputSchema = Schema.Struct({
   environmentId: EnvironmentId,
   /**
@@ -1380,6 +1401,14 @@ export interface DesktopPreviewBridge {
   ensureLoopbackForward?: (
     input: typeof DesktopPreviewLoopbackForwardInputSchema.Type,
   ) => Promise<DesktopPreviewLoopbackForwardResult>;
+  /**
+   * Listen on this machine's loopback and tunnel to a remote environment's
+   * localhost port, so the system browser can reach it. Calling again for an
+   * active forward refreshes its tunnel ticket. Optional: older desktop builds.
+   */
+  forwardPort?: (input: typeof DesktopPortForwardInputSchema.Type) => Promise<DesktopPortForward>;
+  stopPortForward?: (input: typeof DesktopPortForwardStopInputSchema.Type) => Promise<void>;
+  listPortForwards?: () => Promise<ReadonlyArray<DesktopPortForward>>;
   goBack: (tabId: string) => Promise<void>;
   goForward: (tabId: string) => Promise<void>;
   refresh: (tabId: string) => Promise<void>;

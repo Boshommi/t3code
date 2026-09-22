@@ -194,6 +194,7 @@ import {
   BrowserSettingsReadError,
 } from "../browser/openFileInPreview";
 import { resolveLinkTarget } from "../browser/browserLinkTarget";
+import { needsPortForward, openUrlInSystemBrowser } from "../browser/portForwards";
 import { PullRequestLinkPreview } from "./pullRequest/PullRequestLinkPreview";
 
 interface ChatMarkdownProps {
@@ -2959,11 +2960,12 @@ const CHAT_MARKDOWN_COMPONENTS = {
               return;
             }
             // Anything else follows the "Open links in" setting. The system browser
-            // keeps the `_blank` the shell already handles; the in-app browser needs
-            // the click intercepted here. A modifier click is the way out of the
-            // in-app default, so it is left to the shell too.
+            // keeps the `_blank` the shell already handles, unless the link is a
+            // remote environment's localhost and needs a port forward first; the
+            // in-app browser needs the click intercepted here. A modifier click is
+            // the way out of the in-app default, so it is left to the shell too.
+            if (event.defaultPrevented) return;
             if (
-              event.defaultPrevented ||
               resolveLinkTarget({
                 url: href,
                 event,
@@ -2971,6 +2973,20 @@ const CHAT_MARKDOWN_COMPONENTS = {
                 canOpenInApp: canOpenInPreview,
               }) !== "app"
             ) {
+              if (!needsPortForward(environmentId, href)) return;
+              event.preventDefault();
+              event.stopPropagation();
+              void openUrlInSystemBrowser(environmentId, href).catch((cause: unknown) => {
+                reportMarkdownActionFailure(
+                  { operation: "open-link-external", target: href },
+                  cause,
+                );
+                toastManager.add({
+                  type: "error",
+                  title: "Unable to open link",
+                  description: cause instanceof Error ? cause.message : "An error occurred.",
+                });
+              });
               return;
             }
             event.preventDefault();
@@ -2983,7 +2999,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
                 result.cause,
               );
               if (squashAtomCommandFailure(result) instanceof BrowserSettingsReadError) return;
-              void readLocalApi()?.shell.openExternal(href);
+              void openUrlInSystemBrowser(environmentId, href).catch(() => undefined);
             });
           }}
           onContextMenu={(event) => {
@@ -3013,7 +3029,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
                   );
                 }
               },
-              openExternal: (target) => api.shell.openExternal(target),
+              openExternal: (target) => openUrlInSystemBrowser(environmentId, target),
               copyLink: (target) => writeTextToClipboard(target, "link"),
               updateThreadLink: updateThreadPullRequestLink,
               reportFailure: (operation, cause) => {

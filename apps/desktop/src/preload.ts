@@ -290,6 +290,10 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.invoke(IpcChannels.PREVIEW_NAVIGATE_CHANNEL, { tabId, url }),
     ensureLoopbackForward: (input) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_ENSURE_LOOPBACK_FORWARD_CHANNEL, input),
+    forwardPort: (input) => ipcRenderer.invoke(IpcChannels.PREVIEW_FORWARD_PORT_CHANNEL, input),
+    stopPortForward: (input) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_STOP_PORT_FORWARD_CHANNEL, input),
+    listPortForwards: () => ipcRenderer.invoke(IpcChannels.PREVIEW_LIST_PORT_FORWARDS_CHANNEL),
     goBack: (tabId) => ipcRenderer.invoke(IpcChannels.PREVIEW_GO_BACK_CHANNEL, { tabId }),
     goForward: (tabId) => ipcRenderer.invoke(IpcChannels.PREVIEW_GO_FORWARD_CHANNEL, { tabId }),
     refresh: (tabId) => ipcRenderer.invoke(IpcChannels.PREVIEW_REFRESH_CHANNEL, { tabId }),

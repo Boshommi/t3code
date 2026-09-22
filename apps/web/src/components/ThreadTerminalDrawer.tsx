@@ -82,6 +82,7 @@ import { serverEnvironment } from "../state/server";
 import { previewEnvironment } from "../state/preview";
 import { terminalEnvironment } from "../state/terminal";
 import { openTerminalLinkInPreview } from "./preview/openTerminalLinkInPreview";
+import { openUrlInSystemBrowser } from "~/browser/portForwards";
 import { useAtomCommand } from "../state/use-atom-command";
 import { preventTerminalCloseShortcut } from "../lib/terminalCloseShortcut";
 import {
@@ -790,7 +791,7 @@ export function TerminalViewport({
             return;
           }
           const fallbackToBrowser = () => {
-            void localApi.shell.openExternal(text).catch((error: unknown) => {
+            void openUrlInSystemBrowser(threadRef.environmentId, text).catch((error: unknown) => {
               writeSystemMessage(
                 latestTerminal,
                 error instanceof Error ? error.message : "Unable to open link",
