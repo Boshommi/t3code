@@ -143,6 +143,19 @@ running is left alone.
 For Antigravity's Google callback on a remote host, see
 [remote sign-in](./providers-antigravity.md#sign-in-from-a-remote-device).
 
+## Open a remote dev server in your own browser
+
+In the desktop app, a `localhost` link from a remote environment opens that
+machine's server, not yours. Choose **Open in system browser** in the preview's
+address bar, or Cmd/Ctrl-click a terminal link. T3 Code forwards the port to
+`localhost` on your computer and opens it in your default browser. Links follow
+the same path when **Open links in** is set to the system browser.
+
+The forward keeps the remote port number unless your computer already uses it.
+In that case the notification shows the port it picked instead. Forwards stay
+open until you stop them from the preview's **⋮** menu or quit the app. Port
+forwarding is not available over T3 Connect yet.
+
 ## Manage or revoke access
 
 On the host, **Settings → Connections** lets authorized administrators create

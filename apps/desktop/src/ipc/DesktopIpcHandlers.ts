@@ -143,6 +143,9 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(installUpdate);
   yield* ipc.handle(checkForUpdate);
   yield* ipc.handle(PreviewIpc.ensureLoopbackForward);
+  yield* ipc.handle(PreviewIpc.forwardPort);
+  yield* ipc.handle(PreviewIpc.stopPortForward);
+  yield* ipc.handle(PreviewIpc.listPortForwards);
   for (const previewMethod of PreviewIpc.methods) {
     yield* ipc.handle(previewMethod);
   }

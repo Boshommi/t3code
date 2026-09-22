@@ -63,6 +63,7 @@ import * as BrowserImport from "./preview/BrowserImport/BrowserImport.ts";
 import * as LinuxBrowserSecret from "./preview/BrowserImport/LinuxBrowserSecret.ts";
 import * as BrowserSession from "./preview/BrowserSession.ts";
 import * as PreviewLoopbackForwarder from "./preview/LoopbackForwarder.ts";
+import * as PortForwarder from "./preview/PortForwarder.ts";
 import * as PreviewLoopbackRequestInterceptor from "./preview/LoopbackRequestInterceptor.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as DesktopWindow from "./window/DesktopWindow.ts";
@@ -152,6 +153,7 @@ const desktopPreviewLayer = PreviewManager.layer.pipe(
   Layer.provideMerge(BrowserImport.layer.pipe(Layer.provide(LinuxBrowserSecret.layer))),
   Layer.provideMerge(PreviewLoopbackRequestInterceptor.layer),
   Layer.provideMerge(PreviewLoopbackForwarder.layer),
+  Layer.provideMerge(PortForwarder.layer),
   Layer.provideMerge(BrowserSession.layer),
   Layer.provideMerge(desktopFoundationLayer),
 );

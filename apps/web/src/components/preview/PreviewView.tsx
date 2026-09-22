@@ -31,6 +31,7 @@ import {
 } from "~/previewStateStore";
 import { prepareDesktopLoopbackPreviewUrl } from "~/browser/resolvePreviewNavigationUrl";
 import { resolveDiscoveredServerUrl } from "~/browser/browserTargetResolver";
+import { openUrlInSystemBrowser } from "~/browser/portForwards";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
 import { useEnvironmentHttpBaseUrl } from "~/state/environments";
 import { previewEnvironment } from "~/state/preview";
@@ -321,8 +322,16 @@ export function PreviewView({
 
   const handleOpenInBrowser = useCallback(() => {
     if (!localApi || !url) return;
-    void localApi.shell.openExternal(url).catch(() => undefined);
-  }, [url]);
+    void openUrlInSystemBrowser(threadRef.environmentId, url).catch((error: unknown) => {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Unable to open in browser",
+          description: error instanceof Error ? error.message : "The link could not be opened.",
+        }),
+      );
+    });
+  }, [threadRef.environmentId, url]);
 
   const handlePictureInPicture = useCallback(() => {
     if (!tabId) return;

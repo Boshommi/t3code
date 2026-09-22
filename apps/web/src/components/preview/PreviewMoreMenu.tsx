@@ -3,6 +3,7 @@
 import type { DesktopPreviewColorScheme, EnvironmentId } from "@t3tools/contracts";
 import { Minus, MoreVertical, Plus as PlusIcon, RotateCcw } from "lucide-react";
 
+import { stopPortForward, usePortForwardStore } from "~/browser/portForwards";
 import { Button } from "~/components/ui/button";
 import {
   Menu,
@@ -83,6 +84,10 @@ export function PreviewMoreMenu({
   profileId,
   profileName,
 }: Props) {
+  const portForwards = usePortForwardStore((state) => state.forwards).filter(
+    (forward) => forward.environmentId === environmentId,
+  );
+
   if (!previewBridge) return null;
   const bridge = previewBridge;
   const tabDisabled = !tabId || !hasWebContents;
@@ -224,6 +229,26 @@ export function PreviewMoreMenu({
             Clear cache
           </MenuItem>
         </MenuGroup>
+        {portForwards.length > 0 ? (
+          <>
+            <MenuSeparator />
+            {/* Forwards opened by "Open in system browser" for this remote environment. */}
+            <MenuGroup>
+              <MenuGroupLabel>Forwarded ports</MenuGroupLabel>
+              {portForwards.map((forward) => (
+                <MenuItem
+                  key={forward.remotePort}
+                  onClick={() => void stopPortForward(forward).catch(() => undefined)}
+                >
+                  Stop forwarding{" "}
+                  {forward.localPort === forward.remotePort
+                    ? `:${String(forward.remotePort)}`
+                    : `:${String(forward.remotePort)} → localhost:${String(forward.localPort)}`}
+                </MenuItem>
+              ))}
+            </MenuGroup>
+          </>
+        ) : null}
       </MenuPopup>
     </Menu>
   );
