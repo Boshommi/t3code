@@ -70,7 +70,7 @@ function hsvToHex(hue: number, saturation: number, value: number) {
     .join("")}`;
 }
 
-function ProviderCustomColorPanel(props: {
+export function ProviderCustomColorPanel(props: {
   readonly value: string;
   readonly onCommit: (value: string) => void;
 }) {

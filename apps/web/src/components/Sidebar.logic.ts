@@ -996,6 +996,49 @@ export function sortSettledThreadsForSidebar<
   );
 }
 
+export interface SidebarProjectThreadGroup<TThread> {
+  /** Logical project key, or SIDEBAR_UNGROUPED_PROJECT_KEY. */
+  readonly projectKey: string;
+  readonly pinned: readonly TThread[];
+  readonly active: readonly TThread[];
+  readonly snoozed: readonly TThread[];
+  readonly settled: readonly TThread[];
+}
+
+/** Threads whose project isn't in the catalog (yet) still need a home. */
+export const SIDEBAR_UNGROUPED_PROJECT_KEY = "\0ungrouped";
+
+/** Splits the lifecycle sections across logical projects. Each section keeps
+    its incoming order, every listed project gets a group (empty ones too, so
+    they stay reachable), and unknown projects collect in a trailing group. */
+export function groupSidebarThreadsByProject<
+  TThread extends { readonly environmentId: string; readonly projectId: string },
+>(input: {
+  projectKeys: readonly string[];
+  /** `${environmentId}:${projectId}` to logical project key. */
+  projectKeyByMemberKey: ReadonlyMap<string, string>;
+  sections: Readonly<Record<"pinned" | "active" | "snoozed" | "settled", readonly TThread[]>>;
+}): SidebarProjectThreadGroup<TThread>[] {
+  type MutableGroup = Record<"pinned" | "active" | "snoozed" | "settled", TThread[]>;
+  const groups = new Map<string, MutableGroup>();
+  const emptyGroup = (): MutableGroup => ({ pinned: [], active: [], snoozed: [], settled: [] });
+  for (const projectKey of input.projectKeys) groups.set(projectKey, emptyGroup());
+  for (const section of ["pinned", "active", "snoozed", "settled"] as const) {
+    for (const thread of input.sections[section]) {
+      const projectKey =
+        input.projectKeyByMemberKey.get(`${thread.environmentId}:${thread.projectId}`) ??
+        SIDEBAR_UNGROUPED_PROJECT_KEY;
+      let group = groups.get(projectKey);
+      if (group === undefined) {
+        group = emptyGroup();
+        groups.set(projectKey, group);
+      }
+      group[section].push(thread);
+    }
+  }
+  return [...groups].map(([projectKey, group]) => ({ projectKey, ...group }));
+}
+
 /** The timestamp a working thread's elapsed label counts from: the running
     turn's start (request time until adoption), falling back to the session's
     last transition when the turn projection lags behind. Malformed

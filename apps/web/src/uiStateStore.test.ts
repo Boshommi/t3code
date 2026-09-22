@@ -12,6 +12,7 @@ import {
   reorderProjects,
   resolveProjectExpanded,
   setDefaultAdvertisedEndpointKey,
+  setProjectColor,
   setProjectExpanded,
   setSidebarProjectScopeKey,
   setThreadChangedFilesExpanded,
@@ -23,6 +24,9 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     projectExpandedById: {},
     projectOrder: [],
     sidebarProjectScopeKey: null,
+    sidebarGroupByProject: true,
+    projectColorByKey: {},
+    projectShelfExpandedByKey: {},
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
     defaultAdvertisedEndpointKey: null,
@@ -158,6 +162,26 @@ describe("uiStateStore pure functions", () => {
   });
 });
 
+describe("setProjectColor", () => {
+  it("normalizes colors, clamps opacity, and clears back to no entry", () => {
+    const colored = setProjectColor(makeUiState(), "project", { color: "#2563EB", opacity: 3 });
+    expect(colored.projectColorByKey).toEqual({ project: { color: "#2563eb", opacity: 1 } });
+    expect(setProjectColor(colored, "project", { color: "#2563eb", opacity: 1 })).toBe(colored);
+    expect(setProjectColor(colored, "project", null).projectColorByKey).toEqual({});
+  });
+
+  it("ignores malformed persisted colors", () => {
+    const parsed = parsePersistedState({
+      projectColorByKey: {
+        good: { color: "#00ff00", opacity: 0.1 },
+        badColor: { color: "green", opacity: 0.1 },
+        badOpacity: { color: "#00ff00", opacity: "0.1" as unknown as number },
+      },
+    });
+    expect(parsed.projectColorByKey).toEqual({ good: { color: "#00ff00", opacity: 0.1 } });
+  });
+});
+
 describe("parsePersistedState", () => {
   it("hydrates the last selected pull request merge method", () => {
     const parsed = parsePersistedState({
@@ -202,6 +226,9 @@ describe("parsePersistedState", () => {
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
       sidebarProjectScopeKey: null,
+      sidebarGroupByProject: true,
+      projectColorByKey: {},
+      projectShelfExpandedByKey: {},
       pullRequestMergeMethod: "merge",
       threadChangedFilesExpandedById: {
         "environment:thread-1": {
@@ -324,6 +351,9 @@ describe("uiStateStore persistence", () => {
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
       sidebarProjectScopeKey: null,
+      sidebarGroupByProject: true,
+      projectColorByKey: {},
+      projectShelfExpandedByKey: {},
       threadChangedFilesExpansionVersion: 2,
       threadChangedFilesExpandedById: {
         "environment:thread-1": {
@@ -336,6 +366,21 @@ describe("uiStateStore persistence", () => {
     expect(parsePersistedState(persisted)).toEqual({
       ...state,
     });
+  });
+
+  it("restores project grouping, colors, and shelves across reloads", () => {
+    const state = makeUiState({
+      sidebarGroupByProject: false,
+      projectColorByKey: { "github.com/pingdotgg/t3code": { color: "#2563eb", opacity: 0.2 } },
+      projectShelfExpandedByKey: { "github.com/pingdotgg/t3code:settled": true },
+    });
+    persistState(state);
+
+    const persisted = JSON.parse(
+      localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
+    ) as PersistedUiState;
+
+    expect(parsePersistedState(persisted)).toEqual(state);
   });
 
   it("restores the sidebar project scope across reloads", () => {

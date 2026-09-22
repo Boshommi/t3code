@@ -20,6 +20,20 @@ on Windows and Linux to start a new thread and immediately open another draft. T
 next draft keeps the workspace mode and base branch you selected. With **New
 worktree**, each background submission creates its own worktree.
 
+## Group threads by project
+
+On web and desktop, the sidebar lists threads under a header for each project. Click a header
+to collapse or expand that project, or use its pen button to start a thread there. Each project
+has its own **Snoozed** and **Settled** shelves. Right-click a project header to settle all of its
+active threads at once (pinned threads stay) or to open project settings.
+
+To tint a project, hover its header and choose the palette button, or right-click the header and
+choose **Set color…**. The sidebar shows the color and opacity while you adjust them. Colors are
+saved on this device only.
+
+Drag and drop is off while threads are grouped, so use the thread actions instead. To switch
+back to a single list, use the list button in the sidebar header.
+
 ## Pin and reorder threads
 
 Pin a thread from its menu to keep it above your active work.

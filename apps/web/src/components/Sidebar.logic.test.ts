@@ -17,6 +17,7 @@ import {
   reduceSidebarProjectScopeMenuState,
   getFallbackThreadIdAfterDelete,
   getProjectSortTimestamp,
+  groupSidebarThreadsByProject,
   hasUnseenCompletion,
   isContextMenuPointerDown,
   isSidebarNestedLinkClick,
@@ -46,6 +47,7 @@ import {
   sortScopedProjectsForSidebar,
   shouldCreateNewThreadInCurrentProject,
   shouldNavigateAfterThreadPark,
+  SIDEBAR_UNGROUPED_PROJECT_KEY,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
   type SidebarListItem,
   type SidebarListMarker,
@@ -2587,4 +2589,43 @@ describe("navigation after parking a thread", () => {
       ).toBe(expected);
     },
   );
+});
+
+describe("groupSidebarThreadsByProject", () => {
+  const row = (id: string, environmentId: string, projectId: string) => ({
+    id,
+    environmentId,
+    projectId,
+  });
+
+  it("keeps every project, each section's order, and collects unknown projects last", () => {
+    const groups = groupSidebarThreadsByProject({
+      projectKeys: ["repo-a", "repo-b", "empty"],
+      projectKeyByMemberKey: new Map([
+        ["local:a", "repo-a"],
+        ["remote:a", "repo-a"],
+        ["local:b", "repo-b"],
+      ]),
+      sections: {
+        pinned: [row("pin-b", "local", "b")],
+        active: [row("a2", "remote", "a"), row("orphan", "local", "gone"), row("a1", "local", "a")],
+        snoozed: [],
+        settled: [row("s-a", "local", "a"), row("s-b", "local", "b")],
+      },
+    });
+
+    expect(
+      groups.map((group) => ({
+        projectKey: group.projectKey,
+        pinned: group.pinned.map((thread) => thread.id),
+        active: group.active.map((thread) => thread.id),
+        settled: group.settled.map((thread) => thread.id),
+      })),
+    ).toEqual([
+      { projectKey: "repo-a", pinned: [], active: ["a2", "a1"], settled: ["s-a"] },
+      { projectKey: "repo-b", pinned: ["pin-b"], active: [], settled: ["s-b"] },
+      { projectKey: "empty", pinned: [], active: [], settled: [] },
+      { projectKey: SIDEBAR_UNGROUPED_PROJECT_KEY, pinned: [], active: ["orphan"], settled: [] },
+    ]);
+  });
 });

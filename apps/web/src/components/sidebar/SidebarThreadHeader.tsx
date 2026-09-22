@@ -6,11 +6,21 @@
  * The scope icon swaps to the project favicon while a project is selected,
  * so the header still names the scope after the row that showed it is gone.
  *
+ * The grouping toggle switches between one lifecycle list and per-project
+ * groups.
+ *
  * The scope picker itself is passed in: its combobox state lives with the rest
  * of the sidebar's scope logic. `searchFieldRef` lands on the search field so
  * the picker's popup can anchor to that width rather than to its 28px trigger.
  */
-import { FolderPlusIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
+import {
+  FolderPlusIcon,
+  ListIcon,
+  ListTreeIcon,
+  SearchIcon,
+  SquarePenIcon,
+  XIcon,
+} from "lucide-react";
 import {
   type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -32,6 +42,9 @@ export interface SidebarThreadHeaderProps {
   hasProjects: boolean;
   /** The project scope combobox, rendered as the first icon of the group. */
   projectScope: ReactNode;
+  /** Threads listed under per-project headers instead of one flat list. */
+  groupByProject: boolean;
+  onToggleGroupByProject: () => void;
   onNewProject: () => void;
   /** Receives the click so Shift+click can skip the project picker. */
   onNewThread: (event: ReactMouseEvent) => void;
@@ -54,6 +67,8 @@ export function SidebarThreadHeader({
   searchFieldRef,
   hasProjects,
   projectScope,
+  groupByProject,
+  onToggleGroupByProject,
   onNewProject,
   onNewThread,
   newThreadDisabled,
@@ -128,6 +143,12 @@ export function SidebarThreadHeader({
       <div className="flex shrink-0 items-center">
         {hasProjects ? (
           <>
+            <SidebarHeaderIconButton
+              label={groupByProject ? "Show one list" : "Group by project"}
+              onClick={onToggleGroupByProject}
+            >
+              {groupByProject ? <ListIcon /> : <ListTreeIcon />}
+            </SidebarHeaderIconButton>
             {projectScope}
             <SidebarHeaderIconButton label="New project" onClick={onNewProject}>
               <FolderPlusIcon />
