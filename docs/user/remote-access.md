@@ -146,15 +146,25 @@ For Antigravity's Google callback on a remote host, see
 ## Open a remote dev server in your own browser
 
 In the desktop app, a `localhost` link from a remote environment opens that
-machine's server, not yours. Choose **Open in system browser** in the preview's
-address bar, or Cmd/Ctrl-click a terminal link. T3 Code forwards the port to
-`localhost` on your computer and opens it in your default browser. Links follow
-the same path when **Open links in** is set to the system browser.
+machine's server, not yours. To reach it from any browser on your computer,
+forward the port:
 
-The forward keeps the remote port number unless your computer already uses it.
-In that case the notification shows the port it picked instead. Forwards stay
-open until you stop them from the preview's **⋮** menu or quit the app. Port
-forwarding is not available over T3 Connect yet.
+- **Forwarded ports** in the preview's **⋮** menu, or **Forward a port** in the
+  command palette, lists the servers listening on the remote. Forward one from
+  the list or type any port number.
+- **Open in system browser** in the preview's address bar, or a Cmd/Ctrl-click
+  on a terminal link, forwards the page's port and opens it. Links do the same
+  when **Open links in** is set to the system browser.
+
+Forward every port a page loads from. An app on port 3000 that embeds a sign-in
+iframe from port 5173 needs both.
+
+Forwards belong to the remote environment, not to a thread. Every thread on
+that remote shows its forwarded ports beside the branch picker; select them to
+manage or stop forwards. A forward keeps the remote port number unless your
+computer already uses it, in which case the dialog shows the port it picked.
+Forwards stay open until you stop them or quit the app. Port forwarding is not
+available over T3 Connect yet.
 
 ## Manage or revoke access
 

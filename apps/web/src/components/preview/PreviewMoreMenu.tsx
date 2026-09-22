@@ -4,7 +4,11 @@ import type { DesktopPreviewColorScheme, EnvironmentId } from "@t3tools/contract
 import { Minus, MoreVertical, Plus as PlusIcon, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { stopPortForward, usePortForwardStore } from "~/browser/portForwards";
+import {
+  canForwardPorts,
+  openPortForwardsDialog,
+  useEnvironmentPortForwards,
+} from "~/browser/portForwards";
 import { usePreviewHostPopupStore } from "~/browser/previewHostPopupStore";
 
 import { Button } from "~/components/ui/button";
@@ -91,9 +95,7 @@ export function PreviewMoreMenu({
   const [open, setOpen] = useState(false);
   const beginHostPopup = usePreviewHostPopupStore((state) => state.begin);
   const endHostPopup = usePreviewHostPopupStore((state) => state.end);
-  const portForwards = usePortForwardStore((state) => state.forwards).filter(
-    (forward) => forward.environmentId === environmentId,
-  );
+  const portForwardCount = useEnvironmentPortForwards(environmentId).length;
 
   useEffect(() => {
     if (!open) return;
@@ -247,24 +249,12 @@ export function PreviewMoreMenu({
             Clear cache
           </MenuItem>
         </MenuGroup>
-        {portForwards.length > 0 ? (
+        {canForwardPorts(environmentId) ? (
           <>
             <MenuSeparator />
-            {/* Forwards opened by "Open in system browser" for this remote environment. */}
-            <MenuGroup>
-              <MenuGroupLabel>Forwarded ports</MenuGroupLabel>
-              {portForwards.map((forward) => (
-                <MenuItem
-                  key={forward.remotePort}
-                  onClick={() => void stopPortForward(forward).catch(() => undefined)}
-                >
-                  Stop forwarding{" "}
-                  {forward.localPort === forward.remotePort
-                    ? `:${String(forward.remotePort)}`
-                    : `:${String(forward.remotePort)} → localhost:${String(forward.localPort)}`}
-                </MenuItem>
-              ))}
-            </MenuGroup>
+            <MenuItem onClick={() => openPortForwardsDialog(environmentId)}>
+              Forwarded ports{portForwardCount > 0 ? ` (${String(portForwardCount)})` : ""}…
+            </MenuItem>
           </>
         ) : null}
       </MenuPopup>

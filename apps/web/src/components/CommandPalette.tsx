@@ -42,6 +42,7 @@ import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import {
   ArrowLeftIcon,
+  ArrowLeftRightIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderIcon,
@@ -115,6 +116,7 @@ import {
 import { onOpenCommandPalette } from "../commandPaletteBus";
 import { openChatFind } from "../chatFindBus";
 import { isPreviewFocused } from "../lib/previewFocus";
+import { canForwardPorts, openPortForwardsDialog } from "../browser/portForwards";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import {
   PULL_REQUESTS_PANEL_REF,
@@ -1858,6 +1860,20 @@ function OpenCommandPaletteDialog(props: {
       shortcutCommand: "chat.find",
       run: async () => {
         openChatFind();
+      },
+    });
+  }
+
+  const portForwardEnvironmentId = activeThread?.environmentId ?? null;
+  if (portForwardEnvironmentId !== null && canForwardPorts(portForwardEnvironmentId)) {
+    actionItems.push({
+      kind: "action",
+      value: "action:forward-port",
+      searchTerms: ["forward port", "ports", "port forwarding", "localhost", "tunnel"],
+      title: "Forward a port…",
+      icon: <ArrowLeftRightIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        openPortForwardsDialog(portForwardEnvironmentId);
       },
     });
   }

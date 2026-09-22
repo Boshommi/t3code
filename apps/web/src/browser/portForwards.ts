@@ -1,5 +1,6 @@
 import type { DesktopPortForward, EnvironmentId } from "@t3tools/contracts";
 import { parseLoopbackPreviewTarget } from "@t3tools/shared/previewLoopbackForward";
+import { useMemo } from "react";
 import { create } from "zustand";
 
 import { previewBridge } from "~/components/preview/previewBridge";
@@ -79,6 +80,17 @@ if (previewBridge?.listPortForwards !== undefined) {
 }
 
 /**
+ * Whether this environment's localhost is another machine that the desktop
+ * app can forward ports from. T3 Connect sessions cannot mint tunnel tickets.
+ */
+export function canForwardPorts(environmentId: EnvironmentId | null | undefined): boolean {
+  if (!environmentId || previewBridge?.forwardPort === undefined) return false;
+  const connection = readPreparedConnection(environmentId);
+  if (connection === null || connection.httpAuthorization?._tag === "Dpop") return false;
+  return !previewEnvironmentIsLocal(connection);
+}
+
+/**
  * Whether the system browser needs a forward to open this URL: it points at
  * localhost, and localhost for this environment is another machine.
  */
@@ -91,7 +103,19 @@ export function needsPortForward(
   return !previewEnvironmentIsLocal(readPreparedConnection(environmentId));
 }
 
-async function forwardPort(
+/** The environment's forwards; they belong to the remote, not to any one thread. */
+export function useEnvironmentPortForwards(
+  environmentId: EnvironmentId | null | undefined,
+): ReadonlyArray<DesktopPortForward> {
+  const forwards = usePortForwardStore((state) => state.forwards);
+  return useMemo(
+    () => forwards.filter((forward) => forward.environmentId === environmentId),
+    [environmentId, forwards],
+  );
+}
+
+/** Starts forwarding a remote port, or returns the forward already running. */
+export async function forwardPort(
   environmentId: EnvironmentId,
   remotePort: number,
 ): Promise<DesktopPortForward> {
@@ -104,17 +128,22 @@ async function forwardPort(
   const { forwards } = usePortForwardStore.getState();
   if (!forwards.some((existing) => sameForward(existing, forward))) {
     setForwards([...forwards, forward]);
-    toastManager.add({
-      type: "success",
-      title: `Forwarding port ${String(remotePort)}`,
-      description:
-        forward.localPort === remotePort
-          ? `localhost:${String(remotePort)} on this machine now reaches the remote environment.`
-          : `Port ${String(remotePort)} is in use on this machine, so it is forwarded to localhost:${String(forward.localPort)}.`,
-      actionProps: { children: "Stop", onClick: () => void stopPortForward(forward) },
-    });
   }
   return forward;
+}
+
+/**
+ * URL on this machine for a forward. A remote URL keeps its path and its
+ * `localhost` or `127.0.0.1` host, since pages care which origin they are on;
+ * without one, the forward's own listen address is the literal answer.
+ */
+export function forwardedUrl(forward: DesktopPortForward, remoteUrl?: string): string {
+  const target = remoteUrl === undefined ? null : parseLoopbackPreviewTarget(remoteUrl);
+  const url = new URL(target?.href ?? "http://127.0.0.1/");
+  // The forward listens on 127.0.0.1 only; `localhost` resolves there too.
+  if (url.hostname !== "127.0.0.1") url.hostname = "localhost";
+  url.port = String(forward.localPort);
+  return url.href;
 }
 
 export async function stopPortForward(
@@ -146,10 +175,33 @@ export async function openUrlInSystemBrowser(
     await api.shell.openExternal(rawUrl);
     return;
   }
+  const alreadyForwarded = usePortForwardStore
+    .getState()
+    .forwards.some((existing) => sameForward(existing, { environmentId, remotePort: target.port }));
   const forward = await forwardPort(environmentId, target.port);
-  const url = new URL(target.href);
-  // The forward listens on 127.0.0.1 only; `localhost` resolves there too.
-  if (url.hostname !== "127.0.0.1") url.hostname = "localhost";
-  url.port = String(forward.localPort);
-  await api.shell.openExternal(url.href);
+  if (!alreadyForwarded) {
+    toastManager.add({
+      type: "success",
+      title: `Forwarding port ${String(target.port)}`,
+      description:
+        forward.localPort === target.port
+          ? `localhost:${String(target.port)} on this machine now reaches the remote environment.`
+          : `Port ${String(target.port)} is in use on this machine, so it is forwarded to localhost:${String(forward.localPort)}.`,
+      actionProps: { children: "Ports", onClick: () => openPortForwardsDialog(environmentId) },
+    });
+  }
+  await api.shell.openExternal(forwardedUrl(forward, rawUrl));
+}
+
+/** Which environment's ports dialog is open; the dialog is mounted once at the app root. */
+export const usePortForwardsDialogStore = create<{
+  readonly environmentId: EnvironmentId | null;
+}>(() => ({ environmentId: null }));
+
+export function openPortForwardsDialog(environmentId: EnvironmentId): void {
+  usePortForwardsDialogStore.setState({ environmentId });
+}
+
+export function closePortForwardsDialog(): void {
+  usePortForwardsDialogStore.setState({ environmentId: null });
 }

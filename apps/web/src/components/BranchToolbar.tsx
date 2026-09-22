@@ -59,6 +59,7 @@ import { useComposerMenuProps } from "./chat/composerEventScope";
 import { measureRestingComposerControls } from "./chat/restingComposerControlsMeasurement";
 import { resolveRestingComposerControlsNaturalWidth } from "./composerFooterLayout";
 import { cn } from "~/lib/utils";
+import { PortForwardsChip } from "./preview/PortForwardsDialog";
 
 export interface BranchToolbarHandle {
   openBranchPicker: () => void;
@@ -674,6 +675,8 @@ export const BranchToolbar = memo(function BranchToolbar({
           className="flex min-w-0 flex-1 items-center justify-start overflow-x-clip overflow-y-visible"
         />
       ) : null}
+
+      <PortForwardsChip environmentId={environmentId} />
 
       {showGitControls ? (
         <BranchToolbarBranchSelector
