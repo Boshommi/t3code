@@ -912,6 +912,42 @@ export function searchSidebarThreads<
   );
 }
 
+/**
+ * Merge local title matches with server conversation-content matches, cs-style:
+ * name hits first (in lifecycle order), then content-only hits (in server
+ * rank order). Content hits resolve against the searchable set, so scope,
+ * archive, and settled-paging filters apply to both halves.
+ */
+export function mergeSidebarThreadSearchResults<TThread, TMatch>(input: {
+  readonly titleMatches: readonly TThread[];
+  readonly threadByKey: ReadonlyMap<string, TThread>;
+  readonly contentMatches: readonly TMatch[];
+  readonly matchKeyForThread: (thread: TThread) => string;
+  readonly matchKeyForContent: (match: TMatch) => string;
+}): {
+  readonly threads: TThread[];
+  readonly contentMatchByKey: Map<string, TMatch>;
+} {
+  const contentMatchByKey = new Map<string, TMatch>();
+  for (const match of input.contentMatches) {
+    const key = input.matchKeyForContent(match);
+    if (input.threadByKey.has(key) && !contentMatchByKey.has(key)) {
+      contentMatchByKey.set(key, match);
+    }
+  }
+  const threads = [...input.titleMatches];
+  const seen = new Set(input.titleMatches.map((thread) => input.matchKeyForThread(thread)));
+  for (const match of input.contentMatches) {
+    const key = input.matchKeyForContent(match);
+    if (seen.has(key)) continue;
+    const thread = input.threadByKey.get(key);
+    if (thread === undefined) continue;
+    seen.add(key);
+    threads.push(thread);
+  }
+  return { threads, contentMatchByKey };
+}
+
 export function filterSidebarProjectScopeItems<TItem extends { readonly value: string }>(input: {
   items: readonly TItem[];
   query: string;
