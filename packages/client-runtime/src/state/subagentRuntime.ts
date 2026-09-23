@@ -79,6 +79,8 @@ export interface RuntimeSubagent {
   readonly workflowName: string | null;
   readonly phases: ReadonlyArray<SubagentWorkflowPhase>;
   readonly runHandles: SubagentRunHandles | null;
+  /** Id to request this agent's transcript with; defaults to `id`. */
+  readonly transcriptAgentId: string | null;
   readonly recentActivity: ReadonlyArray<SubagentActivityEntry>;
   /** First retained observation, used as the roster's stable display order. */
   readonly firstSeenAt: string;
@@ -248,6 +250,7 @@ interface MutableAgent {
   workflowName: string | null;
   phases: ReadonlyArray<SubagentWorkflowPhase>;
   runHandles: SubagentRunHandles | null;
+  transcriptAgentId: string | null;
   recentActivity: ReadonlyArray<SubagentActivityEntry>;
   firstSeenAt: string;
   startedAt: string | null;
@@ -305,6 +308,7 @@ function getOrCreate(
     workflowName: asString(payload.workflowName) ?? null,
     phases: [],
     runHandles: null,
+    transcriptAgentId: null,
     recentActivity: [],
     firstSeenAt: at,
     startedAt: null,
@@ -333,6 +337,8 @@ function fillMetadata(agent: MutableAgent, payload: Record<string, unknown>): vo
   }
   const workflowName = asString(payload.workflowName);
   if (workflowName) agent.workflowName = workflowName;
+  const transcriptAgentId = asString(payload.transcriptAgentId);
+  if (transcriptAgentId) agent.transcriptAgentId = transcriptAgentId;
   if (asString(payload.taskType) === "local_workflow") agent.kind = "workflow";
   const agentIndex = asCount(payload.agentIndex);
   if (agentIndex !== undefined) agent.agentIndex = agentIndex;

@@ -114,7 +114,7 @@ export function SubagentTranscript({
   const transcript = useEnvironmentQuery(
     orchestrationEnvironment.subagentTranscript({
       environmentId,
-      input: { threadId, agentId: agent.id },
+      input: { threadId, agentId: agent.transcriptAgentId ?? agent.id },
     }),
   );
   const live = isActiveSubagentStatus(agent.status);

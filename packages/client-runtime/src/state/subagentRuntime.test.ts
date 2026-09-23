@@ -344,6 +344,7 @@ describe("foldSubagentActivities", () => {
         error: "attempt 1 died",
         parentAgentId: "wf-2",
         attempt: 1,
+        transcriptAgentId: "agent-attempt-1",
       }),
       activity("task.progress", {
         taskId: "wf-2:wf:1",
@@ -351,6 +352,7 @@ describe("foldSubagentActivities", () => {
         status: "running",
         parentAgentId: "wf-2",
         attempt: 2,
+        transcriptAgentId: "agent-attempt-2",
       }),
     ]);
     expect(agents).toHaveLength(1);
@@ -358,6 +360,8 @@ describe("foldSubagentActivities", () => {
     expect(member.activationCount).toBeGreaterThanOrEqual(2);
     expect(member.error).toBeNull();
     expect(member.status).toBe("running");
+    // The transcript follows the live attempt, not the failed one.
+    expect(member.transcriptAgentId).toBe("agent-attempt-2");
   });
 
   it("drops non-http(s) session urls at the fold boundary", () => {
