@@ -1,6 +1,7 @@
 import type { TurnId } from "@t3tools/contracts";
+import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 
-import { deriveDisplayedUserMessageState } from "./terminalContext";
+import { resolveUserMessageContext } from "./composerContextRecords";
 import type { TimelineEntry } from "../session-logic";
 
 export interface ChatFindDocument {
@@ -40,7 +41,10 @@ export function collectChatFindDocuments(
       }
       const text =
         message.role === "user"
-          ? deriveDisplayedUserMessageState(message.text).visibleText
+          ? replaceComposerContextReferences(
+              resolveUserMessageContext(message).text,
+              (reference) => reference.label,
+            )
           : message.text;
       if (text.length === 0) {
         continue;
