@@ -45,6 +45,7 @@ import {
   createLocalDispatchSnapshot,
   deriveComposerSendState,
   deriveLockedProvider,
+  isProviderHandoff,
   dismissBranchMismatchForSession,
   ENVIRONMENT_RECONNECT_WARNING_GRACE_MS,
   getAntigravitySendBlockReason,
@@ -1523,6 +1524,47 @@ describe("resolveComposerProviderSelection", () => {
     });
 
     expect(selection.selectedProviderEntry).toBeUndefined();
+  });
+
+  it("moves only between Codex and Claude", () => {
+    const claude = entry("claudeAgent");
+    const codex = entry("codex");
+    const codexWork = entry("codex", "codex_work");
+    const opencode = entry("opencode");
+    const providers = [claude, codex, codexWork, opencode].map((entry) => entry.snapshot);
+    const thread = importedThread(codex.instanceId);
+    const handoff = (nextInstanceId: ProviderInstanceId) =>
+      isProviderHandoff({ thread, providers, nextInstanceId });
+
+    expect(handoff(claude.instanceId)).toBe(true);
+    expect(handoff(codexWork.instanceId)).toBe(false);
+    expect(handoff(opencode.instanceId)).toBe(false);
+    expect(
+      isProviderHandoff({
+        thread: makeThread({ modelSelection: { instanceId: codex.instanceId, model: "default" } }),
+        providers,
+        nextInstanceId: claude.instanceId,
+      }),
+    ).toBe(false);
+  });
+
+  it("moves a started thread to an explicitly picked partner provider only", () => {
+    const codex = entry("codex");
+    const claude = entry("claudeAgent");
+    const opencode = entry("opencode");
+    const entries = [codex, claude, opencode];
+    const select = (handoffInstanceId: ProviderInstanceId | null, candidate = handoffInstanceId) =>
+      resolveComposerProviderSelection({
+        entries,
+        candidateInstanceIds: [candidate, codex.instanceId],
+        lockedProvider: codex.driverKind,
+        lockedInstanceId: codex.instanceId,
+        handoffInstanceId,
+      }).selectedProviderEntry?.instanceId;
+
+    expect(select(claude.instanceId)).toBe(claude.instanceId);
+    expect(select(null, claude.instanceId)).toBe(codex.instanceId);
+    expect(select(opencode.instanceId)).toBe(codex.instanceId);
   });
 });
 

@@ -2,8 +2,11 @@ import {
   type ChatAttachment,
   CommandId,
   EventId,
+  type MessageId,
   type ModelSelection,
   type OrchestrationEvent,
+  canHandOffConversation,
+  PROVIDER_DISPLAY_NAMES,
   ProviderDriverKind,
   type ProjectId,
   type OrchestrationSession,
@@ -56,6 +59,7 @@ import {
   type ThreadTitleMessage,
 } from "../../textGeneration/ThreadTitleContext.ts";
 import { canReplaceThreadTitle, DEFAULT_THREAD_TITLE } from "../threadTitles.ts";
+import { buildProviderHandoffInput, collectHandoffHistory } from "../providerHandoff.ts";
 import {
   resolveSourceControlWriterModelSelection,
   ServerSettingsService,
@@ -552,12 +556,38 @@ const make = Effect.gen(function* () {
     });
   });
 
+  const appendHandoffActivity = Effect.fnUntraced(function* (input: {
+    readonly threadId: ThreadId;
+    readonly previousProviderName: string;
+    readonly handedOffMessageCount: number;
+    readonly native: boolean;
+    readonly createdAt: string;
+  }) {
+    yield* orchestrationEngine.dispatch({
+      type: "thread.activity.append",
+      commandId: yield* serverCommandId("provider-handoff"),
+      threadId: input.threadId,
+      activity: {
+        id: yield* serverEventId(),
+        tone: "info",
+        kind: "provider.handoff",
+        summary: `Conversation handed off from ${input.previousProviderName}`,
+        payload: { handedOffMessageCount: input.handedOffMessageCount, native: input.native },
+        turnId: null,
+        createdAt: input.createdAt,
+      },
+      createdAt: input.createdAt,
+    });
+  });
+
   const ensureSessionForThread = Effect.fn("ensureSessionForThread")(function* (
     threadId: ThreadId,
     createdAt: string,
     options?: {
       readonly modelSelection?: ModelSelection;
       readonly pendingTurnStart?: boolean;
+      /** The user message starting this turn, kept out of handed-off history. */
+      readonly currentMessageId?: MessageId;
     },
   ) {
     const thread = yield* resolveThreadShell(threadId);
@@ -589,12 +619,13 @@ const make = Effect.gen(function* () {
         detail: `Thread '${threadId}' has an active provider session without a provider instance id.`,
       });
     }
+    // The instance that last ran the thread holds its native conversation state.
     const currentInstanceId =
       activeThreadSession !== null &&
       activeSession !== undefined &&
       activeSession.providerInstanceId !== undefined
         ? activeSession.providerInstanceId
-        : thread.modelSelection.instanceId;
+        : (thread.session?.providerInstanceId ?? thread.modelSelection.instanceId);
     const desiredModelSelection = requestedModelSelection ?? thread.modelSelection;
     const desiredInstanceId = desiredModelSelection.instanceId;
     const currentInfo = yield* providerService.getInstanceInfo(currentInstanceId).pipe(
@@ -632,14 +663,23 @@ const make = Effect.gen(function* () {
       });
     }
     const preferredProvider: ProviderDriverKind = desiredDriverKind;
+    // Codex and Claude threads can move to each other: the new provider starts a fresh
+    // session that takes over the conversation. Every other thread keeps its provider.
+    const handoff =
+      desiredInstanceId !== currentInstanceId &&
+      canHandOffConversation(currentInfo.driverKind, desiredInfo.driverKind);
     if (options?.pendingTurnStart === true && thread.session?.status !== "running") {
       yield* setThreadSession({
         threadId,
         session: {
           threadId,
           status: "starting",
-          providerName: activeSession?.provider ?? preferredProvider,
-          providerInstanceId: activeSession?.providerInstanceId ?? desiredInstanceId,
+          providerName: handoff
+            ? preferredProvider
+            : (activeSession?.provider ?? preferredProvider),
+          providerInstanceId: handoff
+            ? desiredInstanceId
+            : (activeSession?.providerInstanceId ?? desiredInstanceId),
           runtimeMode: desiredRuntimeMode,
           activeTurnId: null,
           lastError: null,
@@ -648,7 +688,7 @@ const make = Effect.gen(function* () {
         createdAt,
       });
     }
-    if (thread.session !== null) {
+    if (thread.session !== null && !handoff) {
       yield* rejectStartedThreadModelChangeIfRequired({
         threadId,
         currentModelSelection:
@@ -664,6 +704,7 @@ const make = Effect.gen(function* () {
     }
     if (
       thread.session !== null &&
+      !handoff &&
       requestedModelSelection !== undefined &&
       requestedModelSelection.instanceId !== currentInstanceId
     ) {
@@ -685,6 +726,34 @@ const make = Effect.gen(function* () {
         });
       }
     }
+    const handoffFrom = handoff
+      ? (currentInfo.displayName ??
+        PROVIDER_DISPLAY_NAMES[currentInfo.driverKind] ??
+        "another agent")
+      : null;
+    const handoffHistory =
+      handoffFrom === null
+        ? []
+        : collectHandoffHistory({
+            messages: (yield* resolveThreadDetail(threadId))?.messages ?? [],
+            currentMessageId: options?.currentMessageId,
+          });
+    // The new provider normally loads the history as its own turns. If that fails,
+    // the caller hands it over as text in the first turn instead.
+    const handoffResult = (session: ProviderSession) =>
+      handoffFrom === null || handoffHistory.length === 0
+        ? Effect.succeed({ handoff: null })
+        : session.historySeeded === true
+          ? appendHandoffActivity({
+              threadId,
+              previousProviderName: handoffFrom,
+              handedOffMessageCount: handoffHistory.length,
+              native: true,
+              createdAt,
+            }).pipe(Effect.as({ handoff: null }))
+          : Effect.succeed({
+              handoff: { previousProviderName: handoffFrom, history: handoffHistory },
+            });
     const project = yield* resolveProject(thread.projectId);
     const effectiveCwd = resolveThreadWorkspaceCwd({
       thread,
@@ -710,6 +779,7 @@ const make = Effect.gen(function* () {
           modelSelection: desiredModelSelection,
           ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
           runtimeMode: desiredRuntimeMode,
+          ...(handoffHistory.length > 0 ? { history: handoffHistory } : {}),
         })
         .pipe(Effect.tap(() => refreshWorkspaceSnapshot));
 
@@ -770,12 +840,14 @@ const make = Effect.gen(function* () {
         !shouldRestartForModelSelectionChange
       ) {
         yield* refreshWorkspaceSnapshot;
-        return existingSessionThreadId;
+        // The running session is kept, so it still holds the conversation.
+        return { handoff: null };
       }
 
-      const resumeCursor = shouldRestartForModelChange
-        ? undefined
-        : (activeSession?.resumeCursor ?? undefined);
+      const resumeCursor =
+        shouldRestartForModelChange || handoff
+          ? undefined
+          : (activeSession?.resumeCursor ?? undefined);
       yield* Effect.logInfo("provider command reactor restarting provider session", {
         threadId,
         existingSessionThreadId,
@@ -807,16 +879,17 @@ const make = Effect.gen(function* () {
         cwd: restartedSession.cwd,
       });
       yield* bindSessionToThread(restartedSession);
-      return restartedSession.threadId;
+      return yield* handoffResult(restartedSession);
     }
 
     const startedSession = yield* startProviderSession(undefined);
     yield* bindSessionToThread(startedSession);
-    return startedSession.threadId;
+    return yield* handoffResult(startedSession);
   });
 
   const buildSendTurnRequestForThread = Effect.fnUntraced(function* (input: {
     readonly threadId: ThreadId;
+    readonly messageId: MessageId;
     readonly messageText: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly modelSelection?: ModelSelection;
@@ -829,14 +902,27 @@ const make = Effect.gen(function* () {
         new Error(`Thread '${input.threadId}' was not found in read model.`),
       );
     }
-    yield* ensureSessionForThread(input.threadId, input.createdAt, {
+    const { handoff } = yield* ensureSessionForThread(input.threadId, input.createdAt, {
       ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
       pendingTurnStart: true,
+      currentMessageId: input.messageId,
     });
     if (input.modelSelection !== undefined) {
       threadModelSelections.set(input.threadId, input.modelSelection);
     }
-    const normalizedInput = toNonEmptyProviderInput(input.messageText);
+    let messageText = input.messageText;
+    if (handoff !== null) {
+      const transcript = buildProviderHandoffInput({ ...handoff, messageText });
+      messageText = transcript.text;
+      yield* appendHandoffActivity({
+        threadId: input.threadId,
+        previousProviderName: handoff.previousProviderName,
+        handedOffMessageCount: transcript.handedOffMessageCount,
+        native: false,
+        createdAt: input.createdAt,
+      });
+    }
+    const normalizedInput = toNonEmptyProviderInput(messageText);
     const normalizedAttachments = input.attachments ?? [];
     const activeSession = yield* providerService
       .listSessions()
@@ -1497,6 +1583,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const sendTurnRequest = yield* buildSendTurnRequestForThread({
           threadId: event.payload.threadId,
+          messageId: event.payload.messageId,
           messageText: projectComposerContextForProvider({
             text: message.text,
             records: message.context?.records ?? [],

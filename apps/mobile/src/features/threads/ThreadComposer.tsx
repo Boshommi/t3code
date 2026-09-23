@@ -6,6 +6,7 @@ import { pastedTextDisposition, replaceTextSelection } from "@t3tools/client-run
 import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+  canHandOffConversation,
   type EnvironmentId,
   type MessageId,
   type ModelSelection,
@@ -529,11 +530,22 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   );
   const providerGroups = useMemo(() => groupByProvider(modelOptions), [modelOptions]);
   // An existing thread is bound to its harness: sessions can't move between
-  // provider instances, so the picker only offers the thread's own group.
-  const threadProviderGroups = useMemo(
-    () => providerGroups.filter((group) => group.providerKey === currentModelSelection.instanceId),
-    [providerGroups, currentModelSelection.instanceId],
-  );
+  // provider instances, so the picker offers the thread's own group. Codex and
+  // Claude threads can also move to each other, carrying the conversation.
+  const threadProviderGroups = useMemo(() => {
+    const driverOf = (instanceId: string) =>
+      props.serverConfig?.providers.find((provider) => provider.instanceId === instanceId)?.driver;
+    const currentDriver = driverOf(currentModelSelection.instanceId);
+    return providerGroups.filter((group) => {
+      if (group.providerKey === currentModelSelection.instanceId) return true;
+      const groupDriver = driverOf(group.providerKey);
+      return (
+        currentDriver !== undefined &&
+        groupDriver !== undefined &&
+        canHandOffConversation(currentDriver, groupDriver)
+      );
+    });
+  }, [providerGroups, currentModelSelection.instanceId, props.serverConfig?.providers]);
   const currentModelOption =
     modelOptions.find(
       (option) =>

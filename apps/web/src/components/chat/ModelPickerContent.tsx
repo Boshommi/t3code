@@ -1,5 +1,6 @@
 import {
   ANTIGRAVITY_DEFAULT_MODEL,
+  canHandOffConversation,
   type ProviderInstanceId,
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
@@ -156,7 +157,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
    * because the user is editing a previously-sent message and can't change
    * which driver served the turn. Multiple instances of the same kind
    * remain selectable (e.g. locked to `codex` still lets the user switch
-   * between the default Codex and a custom Codex Personal).
+   * between the default Codex and a custom Codex Personal). Codex and
+   * Claude threads can also move to each other.
    */
   lockedProvider: ProviderDriverKind | null;
   lockedContinuationGroupKey?: string | null;
@@ -301,6 +303,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const matchesLockedProvider = useCallback(
     (entry: Pick<ProviderInstanceEntry, "driverKind" | "continuationGroupKey">): boolean => {
       if (props.lockedProvider === null) return true;
+      // Codex and Claude threads can move to each other, carrying the conversation.
+      if (canHandOffConversation(props.lockedProvider, entry.driverKind)) return true;
       if (entry.driverKind !== props.lockedProvider) return false;
       if (!props.lockedContinuationGroupKey) return true;
       return entry.continuationGroupKey === props.lockedContinuationGroupKey;

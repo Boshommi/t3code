@@ -48,8 +48,30 @@ export const ProviderSession = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   lastError: Schema.optional(TrimmedNonEmptyString),
+  /** True when the adapter loaded the start input's `history` into the native session. */
+  historySeeded: Schema.optional(Schema.Boolean),
 });
 export type ProviderSession = typeof ProviderSession.Type;
+
+export const ProviderHistoryMessage = Schema.Struct({
+  role: Schema.Literals(["user", "assistant"]),
+  text: Schema.String,
+});
+export type ProviderHistoryMessage = typeof ProviderHistoryMessage.Type;
+
+// Drivers that can load another driver's conversation natively. A started thread can
+// only move between these; every other thread stays with its provider.
+const CONVERSATION_HANDOFF_DRIVERS: ReadonlySet<string> = new Set(["codex", "claudeAgent"]);
+
+/** Whether a started thread on `from` can move to `to`, taking its conversation along. */
+export function canHandOffConversation(
+  from: ProviderDriverKind | string,
+  to: ProviderDriverKind | string,
+): boolean {
+  return (
+    from !== to && CONVERSATION_HANDOFF_DRIVERS.has(from) && CONVERSATION_HANDOFF_DRIVERS.has(to)
+  );
+}
 
 export const ProviderSessionStartInput = Schema.Struct({
   threadId: ThreadId,
@@ -63,6 +85,11 @@ export const ProviderSessionStartInput = Schema.Struct({
   approvalPolicy: Schema.optional(ProviderApprovalPolicy),
   sandboxMode: Schema.optional(ProviderSandboxMode),
   runtimeMode: RuntimeMode,
+  /**
+   * Earlier conversation, oldest first, for a fresh session that takes over a thread
+   * from another provider. Adapters that can load it natively report `historySeeded`.
+   */
+  history: Schema.optional(Schema.Array(ProviderHistoryMessage)),
 });
 export type ProviderSessionStartInput = typeof ProviderSessionStartInput.Type;
 

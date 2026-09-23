@@ -1098,6 +1098,59 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("resumes handed-off history as a seeded Claude session", () => {
+    const baseDir = NodeFS.realpathSync(
+      NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "claude-history-seed-")),
+    );
+    const homeDir = NodePath.join(baseDir, "claude-home");
+    const cwd = NodePath.join(baseDir, "work");
+    NodeFS.mkdirSync(cwd, { recursive: true });
+    const harness = makeHarness({ claudeConfig: { homePath: homeDir } });
+    return Effect.gen(function* () {
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => NodeFS.rmSync(baseDir, { recursive: true, force: true })),
+      );
+      const adapter = yield* ClaudeAdapter;
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+        cwd,
+        history: [
+          { role: "user", text: "Fix the bug" },
+          { role: "assistant", text: "Fixed" },
+        ],
+      });
+
+      const options = harness.getLastCreateQueryInput()?.options;
+      assert.equal(session.historySeeded, true);
+      assert.isString(options?.resume);
+      assert.isUndefined(options?.sessionId);
+      const transcript = NodeFS.readFileSync(
+        NodePath.join(
+          homeDir,
+          "projects",
+          cwd.replace(/[^a-zA-Z0-9]/g, "-"),
+          `${options?.resume}.jsonl`,
+        ),
+        "utf8",
+      )
+        .trimEnd()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      assert.deepEqual(
+        transcript.map((entry) => [entry.type, entry.message.content[0].text, entry.sessionId]),
+        [
+          ["user", "Fix the bug", options?.resume],
+          ["assistant", "Fixed", options?.resume],
+        ],
+      );
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("dispatches a $skill mention as a trailing slash command block", () => {
     // Claude Code only runs `/name` from the message's last text block, so a
     // chip picked mid-prompt is moved there and the surrounding prose kept.

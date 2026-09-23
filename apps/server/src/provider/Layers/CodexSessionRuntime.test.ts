@@ -21,6 +21,7 @@ import {
   openCodexThread,
   readCodexThread,
   rollbackCodexThread,
+  seedCodexThreadHistory,
   toMcpElicitationResponse,
 } from "./CodexSessionRuntime.ts";
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
@@ -1062,6 +1063,70 @@ describe("openCodexThread", () => {
 
       NodeAssert.ok(isCodexAppServerRequestError(error));
       NodeAssert.equal(error.errorMessage, "timed out waiting for server");
+    }),
+  );
+});
+
+describe("seedCodexThreadHistory", () => {
+  const history = [
+    { role: "user" as const, text: "Fix the bug" },
+    { role: "assistant" as const, text: "Fixed" },
+  ];
+
+  it.effect("injects the history as user and assistant message items", () =>
+    Effect.gen(function* () {
+      const calls: Array<unknown> = [];
+      const seeded = yield* seedCodexThreadHistory({
+        client: {
+          request: (method, payload) => Effect.sync(() => void calls.push({ method, payload })),
+        },
+        threadId: ThreadId.make("thread-1"),
+        providerThreadId: "codex-thread",
+        history,
+      });
+
+      NodeAssert.equal(seeded, true);
+      NodeAssert.deepEqual(calls, [
+        {
+          method: "thread/inject_items",
+          payload: {
+            threadId: "codex-thread",
+            items: [
+              {
+                type: "message",
+                role: "user",
+                content: [{ type: "input_text", text: "Fix the bug" }],
+              },
+              {
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: "Fixed" }],
+              },
+            ],
+          },
+        },
+      ]);
+    }),
+  );
+
+  it.effect("reports failure so the caller can fall back to a text handoff", () =>
+    Effect.gen(function* () {
+      const seeded = yield* seedCodexThreadHistory({
+        client: {
+          request: () =>
+            Effect.fail(
+              new CodexErrors.CodexAppServerRequestError({
+                code: -32600,
+                errorMessage: "unknown method",
+              }),
+            ),
+        },
+        threadId: ThreadId.make("thread-1"),
+        providerThreadId: "codex-thread",
+        history,
+      });
+
+      NodeAssert.equal(seeded, false);
     }),
   );
 });

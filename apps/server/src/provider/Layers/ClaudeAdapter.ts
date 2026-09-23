@@ -41,6 +41,7 @@ import {
   ProviderInstanceId,
   type ModelSelection,
   ProviderItemId,
+  type ProviderHistoryMessage,
   type ProviderRuntimeEvent,
   type ProviderRuntimeTurnStatus,
   type ProviderSendTurnInput,
@@ -96,6 +97,7 @@ import { planClaudeSkillDispatch } from "../Drivers/ClaudeSkillDispatch.ts";
 import { resolveClaudeAgentDefinition } from "../Drivers/ClaudeAgentDefinitions.ts";
 import { discoverClaudeSkills, resolveClaudeConfigDirPath } from "../Drivers/ClaudeSkills.ts";
 import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
+import { buildClaudeSeedTranscript, claudeProjectDirName } from "../claudeHistorySeed.ts";
 import {
   BUNDLED_CLAUDE_MODEL_CATALOG,
   type ClaudeModelCatalog,
@@ -2123,6 +2125,57 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           cause,
         }),
     ),
+  );
+
+  /**
+   * Writes `history` as a Claude session transcript the CLI can resume, so a thread
+   * taken over from another provider continues with real turns. Returns the new
+   * session id, or undefined when the transcript location cannot be derived or
+   * written; the reactor then hands the history over as text instead.
+   */
+  const seedClaudeSessionHistory = Effect.fn("seedClaudeSessionHistory")(
+    function* (input: {
+      readonly threadId: ThreadId;
+      readonly cwd: string;
+      readonly history: ReadonlyArray<ProviderHistoryMessage>;
+    }) {
+      // The CLI files sessions under its physical working directory.
+      const cwd = yield* fileSystem.realPath(input.cwd);
+      const projectDirName = claudeProjectDirName({ cwd, environment: claudeEnvironment });
+      if (projectDirName === undefined) {
+        return undefined;
+      }
+      const configDir = (yield* resolveClaudeConfigDirPath(
+        claudeSettings,
+        claudeEnvironment,
+        cwd,
+      )).normalize("NFC");
+      const sessionId = yield* randomUUIDv4;
+      const uuids = yield* Effect.forEach(input.history, () => randomUUIDv4);
+      const projectDir = path.join(configDir, "projects", projectDirName);
+      yield* fileSystem.makeDirectory(projectDir, { recursive: true });
+      yield* fileSystem.writeFileString(
+        path.join(projectDir, `${sessionId}.jsonl`),
+        buildClaudeSeedTranscript({
+          sessionId,
+          cwd,
+          history: input.history,
+          startedAt: yield* DateTime.now,
+          uuids,
+        }),
+      );
+      return sessionId;
+    },
+    (effect, input) =>
+      effect.pipe(
+        Effect.provideService(Path.Path, path),
+        Effect.catch((cause) =>
+          Effect.logWarning("claude.session.history-seed-failed", {
+            threadId: input.threadId,
+            cause,
+          }).pipe(Effect.as(undefined)),
+        ),
+      ),
   );
   const nextEventId = Effect.map(randomUUIDv4, (id) => EventId.make(id));
   const makeEventStamp = () => Effect.all({ eventId: nextEventId, createdAt: nowIso });
@@ -4443,7 +4496,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const startedAt = yield* nowIso;
       const resumeState = readClaudeResumeState(input.resumeCursor);
       const threadId = input.threadId;
-      const existingResumeSessionId = resumeState?.resume;
+      const seededSessionId =
+        resumeState?.resume === undefined && input.history && input.history.length > 0 && input.cwd
+          ? yield* seedClaudeSessionHistory({
+              threadId,
+              cwd: input.cwd,
+              history: input.history,
+            })
+          : undefined;
+      const existingResumeSessionId = resumeState?.resume ?? seededSessionId;
       const newSessionId = existingResumeSessionId === undefined ? yield* randomUUIDv4 : undefined;
       const sessionId = existingResumeSessionId ?? newSessionId;
 
@@ -5040,6 +5101,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(modelSelection?.model ? { model: modelSelection.model } : {}),
         ...(threadId ? { threadId } : {}),
+        ...(seededSessionId !== undefined ? { historySeeded: true } : {}),
         resumeCursor: {
           ...(threadId ? { threadId } : {}),
           ...(sessionId ? { resume: sessionId } : {}),

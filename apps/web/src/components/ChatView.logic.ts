@@ -2,6 +2,7 @@ import {
   ANTIGRAVITY_DEFAULT_MODEL,
   type AssetCreateUrlInput,
   type AssetCreateUrlResult,
+  canHandOffConversation,
   type ChatFileAttachment,
   type EnvironmentId,
   isProviderDriverKind,
@@ -560,6 +561,8 @@ export function resolveComposerProviderSelection(input: {
   candidateInstanceIds: ReadonlyArray<ProviderInstanceId | null | undefined>;
   lockedProvider: ProviderDriverKind | null;
   lockedInstanceId: ProviderInstanceId | null | undefined;
+  /** An instance the user explicitly picked, which may move a Codex or Claude thread. */
+  handoffInstanceId?: ProviderInstanceId | null | undefined;
 }) {
   const requestedInstanceId = input.candidateInstanceIds.find(
     (candidate) => candidate != null && candidate !== NO_PROVIDER_MODEL_SELECTION.instanceId,
@@ -584,7 +587,20 @@ export function resolveComposerProviderSelection(input: {
       (!lockedContinuationGroupKey || entry.continuationGroupKey === lockedContinuationGroupKey) &&
       (!requiresExactInstance || entry.instanceId === input.lockedInstanceId),
   );
+  // A Codex or Claude thread moves to the other only on an explicit pick; fallbacks
+  // never leave the thread's own provider.
+  const lockedProvider = input.lockedProvider;
+  const handoffEntry = lockedProvider
+    ? input.entries.find(
+        (entry) =>
+          entry.instanceId === input.handoffInstanceId &&
+          entry.enabled &&
+          entry.isAvailable &&
+          canHandOffConversation(lockedProvider, entry.driverKind),
+      )
+    : undefined;
   const selectedProviderEntry =
+    handoffEntry ??
     input.candidateInstanceIds
       .map((candidate) =>
         compatibleEntries.find(
@@ -1092,6 +1108,22 @@ export function deriveLockedProvider(input: {
   const narrowedSelectedProvider =
     selectedProvider && isProviderDriverKind(selectedProvider) ? selectedProvider : null;
   return narrowedThreadProvider ?? narrowedSelectedProvider ?? null;
+}
+
+/** Whether sending with `nextInstanceId` moves a started thread between Codex and Claude. */
+export function isProviderHandoff(input: {
+  thread: Thread | null | undefined;
+  providers: ReadonlyArray<Pick<ServerProvider, "instanceId" | "driver">>;
+  nextInstanceId: ProviderInstanceId;
+}): boolean {
+  if (!input.thread || !threadHasStarted(input.thread)) return false;
+  const currentInstanceId =
+    input.thread.session?.providerInstanceId ?? input.thread.modelSelection.instanceId;
+  const driverOf = (instanceId: ProviderInstanceId) =>
+    input.providers.find((provider) => provider.instanceId === instanceId)?.driver;
+  const current = driverOf(currentInstanceId);
+  const next = driverOf(input.nextInstanceId);
+  return current !== undefined && next !== undefined && canHandOffConversation(current, next);
 }
 
 export function getStartedThreadModelChangeBlockReason(input: {

@@ -67,6 +67,14 @@ returns to the remembered selection.
 
 Leaving reasoning level or service tier unset uses the provider's own configuration.
 
+## Move a chat between Codex and Claude
+
+In an existing Codex thread, pick a Claude model, or the other way around. Your next message
+starts a fresh session there that takes over the whole conversation as its own history. It gets
+the messages, not earlier tool output; any file changes are already in the workspace.
+
+Other providers stay with the thread they started in. Start a new thread to use them.
+
 ## Quote an assistant response
 
 On web and desktop, select text within one assistant response and choose

@@ -352,7 +352,11 @@ import { vcsEnvironment } from "../state/vcs";
 import { projectEnvironment } from "../state/projects";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { useProjectClone } from "../state/projectClones";
-import { projectCloneDisplayName, projectCloneProgressSummary } from "@t3tools/contracts";
+import {
+  canHandOffConversation,
+  projectCloneDisplayName,
+  projectCloneProgressSummary,
+} from "@t3tools/contracts";
 import { useEnvironments, usePrimaryEnvironment } from "../state/environments";
 import {
   useProject,
@@ -445,6 +449,7 @@ import {
   PullRequestDialogState,
   cloneComposerImageForRetry,
   deriveLockedProvider,
+  isProviderHandoff,
   readFileAsDataUrl,
   resolveFileAttachmentUrl,
   prepareRevertedMessageAttachments,
@@ -1606,6 +1611,9 @@ export default function ChatView(props: ChatViewProps) {
   );
   const composerActiveProvider = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.activeProvider ?? null,
+  );
+  const composerModelSelectionExplicit = useComposerDraftStore(
+    (store) => store.getComposerDraft(composerDraftTarget)?.modelSelectionExplicit === true,
   );
   const composerHasUnsentContent = useComposerDraftStore((store) =>
     composerDraftHasUserContent(store.getComposerDraft(composerDraftTarget)),
@@ -2851,9 +2859,11 @@ export default function ChatView(props: ChatViewProps) {
         lockedProvider,
         lockedInstanceId:
           activeThread?.session?.providerInstanceId ?? activeThread?.modelSelection.instanceId,
+        handoffInstanceId: composerModelSelectionExplicit ? selectedProviderByThreadId : null,
       }),
     [
       activeProjectDefaultModelSelection?.instanceId,
+      composerModelSelectionExplicit,
       activeThread?.modelSelection.instanceId,
       activeThread?.session?.providerInstanceId,
       lockedProvider,
@@ -8956,7 +8966,13 @@ export default function ChatView(props: ChatViewProps) {
       // are rejected by returning early; the server remains authoritative too.
       const entry = providerStatuses.find((snapshot) => snapshot.instanceId === instanceId);
       const resolvedDriverKind = entry?.driver ?? null;
+      // Codex and Claude threads may move to each other; other switches stay blocked.
+      const handoff =
+        lockedProvider !== null &&
+        resolvedDriverKind !== null &&
+        canHandOffConversation(lockedProvider, resolvedDriverKind);
       if (
+        !handoff &&
         lockedProvider !== null &&
         resolvedDriverKind !== null &&
         resolvedDriverKind !== lockedProvider
@@ -8964,7 +8980,7 @@ export default function ChatView(props: ChatViewProps) {
         scheduleComposerFocus();
         return;
       }
-      if (lockedProvider !== null && activeThread.session?.providerInstanceId) {
+      if (!handoff && lockedProvider !== null && activeThread.session?.providerInstanceId) {
         const currentEntry = providerStatuses.find(
           (snapshot) => snapshot.instanceId === activeThread.session?.providerInstanceId,
         );
@@ -9007,6 +9023,23 @@ export default function ChatView(props: ChatViewProps) {
         scheduleComposerFocus();
         return;
       }
+      if (
+        instanceId !== activeProviderInstanceId &&
+        isProviderHandoff({
+          thread: activeThread,
+          providers: providerStatuses,
+          nextInstanceId: instanceId,
+        })
+      ) {
+        const name =
+          providerInstanceEntries.find((candidate) => candidate.instanceId === instanceId)
+            ?.displayName ?? "the new provider";
+        toastManager.add({
+          type: "info",
+          title: `Moving this chat to ${name}`,
+          description: `Your next message gives ${name} the conversation so far.`,
+        });
+      }
       setComposerDraftModelSelection(
         scopeThreadRef(activeThread.environmentId, activeThread.id),
         nextModelSelection,
@@ -9017,7 +9050,9 @@ export default function ChatView(props: ChatViewProps) {
     },
     [
       activeThread,
+      activeProviderInstanceId,
       lockedProvider,
+      providerInstanceEntries,
       scheduleComposerFocus,
       setComposerDraftModelSelection,
       setStickyComposerModelSelection,

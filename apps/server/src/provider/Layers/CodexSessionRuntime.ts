@@ -8,6 +8,7 @@ import {
   type ProviderApprovalDecision,
   type ProviderApprovalOption,
   type ProviderEvent,
+  type ProviderHistoryMessage,
   type ProviderInteractionMode,
   type ProviderRequestKind,
   type ProviderSession,
@@ -178,6 +179,8 @@ export interface CodexSessionRuntimeOptions {
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly resumeCursor?: CodexResumeCursor;
+  /** Conversation from another provider, loaded into a freshly started thread. */
+  readonly history?: ReadonlyArray<ProviderHistoryMessage>;
   readonly appServerArgs?: ReadonlyArray<string>;
   /** Capabilities the session's `t3-code` MCP credential grants; drives the prompt blocks. */
   readonly mcpCapabilities?: ReadonlySet<string>;
@@ -719,6 +722,44 @@ interface CodexThreadOpenClient {
     CodexErrors.CodexAppServerError
   >;
 }
+
+/**
+ * Loads another provider's conversation into a fresh Codex thread. Injected items join
+ * the model-visible history without starting a turn and persist with the thread, so
+ * later resumes keep them. Returns false when Codex rejects them; the caller then
+ * hands the history over as text.
+ */
+export const seedCodexThreadHistory = (input: {
+  readonly client: {
+    readonly request: (
+      method: "thread/inject_items",
+      payload: CodexRpc.ClientRequestParamsByMethod["thread/inject_items"],
+    ) => Effect.Effect<unknown, CodexErrors.CodexAppServerError>;
+  };
+  readonly threadId: ThreadId;
+  readonly providerThreadId: string;
+  readonly history: ReadonlyArray<ProviderHistoryMessage>;
+}): Effect.Effect<boolean> =>
+  input.client
+    .request("thread/inject_items", {
+      threadId: input.providerThreadId,
+      items: input.history.map((message) => ({
+        type: "message",
+        role: message.role,
+        content: [
+          { type: message.role === "user" ? "input_text" : "output_text", text: message.text },
+        ],
+      })),
+    })
+    .pipe(
+      Effect.as(true),
+      Effect.catch((cause) =>
+        Effect.logWarning("codex app-server could not load handed-off history", {
+          threadId: input.threadId,
+          cause,
+        }).pipe(Effect.as(false)),
+      ),
+    );
 
 export const openCodexThread = (input: {
   readonly client: CodexThreadOpenClient;
@@ -2410,6 +2451,7 @@ export const makeCodexSessionRuntime = (
       yield* client.notify("initialized", undefined);
 
       const requestedModel = normalizeCodexModelSlug(options.model);
+      const resumeThreadId = readResumeCursorThreadId(options.resumeCursor);
 
       const opened = yield* openCodexThread({
         client,
@@ -2418,16 +2460,26 @@ export const makeCodexSessionRuntime = (
         cwd: options.cwd,
         requestedModel,
         serviceTier: options.serviceTier,
-        resumeThreadId: readResumeCursorThreadId(options.resumeCursor),
+        resumeThreadId,
       });
 
       const providerThreadId = opened.thread.id;
+      const historySeeded =
+        resumeThreadId === undefined && options.history !== undefined && options.history.length > 0
+          ? yield* seedCodexThreadHistory({
+              client,
+              threadId: options.threadId,
+              providerThreadId,
+              history: options.history,
+            })
+          : false;
       const session = {
         ...(yield* Ref.get(sessionRef)),
         status: "ready",
         cwd: opened.cwd,
         model: opened.model,
         resumeCursor: { threadId: providerThreadId },
+        ...(historySeeded ? { historySeeded } : {}),
         updatedAt: yield* nowIso,
       } satisfies ProviderSession;
       yield* Ref.set(sessionRef, session);
