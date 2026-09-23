@@ -104,6 +104,11 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
     }),
   );
 
+  public readonly readSubagentThreadImpl = vi.fn(
+    (_agentThreadId: string): Promise<CodexThreadSnapshot | undefined> =>
+      Promise.resolve(undefined),
+  );
+
   public readonly uploadFeedbackImpl = vi.fn((_reason?: string) =>
     Promise.resolve({ threadId: "provider-thread-1" }),
   );
@@ -144,6 +149,10 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
 
   rollbackThread(numTurns: number) {
     return Effect.promise(() => this.rollbackThreadImpl(numTurns));
+  }
+
+  readSubagentThread(agentThreadId: string) {
+    return Effect.promise(() => this.readSubagentThreadImpl(agentThreadId));
   }
 
   uploadFeedback(reason?: string) {

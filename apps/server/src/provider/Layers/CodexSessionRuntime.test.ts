@@ -18,6 +18,7 @@ import {
   buildTurnStartParams,
   describeMcpElicitation,
   hasConfiguredMcpServer,
+  isCodexSubagentOf,
   isRecoverableThreadResumeError,
   makeMemoryConsolidationNotificationFilter,
   openCodexThread,
@@ -92,6 +93,30 @@ describe("Codex thread history", () => {
       }),
     );
   }
+
+  it.effect("accepts nested subagents of the root thread and rejects strangers", () =>
+    Effect.gen(function* () {
+      const parents: Record<string, string> = { grandchild: "child", child: "root" };
+      const spawnSource = (threadId: string) =>
+        parents[threadId] === undefined
+          ? {}
+          : { source: { subAgent: { thread_spawn: { parent_thread_id: parents[threadId] } } } };
+      const client: Parameters<typeof isCodexSubagentOf>[0] = {
+        request: () => Effect.die("Unexpected legacy request"),
+        raw: {
+          request: (method, params) =>
+            Effect.sync(() => {
+              NodeAssert.equal(method, "thread/read");
+              return { thread: spawnSource((params as { threadId: string }).threadId) };
+            }),
+        },
+      };
+      NodeAssert.equal(yield* isCodexSubagentOf(client, "grandchild", "root"), true);
+      NodeAssert.equal(yield* isCodexSubagentOf(client, "child", "root"), true);
+      NodeAssert.equal(yield* isCodexSubagentOf(client, "stranger", "root"), false);
+      NodeAssert.equal(yield* isCodexSubagentOf(client, "grandchild", "other-root"), false);
+    }),
+  );
 
   it.effect("surfaces Codex rejecting a revert of a legacy thread", () =>
     Effect.gen(function* () {
