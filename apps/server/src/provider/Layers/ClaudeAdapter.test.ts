@@ -3941,6 +3941,7 @@ describe("ClaudeAdapterLive", () => {
           index: 0,
           state: "running",
           label: "member-0",
+          agentId: `agent-member-0-${tokens}`,
           phaseIndex: 0,
           tokens,
         },
@@ -3984,6 +3985,15 @@ describe("ClaudeAdapterLive", () => {
       // tick 3 unchanged).
       assert.equal(byMember.get("wf-coalesce:wf:0"), 2);
       assert.equal(byMember.get("wf-coalesce:wf:1"), 1);
+      // Members carry their current attempt's agent id so the transcript
+      // can be read; the slot id alone names no file.
+      assert.deepEqual(
+        progressEvents
+          .map((event) => event.payload as { taskId: string; transcriptAgentId?: string })
+          .filter((payload) => payload.taskId === "wf-coalesce:wf:0")
+          .map((payload) => payload.transcriptAgentId),
+        ["agent-member-0-10", "agent-member-0-20"],
+      );
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

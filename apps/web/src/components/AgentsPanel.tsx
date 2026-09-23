@@ -142,11 +142,13 @@ function agentActivityText(agent: RuntimeSubagent): string | null {
 type OpenAgent = (agent: RuntimeSubagent) => void;
 
 /**
- * Only real subagents have a transcript. Workflow coordinators, batches, and
- * Claude workflow members (synthetic ":wf:" ids) do not.
+ * Workflow coordinators and batches have no transcript of their own. Claude
+ * workflow members use synthetic ":wf:" slot ids and are readable once their
+ * attempt's agent id is known.
  */
 function canOpenTranscript(agent: RuntimeSubagent): boolean {
-  return agent.kind !== "workflow" && agent.kind !== "subagent_batch" && !agent.id.includes(":wf:");
+  if (agent.kind === "workflow" || agent.kind === "subagent_batch") return false;
+  return !agent.id.includes(":wf:") || agent.transcriptAgentId !== null;
 }
 
 /** Flat agent status line. Opens the transcript when `onOpen` is given. */

@@ -1407,6 +1407,8 @@ const WORKFLOW_AGENT_CAP = 100;
 interface ClaudeWorkflowAgentEntry {
   readonly index: number;
   readonly state: string;
+  /** The current attempt's agent id; names its transcript file. */
+  readonly agentId: string | undefined;
   readonly label: string | undefined;
   readonly phaseIndex: number | undefined;
   readonly phaseTitle: string | undefined;
@@ -1462,6 +1464,7 @@ function parseWorkflowProgress(value: unknown): ClaudeWorkflowProgress | undefin
     agentsByIndex.set(index, {
       index,
       state,
+      agentId: trimmedString(record.agentId),
       label: trimmedString(record.label),
       phaseIndex: nonNegativeInt(record.phaseIndex),
       phaseTitle: trimmedString(record.phaseTitle),
@@ -3609,6 +3612,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       // per tick (review finding: unbounded event amplification).
       const fingerprint = [
         status,
+        entry.agentId ?? "",
         entry.label ?? "",
         entry.model ?? "",
         entry.lastToolName ?? "",
@@ -3650,6 +3654,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ...(entry.phaseIndex !== undefined ? { phaseIndex: entry.phaseIndex } : {}),
           ...(entry.phaseTitle ? { phaseTitle: entry.phaseTitle } : {}),
           ...(entry.attempt !== undefined ? { attempt: entry.attempt } : {}),
+          ...(entry.agentId ? { transcriptAgentId: entry.agentId } : {}),
           timelineBypass: true,
         },
       });

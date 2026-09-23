@@ -661,6 +661,12 @@ const taskAgentLinkageFields = {
   attempt: Schema.optional(NonNegativeInt),
   runHandles: Schema.optional(TaskRunHandles),
   outputFile: Schema.optional(TrimmedNonEmptyStringSchema),
+  /**
+   * Provider id of the conversation to read for this agent's transcript, when
+   * it differs from taskId. Claude workflow members use a stable slot id, so
+   * this carries the current attempt's agent id.
+   */
+  transcriptAgentId: Schema.optional(TrimmedNonEmptyStringSchema),
   /** Codex agent hierarchy path, e.g. "/root/marlow". */
   agentPath: Schema.optional(TrimmedNonEmptyStringSchema),
   /**
