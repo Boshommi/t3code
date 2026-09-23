@@ -1,12 +1,13 @@
 import type { DesktopPortForward, EnvironmentId } from "@t3tools/contracts";
 import { parseLoopbackPreviewTarget } from "@t3tools/shared/previewLoopbackForward";
+import * as Option from "effect/Option";
 import { useMemo } from "react";
 import { create } from "zustand";
 
 import { previewBridge } from "~/components/preview/previewBridge";
 import { toastManager } from "~/components/ui/toast";
 import { ensureLocalApi } from "~/localApi";
-import { readPreparedConnection } from "~/state/session";
+import { readPreparedConnection, usePreparedConnection } from "~/state/session";
 
 import { previewEnvironmentIsLocal } from "./browserTargetResolver";
 import { issuePreviewTunnelWebsocketUrl } from "./resolvePreviewNavigationUrl";
@@ -79,15 +80,24 @@ if (previewBridge?.listPortForwards !== undefined) {
   );
 }
 
+const connectionCanForwardPorts = (connection: ReturnType<typeof readPreparedConnection>) =>
+  previewBridge?.forwardPort !== undefined &&
+  connection !== null &&
+  connection.httpAuthorization?._tag !== "Dpop" &&
+  !previewEnvironmentIsLocal(connection);
+
 /**
  * Whether this environment's localhost is another machine that the desktop
  * app can forward ports from. T3 Connect sessions cannot mint tunnel tickets.
  */
 export function canForwardPorts(environmentId: EnvironmentId | null | undefined): boolean {
-  if (!environmentId || previewBridge?.forwardPort === undefined) return false;
-  const connection = readPreparedConnection(environmentId);
-  if (connection === null || connection.httpAuthorization?._tag === "Dpop") return false;
-  return !previewEnvironmentIsLocal(connection);
+  if (!environmentId) return false;
+  return connectionCanForwardPorts(readPreparedConnection(environmentId));
+}
+
+/** `canForwardPorts` for render, updating when the environment's connection does. */
+export function useCanForwardPorts(environmentId: EnvironmentId | null): boolean {
+  return connectionCanForwardPorts(Option.getOrNull(usePreparedConnection(environmentId)));
 }
 
 /**

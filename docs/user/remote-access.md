@@ -149,9 +149,9 @@ In the desktop app, a `localhost` link from a remote environment opens that
 machine's server, not yours. To reach it from any browser on your computer,
 forward the port:
 
-- **Forwarded ports** in the preview's **⋮** menu, or **Forward a port** in the
-  command palette, lists the servers listening on the remote. Forward one from
-  the list or type any port number.
+- **Ports** in the thread header, **Forwarded ports** in the preview's **⋮**
+  menu, or **Forward a port** in the command palette lists the servers
+  listening on the remote. Forward one from the list or type any port number.
 - **Open in system browser** in the preview's address bar, or a Cmd/Ctrl-click
   on a terminal link, forwards the page's port and opens it. Links do the same
   when **Open links in** is set to the system browser.
