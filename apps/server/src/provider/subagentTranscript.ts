@@ -11,6 +11,11 @@ import type {
   SubagentTranscriptEntry,
 } from "@t3tools/contracts";
 import type * as EffectCodexSchema from "effect-codex-app-server/schema";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 
 const TEXT_CHAR_LIMIT = 6_000;
 const DETAIL_CHAR_LIMIT = 300;
@@ -330,3 +335,51 @@ export function openCodeSubagentTranscriptEntries(
   }
   return entries;
 }
+
+const decodeWorkflowAgentMeta = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ description: Schema.optional(Schema.String) })),
+);
+
+/**
+ * Finds the agent id of a Claude workflow member from its run's transcript
+ * directory, for rows recorded before members carried `transcriptAgentId`.
+ * Each attempt writes `agent-<id>.meta.json` naming the member's label; the
+ * newest transcript wins so a retried member shows its latest attempt. Only
+ * directories inside this session's `subagents/workflows` are read.
+ */
+export const resolveClaudeWorkflowMemberAgentId = Effect.fn("resolveClaudeWorkflowMemberAgentId")(
+  function* (input: {
+    readonly sessionId: string;
+    readonly transcriptDir: string;
+    readonly label: string;
+  }) {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const directory = yield* fileSystem.realPath(input.transcriptDir);
+    const runsRoot = path.join(input.sessionId, "subagents", "workflows");
+    if (path.dirname(directory).endsWith(`${path.sep}${runsRoot}`) === false) {
+      return undefined;
+    }
+    let newest: { readonly agentId: string; readonly modifiedAt: number } | undefined;
+    for (const name of yield* fileSystem.readDirectory(directory)) {
+      const match = /^agent-([\w-]+)\.meta\.json$/.exec(name);
+      if (!match) continue;
+      const meta = decodeWorkflowAgentMeta(
+        yield* fileSystem.readFileString(path.join(directory, name)),
+      );
+      if (Option.getOrUndefined(meta)?.description !== input.label) continue;
+      const modifiedAt = yield* fileSystem
+        .stat(path.join(directory, `agent-${match[1]}.jsonl`))
+        .pipe(
+          Effect.map((info) =>
+            Option.match(info.mtime, { onNone: () => 0, onSome: (date) => date.getTime() }),
+          ),
+          Effect.orElseSucceed(() => 0),
+        );
+      if (!newest || modifiedAt > newest.modifiedAt) {
+        newest = { agentId: match[1]!, modifiedAt };
+      }
+    }
+    return newest?.agentId;
+  },
+);

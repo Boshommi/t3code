@@ -1,5 +1,10 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { it as itEffect } from "@effect/vitest";
 import type { SubagentTranscriptEntry } from "@t3tools/contracts";
 import type { Part } from "@opencode-ai/sdk/v2";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -7,6 +12,7 @@ import {
   claudeSubagentTranscriptEntries,
   codexSubagentTranscriptEntries,
   openCodeSubagentTranscriptEntries,
+  resolveClaudeWorkflowMemberAgentId,
 } from "./subagentTranscript.ts";
 
 describe("claudeSubagentTranscriptEntries", () => {
@@ -136,4 +142,54 @@ describe("boundSubagentTranscript", () => {
     const entries: Array<SubagentTranscriptEntry> = [{ _tag: "message", text: "hi" }];
     expect(boundSubagentTranscript(entries)).toEqual({ entries, skipped: 0 });
   });
+});
+
+describe("resolveClaudeWorkflowMemberAgentId", () => {
+  const sessionId = "session-1";
+  const writeRun = Effect.fn(function* (root: string) {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const runDir = path.join(root, sessionId, "subagents", "workflows", "wf_run");
+    yield* fileSystem.makeDirectory(runDir, { recursive: true });
+    const writeAgent = Effect.fn(function* (agentId: string, label: string, modifiedAt: number) {
+      yield* fileSystem.writeFileString(
+        path.join(runDir, `agent-${agentId}.meta.json`),
+        JSON.stringify({ agentType: "workflow-subagent", description: label }),
+      );
+      const transcript = path.join(runDir, `agent-${agentId}.jsonl`);
+      yield* fileSystem.writeFileString(transcript, "");
+      yield* fileSystem.utimes(transcript, modifiedAt, modifiedAt);
+    });
+    yield* writeAgent("aFirstAttempt", "gaps:shared", 1_000);
+    yield* writeAgent("aRetry", "gaps:shared", 2_000);
+    yield* writeAgent("aOther", "gaps:portfolio", 3_000);
+    return runDir;
+  });
+
+  itEffect.effect("picks the newest attempt with the member's label", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const runDir = yield* writeRun(yield* fileSystem.makeTempDirectoryScoped());
+      const resolve = (label: string) =>
+        resolveClaudeWorkflowMemberAgentId({ sessionId, transcriptDir: runDir, label });
+
+      expect(yield* resolve("gaps:shared")).toBe("aRetry");
+      expect(yield* resolve("gaps:missing")).toBeUndefined();
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  itEffect.effect("refuses run directories outside the session", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const runDir = yield* writeRun(yield* fileSystem.makeTempDirectoryScoped());
+
+      const agentId = yield* resolveClaudeWorkflowMemberAgentId({
+        sessionId: "another-session",
+        transcriptDir: runDir,
+        label: "gaps:shared",
+      });
+
+      expect(agentId).toBeUndefined();
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
 });
