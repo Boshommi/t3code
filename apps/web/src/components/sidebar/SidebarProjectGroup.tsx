@@ -5,7 +5,18 @@
  * The group subscribes to its own color so dragging the picker repaints only
  * this header and container, never the whole sidebar or its memoized rows.
  */
-import { ChevronRightIcon, PaletteIcon, SquarePenIcon, XIcon } from "lucide-react";
+import {
+  ChevronRightIcon,
+  CircleAlertIcon,
+  CircleDashedIcon,
+  ClockIcon,
+  FolderGit2Icon,
+  FolderIcon,
+  MessageCircleQuestionIcon,
+  PaletteIcon,
+  SquarePenIcon,
+  XIcon,
+} from "lucide-react";
 import {
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
@@ -14,12 +25,16 @@ import {
 } from "react";
 
 import { cn } from "~/lib/utils";
+import { formatRelativeTimeLabel } from "../../timestampFormat";
+import type { SidebarThreadSummary } from "../../types";
 import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
 import { type ProjectColor, useUiStateStore } from "../../uiStateStore";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { ProviderCustomColorPanel } from "../settings/ProviderAccentColorPicker";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { resolveSidebarThreadStatus } from "../Sidebar.logic";
 
 const PROJECT_COLOR_PRESETS = [
   "#ef4444",
@@ -124,6 +139,108 @@ function ProjectColorPanel(props: {
   );
 }
 
+export interface SidebarProjectGroupStats {
+  /** Pinned and active threads, in list order. */
+  liveThreads: readonly SidebarThreadSummary[];
+  pinnedCount: number;
+  snoozedCount: number;
+  settledCount: number;
+}
+
+function pluralize(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+// Rendered only while the tooltip is open, so the per-thread status pass
+// never runs during ordinary list updates.
+function ProjectGroupTooltipBody(props: {
+  project: SidebarProjectSnapshot;
+  displayName: string;
+  stats: SidebarProjectGroupStats;
+}) {
+  const { project, stats } = props;
+  let working = 0;
+  let needsYou = 0;
+  let failed = 0;
+  let lastActivity: string | null = null;
+  for (const thread of stats.liveThreads) {
+    const status = resolveSidebarThreadStatus(thread);
+    if (status === "working") working += 1;
+    else if (status === "approval" || status === "input") needsYou += 1;
+    else if (status === "failed") failed += 1;
+    const touchedAt = thread.latestUserMessageAt ?? thread.updatedAt;
+    if (lastActivity === null || touchedAt > lastActivity) lastActivity = touchedAt;
+  }
+  const identity = project.repositoryIdentity;
+  const repository =
+    identity?.displayName ??
+    (identity?.owner && identity.name ? `${identity.owner}/${identity.name}` : null);
+  const spansEnvironments = project.memberProjects.length > 1;
+  const activeCount = stats.liveThreads.length - stats.pinnedCount;
+  const counts = [
+    activeCount > 0 ? `${activeCount} active` : null,
+    stats.pinnedCount > 0 ? `${stats.pinnedCount} pinned` : null,
+    stats.snoozedCount > 0 ? `${stats.snoozedCount} snoozed` : null,
+    stats.settledCount > 0 ? `${stats.settledCount} settled` : null,
+  ].filter((entry) => entry !== null);
+
+  return (
+    <div className="flex min-w-0 max-w-80 flex-col gap-2 p-[var(--floating-content-inset)]">
+      <div className="min-w-0 truncate text-xs leading-tight font-medium text-foreground">
+        {props.displayName}
+      </div>
+      <div className="grid gap-1.5 pl-0.5 text-xs text-muted-foreground">
+        {repository ? (
+          <div className="flex min-w-0 items-center gap-2">
+            <FolderGit2Icon className="size-3 shrink-0 stroke-muted-foreground" />
+            <div className="min-w-0 truncate text-foreground/75">{repository}</div>
+          </div>
+        ) : null}
+        {project.memberProjects.map((member) => (
+          <div key={member.physicalProjectKey} className="flex min-w-0 items-start gap-2">
+            <FolderIcon className="mt-0.5 size-3 shrink-0 stroke-muted-foreground" />
+            <div className="min-w-0 wrap-break-word text-foreground/75">
+              {member.workspaceRoot}
+              {spansEnvironments && member.environmentLabel ? (
+                <span className="text-muted-foreground"> · {member.environmentLabel}</span>
+              ) : null}
+            </div>
+          </div>
+        ))}
+        {working > 0 ? (
+          <div className="flex min-w-0 items-center gap-2 text-sky-600 dark:text-sky-400">
+            <CircleDashedIcon aria-hidden className="size-3 shrink-0" />
+            <div className="min-w-0 truncate">{working} working</div>
+          </div>
+        ) : null}
+        {needsYou > 0 ? (
+          <div className="flex min-w-0 items-center gap-2 text-indigo-600 dark:text-indigo-300">
+            <MessageCircleQuestionIcon aria-hidden className="size-3 shrink-0" />
+            <div className="min-w-0 truncate">{pluralize(needsYou, "thread")} waiting on you</div>
+          </div>
+        ) : null}
+        {failed > 0 ? (
+          <div className="flex min-w-0 items-center gap-2 text-red-600 dark:text-red-400">
+            <CircleAlertIcon aria-hidden className="size-3 shrink-0" />
+            <div className="min-w-0 truncate">{failed} failed</div>
+          </div>
+        ) : null}
+        {lastActivity !== null ? (
+          <div className="flex min-w-0 items-center gap-2">
+            <ClockIcon className="size-3 shrink-0 stroke-muted-foreground" />
+            <div className="min-w-0 truncate text-foreground/75">
+              Last activity {formatRelativeTimeLabel(lastActivity)}
+            </div>
+          </div>
+        ) : null}
+      </div>
+      <div className="border-t border-border/60 pt-2 pl-0.5 text-xs text-muted-foreground">
+        {counts.length > 0 ? counts.join(" · ") : "No threads yet"}
+      </div>
+    </div>
+  );
+}
+
 export function SidebarProjectGroup(props: {
   projectKey: string;
   /** Null for the catch-all group of threads whose project isn't loaded. */
@@ -132,6 +249,7 @@ export function SidebarProjectGroup(props: {
   expanded: boolean;
   /** Pinned and active threads, shown while collapsed. */
   cardCount: number;
+  stats: SidebarProjectGroupStats;
   colorPickerOpen: boolean;
   onColorPickerOpenChange: (projectKey: string, open: boolean) => void;
   onToggleExpanded: (projectKey: string) => void;
@@ -159,31 +277,52 @@ export function SidebarProjectGroup(props: {
         className="group/project-header flex h-8 items-center gap-0.5 rounded-lg pe-1"
         onContextMenu={handleContextMenu}
       >
-        <button
-          type="button"
-          aria-expanded={props.expanded}
-          onClick={() => props.onToggleExpanded(projectKey)}
-          className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md ps-1.5 text-left text-xs font-medium text-sidebar-foreground/85 outline-none hover:text-sidebar-foreground focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          <ChevronRightIcon
-            aria-hidden
-            className={cn(
-              "size-3.5 shrink-0 text-sidebar-muted-foreground/70 transition-transform",
-              props.expanded && "rotate-90",
-            )}
-          />
+        <Tooltip disabled={props.project === null}>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                aria-expanded={props.expanded}
+                onClick={() => props.onToggleExpanded(projectKey)}
+                className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md ps-1.5 text-left text-xs font-medium text-sidebar-foreground/85 outline-none hover:text-sidebar-foreground focus-visible:ring-1 focus-visible:ring-ring"
+              />
+            }
+          >
+            <ChevronRightIcon
+              aria-hidden
+              className={cn(
+                "size-3.5 shrink-0 text-sidebar-muted-foreground/70 transition-transform",
+                props.expanded && "rotate-90",
+              )}
+            />
+            {props.project ? (
+              <span className="flex shrink-0">
+                <ProjectFavicon project={props.project} className="size-4" />
+              </span>
+            ) : null}
+            <span className="min-w-0 flex-1 truncate">{props.displayName}</span>
+            {!props.expanded && props.cardCount > 0 ? (
+              <span className="shrink-0 pe-1 tabular-nums text-sidebar-muted-foreground/70">
+                {props.cardCount}
+              </span>
+            ) : null}
+          </TooltipTrigger>
           {props.project ? (
-            <span className="flex shrink-0">
-              <ProjectFavicon project={props.project} className="size-4" />
-            </span>
+            <TooltipPopup
+              side="right"
+              align="start"
+              sideOffset={4}
+              variant="glass"
+              className="max-w-80 text-left whitespace-normal [&_[data-slot=tooltip-viewport]]:p-0"
+            >
+              <ProjectGroupTooltipBody
+                project={props.project}
+                displayName={props.displayName}
+                stats={props.stats}
+              />
+            </TooltipPopup>
           ) : null}
-          <span className="min-w-0 flex-1 truncate">{props.displayName}</span>
-          {!props.expanded && props.cardCount > 0 ? (
-            <span className="shrink-0 pe-1 tabular-nums text-sidebar-muted-foreground/70">
-              {props.cardCount}
-            </span>
-          ) : null}
-        </button>
+        </Tooltip>
         {props.project ? (
           <>
             <Popover
