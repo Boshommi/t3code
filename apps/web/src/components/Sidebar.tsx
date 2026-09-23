@@ -1423,12 +1423,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // All sidebar rows share one surface model. Live threads used to look
   // like elevated cards while settled threads were plain rows, leaving neither
   // a useful hierarchy nor a reliable hover cue. Status now lives in the row
-  // content; surface is reserved for interaction (hover, multi-select, route).
+  // content; surface is reserved for hover and multi-select, while a slim
+  // marker identifies the open thread.
   const rowSurfaceClassName = cn(
     "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-md text-left outline-none select-none",
     variantAction === "unsettle" && "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
     props.isActive
-      ? "bg-sidebar-row-active text-sidebar-foreground"
+      ? "bg-transparent text-sidebar-foreground hover:bg-sidebar-row-hover"
       : isSelected
         ? "bg-sidebar-row-selected text-sidebar-foreground"
         : hasUnsentDraft
@@ -1437,7 +1438,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             ? "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
             : "bg-transparent text-sidebar-foreground hover:bg-sidebar-row-hover",
     isFileDragOver && "ring-1 ring-inset ring-primary/70",
-    // The hover tint must not clobber an active/selected row's own surface.
+    // The file drop tint must not clobber selected rows or the open thread.
     isFileDragOver && !props.isActive && !isSelected && "bg-sidebar-row-hover",
     // The lifted row is an opaque card so the rows beneath it never show
     // through. The row tint is translucent in dark themes and the pointer
@@ -1446,6 +1447,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     props.sortable?.isDragging &&
       "bg-[linear-gradient(var(--sidebar-row-active),var(--sidebar-row-active)),linear-gradient(var(--sidebar),var(--sidebar))] text-sidebar-foreground opacity-100 shadow-lg",
   );
+  const activeMarker = props.isActive ? (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute top-1/2 left-0 h-5 w-1 -translate-y-1/2 rounded-r-full bg-emerald-500 dark:bg-emerald-300/90"
+    />
+  ) : null;
   // dnd-kit props for the row root. Same bag on both variants: every row in
   // the list translates around the gap as the drag passes it.
   const sortable = props.sortable;
@@ -1687,6 +1694,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               />
             }
           >
+            {activeMarker}
             {leading}
             {title}
             {isRegeneratingTitle ? (
@@ -1805,6 +1813,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               />
             }
           >
+            {activeMarker}
             {/* Settled history recedes: dimmed favicon at rest, restored on
               hover so the tail stays scannable when you're hunting. */}
             <span
@@ -1958,6 +1967,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             />
           }
         >
+          {activeMarker}
           <div className="relative z-10 h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
             <div className="flex h-5 min-w-0 items-center gap-1.5">
               {draftIndicator}
