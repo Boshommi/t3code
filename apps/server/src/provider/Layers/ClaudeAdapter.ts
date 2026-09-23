@@ -120,7 +120,11 @@ import {
 } from "../Errors.ts";
 import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { spawnAndCollect } from "../providerSnapshot.ts";
-import { boundSubagentTranscript, claudeSubagentTranscriptEntries } from "../subagentTranscript.ts";
+import {
+  boundSubagentTranscript,
+  claudeSubagentTranscriptEntries,
+  resolveClaudeWorkflowMemberAgentId,
+} from "../subagentTranscript.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
 const decodeUnknownJsonStringExit = Schema.decodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
@@ -5450,12 +5454,24 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   };
 
   const readSubagentTranscript: NonNullable<ClaudeAdapterShape["readSubagentTranscript"]> =
-    Effect.fn("readSubagentTranscript")(function* ({ threadId, agentId }) {
+    Effect.fn("readSubagentTranscript")(function* ({
+      threadId,
+      agentId: requestedId,
+      workflowMember,
+    }) {
       const context = yield* requireSession(threadId);
       const sessionId = context.resumeSessionId;
+      const agentId =
+        sessionId && workflowMember
+          ? yield* resolveClaudeWorkflowMemberAgentId({ sessionId, ...workflowMember }).pipe(
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+              Effect.provideService(Path.Path, path),
+              Effect.orElseSucceed(() => undefined),
+            )
+          : requestedId;
       // Agent ids name the transcript file (agent-<id>.jsonl); refuse anything
       // that could step outside the session's subagents directory.
-      if (!sessionId || !/^[\w-]+$/.test(agentId)) {
+      if (!sessionId || !agentId || !/^[\w-]+$/.test(agentId)) {
         return yield* new ProviderAdapterRequestError({
           provider: PROVIDER,
           method: "subagent/read",

@@ -102,11 +102,14 @@ const TranscriptEntry = memo(
 
 export function SubagentTranscript({
   agent,
+  workflowTranscriptDir,
   environmentId,
   threadId,
   onBack,
 }: {
   agent: RuntimeSubagent;
+  /** The parent workflow's transcript directory, for members without an agent id. */
+  workflowTranscriptDir: string | undefined;
   environmentId: EnvironmentId;
   threadId: ThreadId;
   onBack: () => void;
@@ -114,7 +117,14 @@ export function SubagentTranscript({
   const transcript = useEnvironmentQuery(
     orchestrationEnvironment.subagentTranscript({
       environmentId,
-      input: { threadId, agentId: agent.transcriptAgentId ?? agent.id },
+      input:
+        agent.transcriptAgentId === null && workflowTranscriptDir !== undefined
+          ? {
+              threadId,
+              agentId: agent.id,
+              workflowMember: { transcriptDir: workflowTranscriptDir, label: agent.title },
+            }
+          : { threadId, agentId: agent.transcriptAgentId ?? agent.id },
     }),
   );
   const live = isActiveSubagentStatus(agent.status);

@@ -143,16 +143,32 @@ type OpenAgent = (agent: RuntimeSubagent) => void;
 
 /**
  * Workflow coordinators and batches have no transcript of their own. Claude
- * workflow members use synthetic ":wf:" slot ids and are readable once their
- * attempt's agent id is known.
+ * workflow members use synthetic ":wf:" slot ids; they are readable through
+ * their attempt's agent id, or found by label in the run's transcript
+ * directory for rows recorded before that id was carried.
  */
-function canOpenTranscript(agent: RuntimeSubagent): boolean {
+function canOpenTranscript(
+  agent: RuntimeSubagent,
+  workflowTranscriptDir: string | undefined,
+): boolean {
   if (agent.kind === "workflow" || agent.kind === "subagent_batch") return false;
-  return !agent.id.includes(":wf:") || agent.transcriptAgentId !== null;
+  return (
+    !agent.id.includes(":wf:") ||
+    agent.transcriptAgentId !== null ||
+    workflowTranscriptDir !== undefined
+  );
 }
 
 /** Flat agent status line. Opens the transcript when `onOpen` is given. */
-function AgentRow({ agent, onOpen }: { agent: RuntimeSubagent; onOpen?: OpenAgent | undefined }) {
+function AgentRow({
+  agent,
+  onOpen,
+  workflowTranscriptDir,
+}: {
+  agent: RuntimeSubagent;
+  onOpen?: OpenAgent | undefined;
+  workflowTranscriptDir?: string | undefined;
+}) {
   const visuals = STATUS_VISUALS[agent.status];
   const statusLabel =
     agent.kind === "subagent_batch" && agent.status === "idle" ? "Idle" : visuals.label;
@@ -169,7 +185,7 @@ function AgentRow({ agent, onOpen }: { agent: RuntimeSubagent; onOpen?: OpenAgen
     agent.activationCount > 1 ? `run ${agent.activationCount}` : null,
   ].filter((value): value is string => value !== null);
 
-  const openable = onOpen !== undefined && canOpenTranscript(agent);
+  const openable = onOpen !== undefined && canOpenTranscript(agent, workflowTranscriptDir);
   const Row = openable ? "button" : "div";
   return (
     <Row
@@ -342,10 +358,12 @@ function PhaseSection({
   phase,
   defaultOpen = false,
   onOpenAgent,
+  workflowTranscriptDir,
 }: {
   phase: AgentPanelWorkflowGroup["phases"][number];
   defaultOpen?: boolean;
   onOpenAgent: OpenAgent | undefined;
+  workflowTranscriptDir: string | undefined;
 }) {
   const [open, setOpen] = useState(defaultOpen || phase.state === "running");
   const previousState = useRef(phase.state);
@@ -396,7 +414,12 @@ function PhaseSection({
       </button>
       {open
         ? phase.members.map((member) => (
-            <AgentRow key={member.id} agent={member} onOpen={onOpenAgent} />
+            <AgentRow
+              key={member.id}
+              agent={member}
+              onOpen={onOpenAgent}
+              workflowTranscriptDir={workflowTranscriptDir}
+            />
           ))
         : null}
     </div>
@@ -475,10 +498,16 @@ function ExpandedWorkflowSection({
           phase={phase}
           defaultOpen={!workflowIsLive(group)}
           onOpenAgent={onOpenAgent}
+          workflowTranscriptDir={group.workflow.runHandles?.transcriptDir}
         />
       ))}
       {group.unphasedMembers.map((member) => (
-        <AgentRow key={member.id} agent={member} onOpen={onOpenAgent} />
+        <AgentRow
+          key={member.id}
+          agent={member}
+          onOpen={onOpenAgent}
+          workflowTranscriptDir={group.workflow.runHandles?.transcriptDir}
+        />
       ))}
       {group.phases.length === 0 && group.unphasedMembers.length === 0 ? (
         <AgentRow agent={group.workflow} />
@@ -587,14 +616,20 @@ export function AgentsPanel({
     openAgentId === null
       ? undefined
       : [
-          ...model.directAgents,
-          ...model.workflows.flatMap((group) => [group.workflow, ...workflowMembers(group)]),
-        ].find((agent) => agent.id === openAgentId);
+          ...model.directAgents.map((agent) => ({ agent, workflowTranscriptDir: undefined })),
+          ...model.workflows.flatMap((group) =>
+            workflowMembers(group).map((agent) => ({
+              agent,
+              workflowTranscriptDir: group.workflow.runHandles?.transcriptDir,
+            })),
+          ),
+        ].find(({ agent }) => agent.id === openAgentId);
 
   if (openAgent && transcriptsSupported && threadId !== null) {
     return (
       <SubagentTranscript
-        agent={openAgent}
+        agent={openAgent.agent}
+        workflowTranscriptDir={openAgent.workflowTranscriptDir}
         environmentId={environmentId}
         threadId={threadId}
         onBack={() => setOpenAgentId(null)}

@@ -169,6 +169,13 @@ export const ProviderReadSubagentTranscriptInput = Schema.Struct({
   threadId: ThreadId,
   /** The subagent's task id, as carried by its `task.*` activities. */
   agentId: TrimmedNonEmptyString,
+  /**
+   * Claude workflow member whose agent id was never recorded: its run's
+   * transcript directory (from the workflow's runHandles) and its label.
+   */
+  workflowMember: Schema.optional(
+    Schema.Struct({ transcriptDir: TrimmedNonEmptyString, label: TrimmedNonEmptyString }),
+  ),
 });
 export type ProviderReadSubagentTranscriptInput = typeof ProviderReadSubagentTranscriptInput.Type;
 
