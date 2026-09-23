@@ -9,6 +9,7 @@
  */
 import type {
   ApprovalRequestId,
+  MessageId,
   ProviderApprovalDecision,
   ProviderDriverKind,
   ProviderUserInputAnswers,
@@ -54,6 +55,18 @@ export interface ProviderAdapterCapabilities {
   readonly promptlessTurnContinuation?: boolean;
   /** False when native conversation history cannot be rewound. */
   readonly supportsConversationRollback?: boolean;
+}
+
+/**
+ * A read-only side question (`/btw`) about a thread. The answer must never
+ * enter the thread's provider history or interrupt its running turn.
+ * `history` holds the side thread's earlier answered exchanges, oldest first.
+ */
+export interface ProviderSideQuestionInput {
+  readonly threadId: ThreadId;
+  readonly sideThreadId: MessageId;
+  readonly question: string;
+  readonly history: ReadonlyArray<{ readonly question: string; readonly answer: string }>;
 }
 
 export interface ProviderThreadTurnSnapshot {
@@ -155,6 +168,12 @@ export interface ProviderAdapterShape<TError> {
   readonly readSubagentTranscript?: (
     input: ProviderReadSubagentTranscriptInput,
   ) => Effect.Effect<ProviderReadSubagentTranscriptResult, TError>;
+
+  /**
+   * Answer a side question from the live session's context, without tools and
+   * without touching the main conversation. Omitted when unsupported.
+   */
+  readonly askSideQuestion?: (input: ProviderSideQuestionInput) => Effect.Effect<string, TError>;
 
   /**
    * Stop all sessions owned by this adapter.

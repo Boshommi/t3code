@@ -363,6 +363,16 @@ export function isThreadDetailEvent(event: OrchestrationEvent): event is Extract
   );
 }
 
+/** Side-thread events reach only subscriptions that opt in with `sideThreads`. */
+export function isSideThreadEvent(
+  event: OrchestrationEvent,
+): event is Extract<
+  OrchestrationEvent,
+  { type: "thread.side-message-added" | "thread.side-thread-deleted" }
+> {
+  return event.type === "thread.side-message-added" || event.type === "thread.side-thread-deleted";
+}
+
 const PROVIDER_STATUS_DEBOUNCE_MS = 200;
 
 // When a resuming client's cursor is more than this many events behind the
@@ -1865,6 +1875,7 @@ const makeWsRpcLayer = (
             threadResumeCompletionMarker: true,
             threadSnapshotPagination: true,
             reasoningMessages: true,
+            sideThreads: true,
           };
         });
 
@@ -2189,7 +2200,8 @@ const makeWsRpcLayer = (
               const isThisThreadDetailEvent = (event: OrchestrationEvent) =>
                 event.aggregateKind === "thread" &&
                 event.aggregateId === input.threadId &&
-                isThreadDetailEvent(event);
+                (isThreadDetailEvent(event) ||
+                  (input.sideThreads === true && isSideThreadEvent(event)));
 
               const liveStream = orchestrationEngine.streamDomainEvents.pipe(
                 Stream.filter(isThisThreadDetailEvent),

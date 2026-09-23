@@ -44,6 +44,7 @@ import {
   type CodexSessionRuntimeOptions,
   type CodexSessionRuntimeSendTurnInput,
   type CodexSessionRuntimeShape,
+  type CodexSessionRuntimeSideQuestionInput,
   type CodexThreadSnapshot,
 } from "./CodexSessionRuntime.ts";
 import { makeCodexAdapter } from "./CodexAdapter.ts";
@@ -123,6 +124,10 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
       Promise.resolve(undefined),
   );
 
+  public readonly askSideQuestionImpl = vi.fn((_input: CodexSessionRuntimeSideQuestionInput) =>
+    Promise.resolve("side answer"),
+  );
+
   public readonly closeImpl = vi.fn(() => Promise.resolve(undefined));
 
   readonly options: CodexSessionRuntimeOptions;
@@ -165,6 +170,10 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
 
   respondToUserInput(requestId: ApprovalRequestId, answers: ProviderUserInputAnswers) {
     return Effect.promise(() => this.respondToUserInputImpl(requestId, answers));
+  }
+
+  askSideQuestion(input: CodexSessionRuntimeSideQuestionInput) {
+    return Effect.promise(() => this.askSideQuestionImpl(input));
   }
 
   get events() {

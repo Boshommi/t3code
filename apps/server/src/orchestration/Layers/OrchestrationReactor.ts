@@ -12,6 +12,7 @@ import { ThreadDeletionReactor } from "../Services/ThreadDeletionReactor.ts";
 import * as ThreadSettlementReactor from "../ThreadSettlementReactor.ts";
 import * as PullRequestSyncReactor from "../PullRequestSyncReactor.ts";
 import * as ThreadIdleSuspensionReactor from "../ThreadIdleSuspensionReactor.ts";
+import * as SideQuestionReactor from "../SideQuestionReactor.ts";
 import * as ThreadPullRequestReactor from "../ThreadPullRequestReactor.ts";
 import * as AgentAwarenessRelay from "../../relay/AgentAwarenessRelay.ts";
 import * as StorageCleanup from "../../storageCleanup.ts";
@@ -26,6 +27,7 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
   const threadIdleSuspensionReactor =
     yield* ThreadIdleSuspensionReactor.ThreadIdleSuspensionReactor;
   const threadPullRequestReactor = yield* ThreadPullRequestReactor.ThreadPullRequestReactor;
+  const sideQuestionReactor = yield* SideQuestionReactor.SideQuestionReactor;
   const agentAwarenessRelay = yield* AgentAwarenessRelay.AgentAwarenessRelay;
   const storageCleanup = yield* StorageCleanup.StorageCleanup;
 
@@ -38,6 +40,7 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
     yield* threadSettlementReactor.start();
     yield* pullRequestSyncReactor.start();
     yield* threadIdleSuspensionReactor.start();
+    yield* sideQuestionReactor.start();
     yield* agentAwarenessRelay.start();
     yield* storageCleanup.start();
   });

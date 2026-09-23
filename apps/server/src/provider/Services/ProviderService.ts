@@ -34,7 +34,7 @@ import type * as Effect from "effect/Effect";
 import type * as Stream from "effect/Stream";
 
 import type { ProviderServiceError } from "../Errors.ts";
-import type { ProviderAdapterCapabilities } from "./ProviderAdapter.ts";
+import type { ProviderAdapterCapabilities, ProviderSideQuestionInput } from "./ProviderAdapter.ts";
 import type { ProviderInstanceRoutingInfo } from "./ProviderAdapterRegistry.ts";
 
 /**
@@ -137,6 +137,15 @@ export interface ProviderServiceShape {
   readonly readSubagentTranscript: (
     input: ProviderReadSubagentTranscriptInput,
   ) => Effect.Effect<ProviderReadSubagentTranscriptResult, ProviderServiceError>;
+
+  /**
+   * Answer a read-only side question about a thread, recovering its provider
+   * session when needed. Fails with `ProviderValidationError` when the
+   * thread's provider does not support side questions.
+   */
+  readonly askSideQuestion: (
+    input: ProviderSideQuestionInput,
+  ) => Effect.Effect<string, ProviderServiceError>;
 
   /**
    * Canonical provider runtime event stream.

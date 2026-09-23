@@ -2671,6 +2671,22 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       ),
     );
 
+  const askSideQuestion: NonNullable<CodexAdapterShape["askSideQuestion"]> = (input) =>
+    requireSession(input.threadId).pipe(
+      Effect.flatMap((session) =>
+        session.runtime.askSideQuestion({
+          sideThreadId: input.sideThreadId,
+          question: input.question,
+          history: input.history,
+        }),
+      ),
+      Effect.mapError((cause) =>
+        cause._tag === "ProviderAdapterSessionNotFoundError"
+          ? cause
+          : mapCodexRuntimeError(input.threadId, "side_question", cause),
+      ),
+    );
+
   const respondToRequest: CodexAdapterShape["respondToRequest"] = (threadId, requestId, decision) =>
     requireSession(threadId).pipe(
       Effect.flatMap((session) => session.runtime.respondToRequest(requestId, decision)),
@@ -2764,6 +2780,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     uploadFeedback,
     respondToRequest,
     respondToUserInput,
+    askSideQuestion,
     stopSession,
     listSessions,
     hasSession,
