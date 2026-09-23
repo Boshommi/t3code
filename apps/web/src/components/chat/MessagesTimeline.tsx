@@ -2543,7 +2543,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
             copyStreaming={row.assistantCopyStreaming}
           />
         ) : null}
-        <SideThreadRepliesLink messageId={row.message.id} className="-ms-2 mt-1" />
+        <SideThreadRepliesLink messageId={row.message.id} className="mt-1" />
       </div>
     </>
   );
