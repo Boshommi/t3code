@@ -7100,6 +7100,145 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect("announces task subagents to the Agents panel once per lifecycle edge", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-subagent-lifecycle");
+      const sessionID = "http://127.0.0.1:9999/session";
+      const start = promiseWithResolvers<OpenCodeEvent>();
+      const input = {
+        description: "Explore auth",
+        prompt: "Look around",
+        subagent_type: "explore",
+      };
+      const metadata = { sessionId: "ses_child", model: { modelID: "kimi-k3" } };
+      const states = [
+        { status: "pending", input, raw: "" },
+        { status: "running", input, title: "Explore auth", metadata, time: { start: 1 } },
+        { status: "running", input, title: "Explore auth", metadata, time: { start: 1 } },
+        {
+          status: "completed",
+          input,
+          output: "Found it",
+          title: "Explore auth",
+          metadata,
+          time: { start: 1, end: 2 },
+        },
+      ] satisfies ReadonlyArray<ToolPart["state"]>;
+      runtimeMock.state.subscribedEvents = [
+        start.promise,
+        ...states.map(
+          (state, index) =>
+            ({
+              id: `evt-task-${index}`,
+              type: "message.part.updated",
+              properties: {
+                sessionID,
+                time: 4,
+                part: {
+                  id: "part-task",
+                  sessionID,
+                  messageID: "msg-task",
+                  type: "tool",
+                  callID: "call-task",
+                  tool: "task",
+                  state,
+                },
+              },
+            }) satisfies OpenCodeEvent,
+        ),
+        {
+          id: "evt-subagent-lifecycle-drained",
+          type: "session.compacted",
+          properties: { sessionID },
+        },
+      ];
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId),
+        Stream.takeUntil((event) => event.type === "thread.state.changed"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "Explore auth",
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make("opencode"),
+          "opencode/kimi-k3",
+        ),
+      });
+      start.resolve({
+        id: "evt-subagent-lifecycle-started",
+        type: "session.status",
+        properties: { sessionID, status: { type: "busy" } },
+      });
+      const events = yield* Fiber.join(eventsFiber);
+      const tasks = events.flatMap((event) =>
+        event.type === "task.started" || event.type === "task.completed"
+          ? [{ type: event.type, payload: event.payload }]
+          : [],
+      );
+      const identity = {
+        taskId: "ses_child",
+        taskType: "subagent",
+        toolUseId: "call-task",
+        title: "Explore auth",
+        role: "explore",
+        model: "kimi-k3",
+      };
+      NodeAssert.deepEqual(tasks, [
+        { type: "task.started", payload: { ...identity, description: "Explore auth" } },
+        { type: "task.completed", payload: { ...identity, status: "completed" } },
+      ]);
+    }),
+  );
+
+  it.effect("reads a child session transcript only for the thread's own subagents", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-subagent-transcript");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      runtimeMock.state.sessionParentById.set("ses_child", "http://127.0.0.1:9999/session");
+      runtimeMock.state.forkMessagesBySession.set("ses_child", [
+        {
+          info: { id: "msg-child-user", role: "user" },
+          parts: [{ id: "p1", type: "text", text: "Explore auth" }],
+        },
+        {
+          info: { id: "msg-child-assistant", role: "assistant" },
+          parts: [{ id: "p2", type: "text", text: "Auth lives in auth.ts." }],
+        },
+      ] as unknown as MessageEntry[]);
+
+      const transcript = yield* adapter.readSubagentTranscript!({
+        threadId,
+        agentId: "ses_child",
+      });
+      const foreign = yield* adapter.readSubagentTranscript!({
+        threadId,
+        agentId: "ses_elsewhere",
+      }).pipe(Effect.flip);
+
+      NodeAssert.deepEqual(transcript, {
+        entries: [
+          { _tag: "prompt", text: "Explore auth" },
+          { _tag: "message", text: "Auth lives in auth.ts." },
+        ],
+        skipped: 0,
+      });
+      NodeAssert.equal(foreign._tag, "ProviderAdapterRequestError");
+    }),
+  );
+
   it.effect("processes late assistant metadata without visiting completed turns", () =>
     Effect.gen(function* () {
       const adapter = yield* OpenCodeAdapter;

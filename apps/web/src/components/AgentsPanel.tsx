@@ -9,6 +9,7 @@
  * - Workflow expansion is presentation state. A live run stays expanded when
  *   it settles; older collapsed runs can still be opened at run granularity.
  * - Static status dots, DOM-write elapsed timers, plain token counters.
+ * - A subagent row opens its transcript when the provider keeps one.
  */
 import { useAtomValue } from "@effect/atom-react";
 import type {
@@ -25,7 +26,9 @@ import { Bot, Braces, Check, ChevronDown, ChevronRight, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";
+import { useServerConfigs } from "~/state/entities";
 import { orchestrationEnvironment } from "~/state/orchestration";
+import { SubagentTranscript } from "~/components/SubagentTranscript";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { Button } from "~/components/ui/button";
 
@@ -136,8 +139,18 @@ function agentActivityText(agent: RuntimeSubagent): string | null {
   );
 }
 
-/** Flat, non-interactive agent status line. No unfold. */
-function AgentRow({ agent }: { agent: RuntimeSubagent }) {
+type OpenAgent = (agent: RuntimeSubagent) => void;
+
+/**
+ * Only real subagents have a transcript. Workflow coordinators, batches, and
+ * Claude workflow members (synthetic ":wf:" ids) do not.
+ */
+function canOpenTranscript(agent: RuntimeSubagent): boolean {
+  return agent.kind !== "workflow" && agent.kind !== "subagent_batch" && !agent.id.includes(":wf:");
+}
+
+/** Flat agent status line. Opens the transcript when `onOpen` is given. */
+function AgentRow({ agent, onOpen }: { agent: RuntimeSubagent; onOpen?: OpenAgent | undefined }) {
   const visuals = STATUS_VISUALS[agent.status];
   const statusLabel =
     agent.kind === "subagent_batch" && agent.status === "idle" ? "Idle" : visuals.label;
@@ -154,8 +167,16 @@ function AgentRow({ agent }: { agent: RuntimeSubagent }) {
     agent.activationCount > 1 ? `run ${agent.activationCount}` : null,
   ].filter((value): value is string => value !== null);
 
+  const openable = onOpen !== undefined && canOpenTranscript(agent);
+  const Row = openable ? "button" : "div";
   return (
-    <div className="grid h-[3.875rem] grid-cols-[0.375rem_minmax(0,1fr)_auto] grid-rows-[1.25rem_1.125rem_1rem] items-center gap-x-2 rounded-md px-1.5 py-1">
+    <Row
+      {...(openable ? { type: "button" as const, onClick: () => onOpen(agent) } : {})}
+      className={cn(
+        "grid h-[3.875rem] w-full grid-cols-[0.375rem_minmax(0,1fr)_auto] grid-rows-[1.25rem_1.125rem_1rem] items-center gap-x-2 rounded-md px-1.5 py-1 text-left",
+        openable && "hover:bg-accent/40",
+      )}
+    >
       <span className="col-start-1 row-start-1 flex items-center">
         <StatusDot status={agent.status} />
       </span>
@@ -187,7 +208,7 @@ function AgentRow({ agent }: { agent: RuntimeSubagent }) {
         {metadata.join(" · ")}
       </span>
       <span className="sr-only">{statusLabel}</span>
-    </div>
+    </Row>
   );
 }
 
@@ -318,9 +339,11 @@ function WorkflowScriptView({
 function PhaseSection({
   phase,
   defaultOpen = false,
+  onOpenAgent,
 }: {
   phase: AgentPanelWorkflowGroup["phases"][number];
   defaultOpen?: boolean;
+  onOpenAgent: OpenAgent | undefined;
 }) {
   const [open, setOpen] = useState(defaultOpen || phase.state === "running");
   const previousState = useRef(phase.state);
@@ -369,7 +392,11 @@ function PhaseSection({
           </span>
         ) : null}
       </button>
-      {open ? phase.members.map((member) => <AgentRow key={member.id} agent={member} />) : null}
+      {open
+        ? phase.members.map((member) => (
+            <AgentRow key={member.id} agent={member} onOpen={onOpenAgent} />
+          ))
+        : null}
     </div>
   );
 }
@@ -380,11 +407,13 @@ function ExpandedWorkflowSection({
   environmentId,
   threadId,
   onCollapse,
+  onOpenAgent,
 }: {
   group: AgentPanelWorkflowGroup;
   environmentId: EnvironmentId | null;
   threadId: ThreadId | null;
   onCollapse: () => void;
+  onOpenAgent: OpenAgent | undefined;
 }) {
   const [scriptOpen, setScriptOpen] = useState(false);
   const members = workflowMembers(group);
@@ -439,10 +468,15 @@ function ExpandedWorkflowSection({
         />
       ) : null}
       {group.phases.map((phase) => (
-        <PhaseSection key={phase.index} phase={phase} defaultOpen={!workflowIsLive(group)} />
+        <PhaseSection
+          key={phase.index}
+          phase={phase}
+          defaultOpen={!workflowIsLive(group)}
+          onOpenAgent={onOpenAgent}
+        />
       ))}
       {group.unphasedMembers.map((member) => (
-        <AgentRow key={member.id} agent={member} />
+        <AgentRow key={member.id} agent={member} onOpen={onOpenAgent} />
       ))}
       {group.phases.length === 0 && group.unphasedMembers.length === 0 ? (
         <AgentRow agent={group.workflow} />
@@ -503,10 +537,12 @@ function WorkflowSection({
   group,
   environmentId,
   threadId,
+  onOpenAgent,
 }: {
   group: AgentPanelWorkflowGroup;
   environmentId: EnvironmentId | null;
   threadId: ThreadId | null;
+  onOpenAgent: OpenAgent | undefined;
 }) {
   const [open, setOpen] = useState(() => workflowIsLive(group));
   return open ? (
@@ -515,6 +551,7 @@ function WorkflowSection({
       environmentId={environmentId}
       threadId={threadId}
       onCollapse={() => setOpen(false)}
+      onOpenAgent={onOpenAgent}
     />
   ) : (
     <CollapsedWorkflowSection group={group} onExpand={() => setOpen(true)} />
@@ -525,11 +562,44 @@ export function AgentsPanel({
   model,
   environmentId = null,
   threadId = null,
+  providerDriver = null,
 }: {
   model: AgentPanelModel;
   environmentId?: EnvironmentId | null;
   threadId?: ThreadId | null;
+  /** The thread's provider driver, which decides whether transcripts exist. */
+  providerDriver?: string | null;
 }) {
+  const [openAgentId, setOpenAgentId] = useState<string | null>(null);
+  const serverConfigs = useServerConfigs();
+  const transcriptsSupported =
+    environmentId !== null &&
+    providerDriver !== null &&
+    serverConfigs
+      .get(environmentId)
+      ?.environment.capabilities.subagentTranscripts?.includes(providerDriver) === true;
+  const onOpenAgent: OpenAgent | undefined = transcriptsSupported
+    ? (agent) => setOpenAgentId(agent.id)
+    : undefined;
+  const openAgent =
+    openAgentId === null
+      ? undefined
+      : [
+          ...model.directAgents,
+          ...model.workflows.flatMap((group) => [group.workflow, ...workflowMembers(group)]),
+        ].find((agent) => agent.id === openAgentId);
+
+  if (openAgent && transcriptsSupported && threadId !== null) {
+    return (
+      <SubagentTranscript
+        agent={openAgent}
+        environmentId={environmentId}
+        threadId={threadId}
+        onBack={() => setOpenAgentId(null)}
+      />
+    );
+  }
+
   if (!model.hasAgents) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
@@ -553,6 +623,7 @@ export function AgentsPanel({
               group={group}
               environmentId={environmentId}
               threadId={threadId}
+              onOpenAgent={onOpenAgent}
             />
           ))}
           {model.directAgents.length > 0 ? (
@@ -561,7 +632,7 @@ export function AgentsPanel({
                 Direct spawns
               </div>
               {model.directAgents.map((agent) => (
-                <AgentRow key={agent.id} agent={agent} />
+                <AgentRow key={agent.id} agent={agent} onOpen={onOpenAgent} />
               ))}
             </section>
           ) : null}

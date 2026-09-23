@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   ApprovalRequestId,
   EventId,
@@ -135,6 +135,48 @@ export class ProviderUploadFeedbackError extends Schema.TaggedError<ProviderUplo
 ) {
   override get message(): string {
     return `Failed to upload feedback for thread ${this.threadId}.`;
+  }
+}
+
+export const ProviderReadSubagentTranscriptInput = Schema.Struct({
+  threadId: ThreadId,
+  /** The subagent's task id, as carried by its `task.*` activities. */
+  agentId: TrimmedNonEmptyString,
+});
+export type ProviderReadSubagentTranscriptInput = typeof ProviderReadSubagentTranscriptInput.Type;
+
+/** One provider-neutral step of a subagent's conversation, bounded for the wire. */
+export const SubagentTranscriptEntry = Schema.Union([
+  Schema.TaggedStruct("prompt", { text: Schema.String }),
+  Schema.TaggedStruct("message", { text: Schema.String }),
+  Schema.TaggedStruct("reasoning", { text: Schema.String }),
+  Schema.TaggedStruct("tool", {
+    name: Schema.String,
+    /** One-line summary of the input: the command, path, or query. */
+    detail: Schema.optional(Schema.String),
+    output: Schema.optional(Schema.String),
+    failed: Schema.optional(Schema.Boolean),
+  }),
+]);
+export type SubagentTranscriptEntry = typeof SubagentTranscriptEntry.Type;
+
+export const ProviderReadSubagentTranscriptResult = Schema.Struct({
+  entries: Schema.Array(SubagentTranscriptEntry),
+  /** How many earlier entries were dropped to keep the payload small. */
+  skipped: NonNegativeInt,
+});
+export type ProviderReadSubagentTranscriptResult = typeof ProviderReadSubagentTranscriptResult.Type;
+
+export class ProviderReadSubagentTranscriptError extends Schema.TaggedError<ProviderReadSubagentTranscriptError>()(
+  "ProviderReadSubagentTranscriptError",
+  {
+    threadId: ThreadId,
+    agentId: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return "Could not load this subagent's transcript.";
   }
 }
 

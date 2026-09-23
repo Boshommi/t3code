@@ -233,6 +233,8 @@ export const make = Effect.gen(function* () {
       threadPinning: true,
       threadPinReorder: true,
       threadActiveReorder: true,
+      // Drivers whose adapters implement readSubagentTranscript.
+      subagentTranscripts: ["claudeAgent", "codex", "opencode"],
       threadTitleRegeneration: true,
       threadPullRequests: true,
       pullRequestStackActions: true,

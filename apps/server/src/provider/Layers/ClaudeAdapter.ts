@@ -13,6 +13,7 @@ import {
   type CanUseTool,
   query,
   getSessionMessages,
+  getSubagentMessages,
   forkSession,
   type Options as ClaudeQueryOptions,
   type PermissionMode,
@@ -117,6 +118,7 @@ import {
 } from "../Errors.ts";
 import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { spawnAndCollect } from "../providerSnapshot.ts";
+import { boundSubagentTranscript, claudeSubagentTranscriptEntries } from "../subagentTranscript.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
 const decodeUnknownJsonStringExit = Schema.decodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
@@ -472,6 +474,7 @@ export interface ClaudeAdapterLiveOptions {
     readonly options: ClaudeQueryOptions;
   }) => ClaudeQueryRuntime;
   readonly getSessionMessages?: typeof getSessionMessages;
+  readonly getSubagentMessages?: typeof getSubagentMessages;
   readonly forkSession?: typeof forkSession;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
@@ -5319,6 +5322,83 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     },
   );
 
+  // The single-executable has no sibling script and no Node to run one
+  // with, so it hosts the worker as a hidden subcommand of itself.
+  const historyWorkerArguments = Effect.gen(function* () {
+    if (yield* HostProcessIsExecutable) return ["__claude-history"];
+    return [
+      yield* path.fromFileUrl(
+        new URL(
+          import.meta.url.endsWith(".ts")
+            ? "../../claude-history-worker.ts"
+            : "./claude-history-worker.mjs",
+          import.meta.url,
+        ),
+      ),
+    ];
+  });
+  const runScopedHistoryCommand = async (
+    workerArguments: ReadonlyArray<string>,
+    method: "getSessionMessages" | "getSubagentMessages" | "forkSession",
+    historySessionId: string,
+    args: object,
+  ) => {
+    // SDK history helpers read process.env. Isolate the provider's home instead
+    // of changing the server's environment while other providers are running.
+    const result = await Effect.runPromise(
+      spawnAndCollect(
+        process.execPath,
+        ChildProcess.make(
+          process.execPath,
+          [...workerArguments, method, historySessionId, encodeHistoryArgs(args)],
+          { env: { ...claudeEnvironment, ELECTRON_RUN_AS_NODE: "1" } },
+        ),
+      ).pipe(
+        Effect.timeout("30 seconds"),
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      ),
+    );
+    if (result.code !== 0) throw new Error(result.stderr || "Claude history command failed.");
+    return result.stdout;
+  };
+
+  const readSubagentTranscript: NonNullable<ClaudeAdapterShape["readSubagentTranscript"]> =
+    Effect.fn("readSubagentTranscript")(function* ({ threadId, agentId }) {
+      const context = yield* requireSession(threadId);
+      const sessionId = context.resumeSessionId;
+      // Agent ids name the transcript file (agent-<id>.jsonl); refuse anything
+      // that could step outside the session's subagents directory.
+      if (!sessionId || !/^[\w-]+$/.test(agentId)) {
+        return yield* new ProviderAdapterRequestError({
+          provider: PROVIDER,
+          method: "subagent/read",
+          detail: "This subagent's transcript is unavailable.",
+        });
+      }
+      const workerArguments = yield* historyWorkerArguments.pipe(
+        Effect.mapError((cause) => toRequestError(threadId, "subagent/read", cause)),
+      );
+      const messages = yield* Effect.tryPromise({
+        try: async () => {
+          const readOptions = context.session.cwd ? { dir: context.session.cwd } : {};
+          if (options?.getSubagentMessages) {
+            return options.getSubagentMessages(sessionId, agentId, readOptions);
+          }
+          if (claudeEnvironment.CLAUDE_CONFIG_DIR === process.env.CLAUDE_CONFIG_DIR) {
+            return getSubagentMessages(sessionId, agentId, readOptions);
+          }
+          return decodeSessionMessages(
+            await runScopedHistoryCommand(workerArguments, "getSubagentMessages", sessionId, {
+              ...readOptions,
+              agentId,
+            }),
+          );
+        },
+        catch: (cause) => toRequestError(threadId, "subagent/read", cause),
+      });
+      return boundSubagentTranscript(claudeSubagentTranscriptEntries(messages));
+    });
+
   const readThread: ClaudeAdapterShape["readThread"] = Effect.fn("readThread")(
     function* (threadId) {
       const context = yield* requireSession(threadId);
@@ -5357,45 +5437,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           detail: "Claude session id is unavailable.",
         });
       }
-      // The single-executable has no sibling script and no Node to run one
-      // with, so it hosts the worker as a hidden subcommand of itself.
-      const historyWorkerArguments = (yield* HostProcessIsExecutable)
-        ? ["__claude-history"]
-        : [
-            yield* path
-              .fromFileUrl(
-                new URL(
-                  import.meta.url.endsWith(".ts")
-                    ? "../../claude-history-worker.ts"
-                    : "./claude-history-worker.mjs",
-                  import.meta.url,
-                ),
-              )
-              .pipe(Effect.mapError((cause) => toRequestError(threadId, "thread/rollback", cause))),
-          ];
-      const runScopedHistoryCommand = async (
-        method: "getSessionMessages" | "forkSession",
-        args: object,
-        historySessionId = sessionId,
-      ) => {
-        // SDK history helpers read process.env. Isolate the provider's home instead
-        // of changing the server's environment while other providers are running.
-        const result = await Effect.runPromise(
-          spawnAndCollect(
-            process.execPath,
-            ChildProcess.make(
-              process.execPath,
-              [...historyWorkerArguments, method, historySessionId, encodeHistoryArgs(args)],
-              { env: { ...claudeEnvironment, ELECTRON_RUN_AS_NODE: "1" } },
-            ),
-          ).pipe(
-            Effect.timeout("30 seconds"),
-            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          ),
-        );
-        if (result.code !== 0) throw new Error(result.stderr || "Claude history command failed.");
-        return result.stdout;
-      };
+      const workerArguments = yield* historyWorkerArguments.pipe(
+        Effect.mapError((cause) => toRequestError(threadId, "thread/rollback", cause)),
+      );
       const readHistory = (historySessionId: string) =>
         Effect.tryPromise({
           try: async () => {
@@ -5409,7 +5453,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               return getSessionMessages(historySessionId, readOptions);
             }
             return decodeSessionMessages(
-              await runScopedHistoryCommand("getSessionMessages", readOptions, historySessionId),
+              await runScopedHistoryCommand(
+                workerArguments,
+                "getSessionMessages",
+                historySessionId,
+                readOptions,
+              ),
             );
           },
           catch: (cause) => toRequestError(threadId, "thread/rollback", cause),
@@ -5467,7 +5516,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               if (claudeEnvironment.CLAUDE_CONFIG_DIR === process.env.CLAUDE_CONFIG_DIR) {
                 return forkSession(sessionId, forkOptions);
               }
-              return decodeHistoryFork(await runScopedHistoryCommand("forkSession", forkOptions));
+              return decodeHistoryFork(
+                await runScopedHistoryCommand(
+                  workerArguments,
+                  "forkSession",
+                  sessionId,
+                  forkOptions,
+                ),
+              );
             },
             catch: (cause) => toRequestError(threadId, "thread/rollback", cause),
           })
@@ -5599,6 +5655,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     interruptTurn,
     readThread,
     rollbackThread,
+    readSubagentTranscript,
     respondToRequest,
     respondToUserInput,
     stopSession,

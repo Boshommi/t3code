@@ -21,6 +21,8 @@ import type {
   ProviderSession,
   ProviderSessionStartInput,
   ProviderStopSessionInput,
+  ProviderReadSubagentTranscriptInput,
+  ProviderReadSubagentTranscriptResult,
   ProviderUploadFeedbackInput,
   ProviderUploadFeedbackResult,
   MessageId,
@@ -127,6 +129,14 @@ export interface ProviderServiceShape {
   readonly uploadFeedback: (
     input: ProviderUploadFeedbackInput,
   ) => Effect.Effect<ProviderUploadFeedbackResult, ProviderServiceError>;
+
+  /**
+   * Read one subagent's conversation from the provider's own history.
+   * Recovers the thread's session when the adapter needs a live one.
+   */
+  readonly readSubagentTranscript: (
+    input: ProviderReadSubagentTranscriptInput,
+  ) => Effect.Effect<ProviderReadSubagentTranscriptResult, ProviderServiceError>;
 
   /**
    * Canonical provider runtime event stream.

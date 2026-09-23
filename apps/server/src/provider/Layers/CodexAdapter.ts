@@ -57,6 +57,7 @@ import {
   ProviderAdapterValidationError,
   type ProviderAdapterError,
 } from "../Errors.ts";
+import { boundSubagentTranscript, codexSubagentTranscriptEntries } from "../subagentTranscript.ts";
 import { type CodexAdapterShape } from "../Services/CodexAdapter.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
@@ -2587,6 +2588,30 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       })),
     );
 
+  const readSubagentTranscript: NonNullable<CodexAdapterShape["readSubagentTranscript"]> = ({
+    threadId,
+    agentId,
+  }) =>
+    requireSession(threadId).pipe(
+      Effect.flatMap((session) => session.runtime.readSubagentThread(agentId)),
+      Effect.mapError((cause) =>
+        cause._tag === "ProviderAdapterSessionNotFoundError"
+          ? cause
+          : mapCodexRuntimeError(threadId, "thread/read", cause),
+      ),
+      Effect.flatMap((snapshot) =>
+        snapshot === undefined
+          ? Effect.fail(
+              new ProviderAdapterRequestError({
+                provider: PROVIDER,
+                method: "thread/read",
+                detail: "This agent is not a subagent of the thread.",
+              }),
+            )
+          : Effect.succeed(boundSubagentTranscript(codexSubagentTranscriptEntries(snapshot.turns))),
+      ),
+    );
+
   const rollbackThread: CodexAdapterShape["rollbackThread"] = (threadId, numTurns) => {
     if (!Number.isInteger(numTurns) || numTurns < 1) {
       return Effect.fail(
@@ -2722,6 +2747,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     interruptTurn,
     readThread,
     rollbackThread,
+    readSubagentTranscript,
     uploadFeedback,
     respondToRequest,
     respondToUserInput,

@@ -214,6 +214,10 @@ export interface CodexSessionRuntimeShape {
   readonly compactThread: Effect.Effect<void, CodexSessionRuntimeError>;
   readonly interruptTurn: (turnId?: TurnId) => Effect.Effect<void, CodexSessionRuntimeError>;
   readonly readThread: Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
+  /** Reads a subagent's thread; undefined when it does not descend from this session. */
+  readonly readSubagentThread: (
+    agentThreadId: string,
+  ) => Effect.Effect<CodexThreadSnapshot | undefined, CodexSessionRuntimeError>;
   readonly rollbackThread: (
     numTurns: number,
   ) => Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
@@ -1219,6 +1223,44 @@ const readCodexHistoryMode = Effect.fn("readCodexHistoryMode")(function* (
     ),
   );
   return metadata.thread.historyMode;
+});
+
+const CodexThreadSourceMetadata = Schema.Struct({
+  thread: Schema.Struct({ source: Schema.optionalKey(Schema.Unknown) }),
+});
+const decodeCodexThreadSourceMetadata = Schema.decodeUnknownEffect(CodexThreadSourceMetadata);
+
+const MAX_SUBAGENT_DEPTH = 8;
+
+/** True when `threadId` was spawned (directly or through nested agents) by `rootThreadId`. */
+export const isCodexSubagentOf = Effect.fn("isCodexSubagentOf")(function* (
+  client: CodexHistoryClient,
+  threadId: string,
+  rootThreadId: string,
+) {
+  let current = threadId;
+  for (let depth = 0; depth < MAX_SUBAGENT_DEPTH; depth += 1) {
+    const response = yield* client.raw.request("thread/read", {
+      threadId: current,
+      includeTurns: false,
+    });
+    const metadata = yield* decodeCodexThreadSourceMetadata(response).pipe(
+      Effect.mapError((error) =>
+        CodexErrors.CodexAppServerRequestError.invalidPayload(
+          "thread/read",
+          "decode-payload",
+          error,
+        ),
+      ),
+    );
+    const parentThreadId = readThreadSpawnSource({
+      source: metadata.thread.source,
+    })?.parentThreadId;
+    if (parentThreadId === rootThreadId) return true;
+    if (parentThreadId === undefined) return false;
+    current = parentThreadId;
+  }
+  return false;
 });
 
 export const readCodexThread = Effect.fn("readCodexThread")(function* (
@@ -2528,6 +2570,14 @@ export const makeCodexSessionRuntime = (
         const providerThreadId = yield* readProviderThreadId;
         return yield* readCodexThread(client, providerThreadId);
       }),
+      readSubagentThread: (agentThreadId) =>
+        Effect.gen(function* () {
+          const providerThreadId = yield* readProviderThreadId;
+          if (!(yield* isCodexSubagentOf(client, agentThreadId, providerThreadId))) {
+            return undefined;
+          }
+          return yield* readCodexThread(client, agentThreadId);
+        }),
       rollbackThread: (numTurns) =>
         Effect.gen(function* () {
           const providerThreadId = yield* readProviderThreadId;

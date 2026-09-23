@@ -25,6 +25,7 @@ import {
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   ProviderSessionStartInput,
   ProviderStopSessionInput,
+  ProviderReadSubagentTranscriptInput,
   ProviderUploadFeedbackInput,
   ThreadId,
   TurnId,
@@ -2294,6 +2295,48 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     },
   );
 
+  const readSubagentTranscript: ProviderServiceMethod<"readSubagentTranscript"> = Effect.fn(
+    "readSubagentTranscript",
+  )(function* (rawInput) {
+    const input = yield* decodeInputOrValidationError({
+      operation: "ProviderService.readSubagentTranscript",
+      schema: ProviderReadSubagentTranscriptInput,
+      payload: rawInput,
+    });
+    // Check support before recovering so unsupported providers never spawn.
+    let routed = yield* resolveRoutableSession({
+      threadId: input.threadId,
+      operation: "ProviderService.readSubagentTranscript",
+      allowRecovery: false,
+    });
+    if (routed.adapter.readSubagentTranscript === undefined) {
+      return yield* toValidationError(
+        "ProviderService.readSubagentTranscript",
+        `Provider '${routed.adapter.provider}' does not keep subagent transcripts.`,
+      );
+    }
+    if (!routed.isActive) {
+      routed = yield* resolveRoutableSession({
+        threadId: input.threadId,
+        operation: "ProviderService.readSubagentTranscript",
+        allowRecovery: true,
+      });
+    }
+    const read = routed.adapter.readSubagentTranscript;
+    if (read === undefined) {
+      return yield* toValidationError(
+        "ProviderService.readSubagentTranscript",
+        `Provider '${routed.adapter.provider}' does not keep subagent transcripts.`,
+      );
+    }
+    yield* Effect.annotateCurrentSpan({
+      "provider.operation": "read-subagent-transcript",
+      "provider.kind": routed.adapter.provider,
+      "provider.thread_id": input.threadId,
+    });
+    return yield* read(input);
+  });
+
   const runStopAll = Effect.fn("runStopAll")(function* () {
     // Continuation is project-scopable, so decide it per session's project;
     // without orchestration the environment value is all there is.
@@ -2412,6 +2455,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     assertConversationRollbackSupported,
     rollbackConversation,
     uploadFeedback,
+    readSubagentTranscript,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each
     // independently receive all runtime events.

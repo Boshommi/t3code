@@ -8,6 +8,7 @@ import {
   type ProviderSession,
   RuntimeItemId,
   RuntimeRequestId,
+  RuntimeTaskId,
   ThreadId,
   type ToolLifecycleItemType,
   type TurnTokenUsage,
@@ -59,6 +60,10 @@ import {
   toOpenCodeQuestionAnswers,
   type OpenCodeServerConnection,
 } from "../opencodeRuntime.ts";
+import {
+  boundSubagentTranscript,
+  openCodeSubagentTranscriptEntries,
+} from "../subagentTranscript.ts";
 import * as Option from "effect/Option";
 
 const PROVIDER = ProviderDriverKind.make("opencode");
@@ -343,6 +348,8 @@ interface OpenCodeSessionContext {
   readonly directory: string;
   openCodeSessionId: string;
   readonly relatedSessionIds: Set<string>;
+  /** Child sessions announced as subagents, and whether their task settled. */
+  readonly subagentStates: Map<string, "running" | "settled">;
   readonly resolvedRequestIds: Set<string>;
   readonly autoRepliedRequestIds: Set<string>;
   readonly emittedTerminalRequestIds: Set<string>;
@@ -698,6 +705,34 @@ function detailFromToolPart(part: Extract<Part, { type: "tool" }>): string | und
     default:
       return undefined;
   }
+}
+
+/**
+ * Subagent identity for a `task` tool part. OpenCode runs each subagent in a
+ * child session and records its id in the part metadata once it starts.
+ */
+function subagentFromToolPart(part: Extract<Part, { type: "tool" }>) {
+  if (toToolLifecycleItemType(part.tool) !== "collab_agent_tool_call") return undefined;
+  const metadata = part.state.status === "pending" ? undefined : part.state.metadata;
+  const text = (value: unknown) => (typeof value === "string" ? trimText(value) : undefined);
+  const sessionId = text(metadata?.sessionId);
+  if (!sessionId) return undefined;
+  const input = part.state.input;
+  const title =
+    text(input.description) ??
+    (part.state.status === "running" || part.state.status === "completed"
+      ? trimText(part.state.title)
+      : undefined);
+  const role = text(input.subagent_type);
+  const model = text((metadata?.model as { modelID?: unknown } | undefined)?.modelID);
+  return {
+    taskId: RuntimeTaskId.make(sessionId),
+    taskType: "subagent",
+    toolUseId: part.callID,
+    ...(title ? { title } : {}),
+    ...(role ? { role } : {}),
+    ...(model ? { model } : {}),
+  };
 }
 
 function toolStateCreatedAt(part: Extract<Part, { type: "tool" }>): string | undefined {
@@ -2528,6 +2563,43 @@ export function makeOpenCodeAdapter(
               payload,
             };
             yield* emit(runtimeEvent);
+
+            // Announce subagents to the Agents panel. The task part updates on
+            // every child step, so emit only the start and the settle.
+            const subagent = subagentFromToolPart(part);
+            const subagentState = subagent && context.subagentStates.get(subagent.taskId);
+            const settled = part.state.status === "completed" || part.state.status === "error";
+            if (subagent && subagentState !== "settled" && (settled || !subagentState)) {
+              context.subagentStates.set(subagent.taskId, settled ? "settled" : "running");
+              const base = yield* buildEventBase({
+                threadId: context.session.threadId,
+                turnId,
+                raw: event,
+              });
+              if (!subagentState) {
+                yield* emit({
+                  ...base,
+                  type: "task.started",
+                  payload: {
+                    ...subagent,
+                    ...(subagent.title ? { description: subagent.title } : {}),
+                  },
+                });
+              }
+              if (settled) {
+                yield* emit({
+                  ...base,
+                  type: "task.completed",
+                  payload: {
+                    ...subagent,
+                    status: part.state.status === "error" ? "failed" : "completed",
+                    ...(part.state.status === "error" && trimText(part.state.error)
+                      ? { summary: trimText(part.state.error) }
+                      : {}),
+                  },
+                });
+              }
+            }
           }
           break;
         }
@@ -3009,6 +3081,7 @@ export function makeOpenCodeAdapter(
           directory,
           openCodeSessionId: started.openCodeSession.id,
           relatedSessionIds: new Set([started.openCodeSession.id]),
+          subagentStates: new Map(),
           resolvedRequestIds: new Set(),
           autoRepliedRequestIds: new Set(),
           emittedTerminalRequestIds: new Set(),
@@ -3911,6 +3984,26 @@ export function makeOpenCodeAdapter(
       },
     );
 
+    const readSubagentTranscript: NonNullable<OpenCodeAdapterShape["readSubagentTranscript"]> =
+      Effect.fn("readSubagentTranscript")(function* ({ threadId, agentId }) {
+        const context = yield* ensureSessionContext(sessions, threadId);
+        // Subagents are child sessions; only this thread's descendants are readable.
+        const related = yield* isRelatedOpenCodeSession(context, agentId).pipe(
+          Effect.mapError(toRequestError),
+        );
+        if (agentId === context.openCodeSessionId || !related) {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "session.messages",
+            detail: "This agent is not a subagent of the thread.",
+          });
+        }
+        const messages = yield* runOpenCodeSdk("session.messages", () =>
+          context.client.session.messages({ sessionID: agentId }),
+        ).pipe(Effect.mapError(toRequestError));
+        return boundSubagentTranscript(openCodeSubagentTranscriptEntries(messages.data ?? []));
+      });
+
     const rollbackThread: OpenCodeAdapterShape["rollbackThread"] = Effect.fn("rollbackThread")(
       function* (threadId, numTurns) {
         const context = yield* ensureSessionContext(sessions, threadId);
@@ -4037,6 +4130,7 @@ export function makeOpenCodeAdapter(
       listSessions,
       hasSession,
       readThread,
+      readSubagentTranscript,
       rollbackThread,
       stopAll,
       get streamEvents() {

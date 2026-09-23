@@ -9,6 +9,8 @@ import type {
   ProviderSendTurnInput,
   ProviderSession,
   ProviderTurnStartResult,
+  ProviderReadSubagentTranscriptInput,
+  ProviderReadSubagentTranscriptResult,
   ProviderUploadFeedbackInput,
   ProviderUploadFeedbackResult,
 } from "@t3tools/contracts";
@@ -264,6 +266,16 @@ function makeFakeCodexAdapter(
       Effect.succeed({ feedbackId: `feedback-${input.threadId}` }),
   );
 
+  const readSubagentTranscript = vi.fn(
+    (
+      input: ProviderReadSubagentTranscriptInput,
+    ): Effect.Effect<ProviderReadSubagentTranscriptResult, ProviderAdapterError> =>
+      Effect.succeed({
+        entries: [{ _tag: "message", text: `hello from ${input.agentId}` }],
+        skipped: 0,
+      }),
+  );
+
   const stopAll = vi.fn((): Effect.Effect<void, ProviderAdapterError> =>
     Effect.sync(() => {
       sessions.clear();
@@ -294,7 +306,7 @@ function makeFakeCodexAdapter(
     hasSession,
     readThread,
     rollbackThread,
-    ...(provider === CODEX_DRIVER ? { uploadFeedback } : {}),
+    ...(provider === CODEX_DRIVER ? { uploadFeedback, readSubagentTranscript } : {}),
     stopAll,
     get streamEvents() {
       return Stream.fromPubSub(runtimeEventPubSub);
@@ -332,6 +344,7 @@ function makeFakeCodexAdapter(
     readThread,
     rollbackThread,
     uploadFeedback,
+    readSubagentTranscript,
     stopAll,
   };
 }
@@ -2153,6 +2166,57 @@ routing.layer("ProviderServiceLive routing", (it) => {
 
       assert.instanceOf(error, ProviderValidationError);
       assert.include(error.issue, "does not support feedback uploads");
+      assert.strictEqual(routing.claude.startSession.mock.calls.length, 0);
+    }),
+  );
+
+  it.effect("recovers a stopped session before reading a subagent transcript", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-subagent-transcript-recover");
+      yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        cwd: fixtureCwd("subagent-transcript-project"),
+        runtimeMode: "full-access",
+      });
+      yield* routing.codex.stopSession(threadId);
+      routing.codex.startSession.mockClear();
+      routing.codex.readSubagentTranscript.mockClear();
+
+      const result = yield* provider.readSubagentTranscript({ threadId, agentId: "child-1" });
+
+      assert.deepStrictEqual(result, {
+        entries: [{ _tag: "message", text: "hello from child-1" }],
+        skipped: 0,
+      });
+      assert.strictEqual(routing.codex.startSession.mock.calls.length, 1);
+      assert.deepStrictEqual(routing.codex.readSubagentTranscript.mock.calls, [
+        [{ threadId, agentId: "child-1" }],
+      ]);
+    }),
+  );
+
+  it.effect("does not restart a provider without subagent transcripts", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-subagent-transcript-unsupported");
+      yield* provider.startSession(threadId, {
+        provider: CLAUDE_AGENT_DRIVER,
+        providerInstanceId: claudeAgentInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+      yield* routing.claude.stopSession(threadId);
+      routing.claude.startSession.mockClear();
+
+      const error = yield* provider
+        .readSubagentTranscript({ threadId, agentId: "child-1" })
+        .pipe(Effect.flip);
+
+      assert.instanceOf(error, ProviderValidationError);
+      assert.include(error.issue, "does not keep subagent transcripts");
       assert.strictEqual(routing.claude.startSession.mock.calls.length, 0);
     }),
   );

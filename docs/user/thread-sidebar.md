@@ -138,7 +138,10 @@ for custom configuration.
 
 ## Inspect agent work
 
-On web and desktop, use **Agents** to follow work delegated to subagents.
+On web and desktop, use **Agents** to follow work delegated to subagents. With
+Claude, Codex, and OpenCode, select a subagent to read its conversation,
+including its reasoning and tool calls. The conversation updates while the
+subagent works.
 
 Expand a tool call in the conversation to see its full command and output.
 Summaries shorten shell wrappers and can still describe the latest call after it
