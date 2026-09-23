@@ -1888,8 +1888,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         lockedProvider,
         lockedInstanceId:
           activeThread?.session?.providerInstanceId ?? activeThreadModelSelection?.instanceId,
+        handoffInstanceId: composerDraft.modelSelectionExplicit ? selectedProviderByThreadId : null,
       }),
     [
+      composerDraft.modelSelectionExplicit,
       activeProjectDefaultModelSelection?.instanceId,
       activeThread?.session?.providerInstanceId,
       activeThreadModelSelection?.instanceId,
