@@ -202,6 +202,8 @@ export const ServerProvider = Schema.Struct({
   reportsContextWindow: Schema.optional(Schema.Boolean),
   requiresNewThreadForModelChange: Schema.optional(Schema.Boolean),
   supportsConversationRollback: Schema.optional(Schema.Boolean),
+  // Answers read-only side questions (`/btw`) without touching the thread.
+  supportsSideQuestions: Schema.optional(Schema.Boolean),
   supportsTextGeneration: Schema.optional(Schema.Boolean),
   setup: Schema.optional(
     Schema.Struct({
@@ -581,6 +583,8 @@ export const ServerConfig = Schema.Struct({
   threadSnapshotPagination: Schema.optionalKey(Schema.Boolean),
   /** Whether thread reads accept the reasoningMessages opt-in. */
   reasoningMessages: Schema.optionalKey(Schema.Boolean),
+  /** Whether thread subscriptions accept the sideThreads opt-in. */
+  sideThreads: Schema.optionalKey(Schema.Boolean),
   /**
    * Palettes published by this environment's machine. Never sent in a config
    * snapshot: the theme stream emits the current set before any change, so a

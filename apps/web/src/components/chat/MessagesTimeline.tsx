@@ -38,6 +38,7 @@ import type {
   RuntimeSubagent,
 } from "@t3tools/client-runtime/state/subagentRuntime";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
+import type { SideThread } from "@t3tools/client-runtime/state/side-threads";
 import {
   emptyAgentPanelModel,
   formatSubagentModelLabel,
@@ -117,6 +118,8 @@ import {
   GlobeIcon,
   HammerIcon,
   MessageCircleIcon,
+  MessageSquareReplyIcon,
+  MessagesSquareIcon,
   Minimize2Icon,
   MousePointerClickIcon,
   PaintbrushIcon,
@@ -319,7 +322,19 @@ interface TimelineRowActivityState {
   backgroundWorktreeSetup: WorktreeSetupSnapshot | null;
 }
 
+/**
+ * Kept out of TimelineRowCtx so a new side message re-renders only the small
+ * per-message consumers below, not every row.
+ */
+export interface TimelineSideThreadsState {
+  byAnchor: ReadonlyMap<MessageId, ReadonlyArray<SideThread>>;
+  /** Null when the provider cannot answer; existing side threads stay readable. */
+  onReply: ((messageId: MessageId) => void) | null;
+  onOpen: (anchorMessageId: MessageId) => void;
+}
+
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
+const TimelineSideThreadsCtx = createContext<TimelineSideThreadsState | null>(null);
 const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
 
 interface WorkGroupViewState {
@@ -468,6 +483,8 @@ interface MessagesTimelineProps {
   steerQueuedMessageShortcutLabel?: string | null;
   onRemoveQueuedMessage?: (id: string) => void;
   findReveal?: ChatFindReveal | null;
+  /** Side-thread actions and reply links on messages; null where unsupported. */
+  sideThreads?: TimelineSideThreadsState | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -526,6 +543,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   steerQueuedMessageShortcutLabel = null,
   onRemoveQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
   findReveal = null,
+  sideThreads = null,
 }: MessagesTimelineProps) {
   const listIdentityKey = displayThreadKey ?? routeThreadKey;
   const rememberedPosition = useMemo(
@@ -1323,88 +1341,90 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   return (
     <TimelineRowCtx value={sharedState}>
       <TimelineRowActivityCtx value={activityState}>
-        <div
-          ref={setTimelineViewportElement}
-          className="relative h-full min-h-0"
-          data-assistant-citation-viewport="true"
-        >
-          {onCiteAssistantText && citationThreadRef ? (
-            <AssistantSelectionToolbar
-              viewport={timelineViewportElement}
-              threadRef={citationThreadRef}
-              onCite={onCiteAssistantText}
+        <TimelineSideThreadsCtx value={sideThreads}>
+          <div
+            ref={setTimelineViewportElement}
+            className="relative h-full min-h-0"
+            data-assistant-citation-viewport="true"
+          >
+            {onCiteAssistantText && citationThreadRef ? (
+              <AssistantSelectionToolbar
+                viewport={timelineViewportElement}
+                threadRef={citationThreadRef}
+                onCite={onCiteAssistantText}
+              />
+            ) : null}
+            <LegendList<MessagesTimelineRow>
+              ref={listRef}
+              data={rows}
+              extraData={`${listIdentityKey}:${rows.length}`}
+              keyExtractor={keyExtractor}
+              getItemType={getItemType}
+              renderItem={renderItem}
+              estimatedItemSize={90}
+              initialScrollAtEnd={citationRequest === null && rememberedPosition?.atEnd !== false}
+              // Legend needs a data refresh to mount new pins without a scroll event.
+              dataVersion={readyCitationRequest?.key ?? listIdentityKey}
+              {...(alwaysRender ? { alwaysRender } : {})}
+              onLoad={onCitationListLoad}
+              {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
+              contentInsetEndAdjustment={anchoredEndSpace ? contentInsetEndAdjustment : 0}
+              maintainScrollAtEnd={
+                citationPositioning ||
+                (restoringThreadPosition && rememberedPosition?.atEnd === false) ||
+                anchoredEndSpace ||
+                !liveFollowEnabled ||
+                disclosureToggleSettling
+                  ? false
+                  : isWorking && !prefersReducedMotion && settlingListIdentity === null
+                    ? TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH
+                    : TIMELINE_MAINTAIN_SCROLL_AT_END
+              }
+              maintainVisibleContentPosition={
+                citationPositioning ||
+                (restoringThreadPosition && rememberedPosition?.atEnd === false)
+                  ? false
+                  : maintainVisibleContentPosition
+              }
+              maintainScrollAtEndThreshold={1}
+              onScroll={handleScroll}
+              onItemSizeChanged={reportContentOverflow}
+              className={cn(
+                "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5",
+                topFadeEnabled && "topbar-scroll-fade",
+              )}
+              ListHeaderComponent={
+                loadEarlier !== null ? (
+                  <TimelineLoadEarlierHeader
+                    loading={loadEarlier.loading}
+                    onLoadEarlier={loadEarlier.onLoadEarlier}
+                    fade={topFadeEnabled}
+                  />
+                ) : topFadeEnabled ? (
+                  TIMELINE_LIST_FADE_HEADER
+                ) : (
+                  TIMELINE_LIST_HEADER
+                )
+              }
+              ListFooterComponent={timelineListFooter}
             />
-          ) : null}
-          <LegendList<MessagesTimelineRow>
-            ref={listRef}
-            data={rows}
-            extraData={`${listIdentityKey}:${rows.length}`}
-            keyExtractor={keyExtractor}
-            getItemType={getItemType}
-            renderItem={renderItem}
-            estimatedItemSize={90}
-            initialScrollAtEnd={citationRequest === null && rememberedPosition?.atEnd !== false}
-            // Legend needs a data refresh to mount new pins without a scroll event.
-            dataVersion={readyCitationRequest?.key ?? listIdentityKey}
-            {...(alwaysRender ? { alwaysRender } : {})}
-            onLoad={onCitationListLoad}
-            {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
-            contentInsetEndAdjustment={anchoredEndSpace ? contentInsetEndAdjustment : 0}
-            maintainScrollAtEnd={
-              citationPositioning ||
-              (restoringThreadPosition && rememberedPosition?.atEnd === false) ||
-              anchoredEndSpace ||
-              !liveFollowEnabled ||
-              disclosureToggleSettling
-                ? false
-                : isWorking && !prefersReducedMotion && settlingListIdentity === null
-                  ? TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH
-                  : TIMELINE_MAINTAIN_SCROLL_AT_END
-            }
-            maintainVisibleContentPosition={
-              citationPositioning ||
-              (restoringThreadPosition && rememberedPosition?.atEnd === false)
-                ? false
-                : maintainVisibleContentPosition
-            }
-            maintainScrollAtEndThreshold={1}
-            onScroll={handleScroll}
-            onItemSizeChanged={reportContentOverflow}
-            className={cn(
-              "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5",
-              topFadeEnabled && "topbar-scroll-fade",
-            )}
-            ListHeaderComponent={
-              loadEarlier !== null ? (
-                <TimelineLoadEarlierHeader
-                  loading={loadEarlier.loading}
-                  onLoadEarlier={loadEarlier.onLoadEarlier}
-                  fade={topFadeEnabled}
-                />
-              ) : topFadeEnabled ? (
-                TIMELINE_LIST_FADE_HEADER
-              ) : (
-                TIMELINE_LIST_HEADER
-              )
-            }
-            ListFooterComponent={timelineListFooter}
-          />
-          <TimelineMinimap
-            items={minimapItems}
-            hasPersistentGutter={minimapHasPersistentGutter}
-            hitStripWidth={minimapHitStripWidth}
-            currentIndex={minimapCurrentIndex}
-            stripMap={minimapStripMap}
-            onSelect={(item) => {
-              onManualNavigation();
-              void listRef.current?.scrollToIndex({
-                index: item.rowIndex,
-                animated: true,
-                viewOffset: 24,
-              });
-            }}
-          />
-        </div>
+            <TimelineMinimap
+              items={minimapItems}
+              hasPersistentGutter={minimapHasPersistentGutter}
+              hitStripWidth={minimapHitStripWidth}
+              currentIndex={minimapCurrentIndex}
+              stripMap={minimapStripMap}
+              onSelect={(item) => {
+                onManualNavigation();
+                void listRef.current?.scrollToIndex({
+                  index: item.rowIndex,
+                  animated: true,
+                  viewOffset: 24,
+                });
+              }}
+            />
+          </div>
+        </TimelineSideThreadsCtx>
       </TimelineRowActivityCtx>
     </TimelineRowCtx>
   );
@@ -2263,7 +2283,6 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             markdownCwd={ctx.markdownCwd}
           />
         </div>
-
       </div>
       <div className="flex w-full max-w-[80%] items-center justify-end pe-1 text-xs tabular-nums opacity-0 transition-opacity duration-200 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover:opacity-100">
         <div className="flex shrink-0 items-center gap-2">
@@ -2276,6 +2295,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             </TooltipPopup>
           </Tooltip>
           <div className="flex items-center gap-0.5">
+            <ReplyInSideThreadButton messageId={row.message.id} />
             {typeof revertTurnCount === "number" && (
               <RevertUserMessageButton turnCount={revertTurnCount} messageId={row.message.id} />
             )}
@@ -2301,6 +2321,67 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           </div>
         </div>
       </div>
+      <SideThreadRepliesLink messageId={row.message.id} className="max-w-[80%] pe-1" />
+    </div>
+  );
+}
+
+/** Hover action that starts a side thread anchored to a message. */
+function ReplyInSideThreadButton({ messageId }: { messageId: MessageId }) {
+  const onReply = use(TimelineSideThreadsCtx)?.onReply;
+  if (!onReply) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            onClick={() => onReply(messageId)}
+            aria-label="Reply in side thread"
+          />
+        }
+      >
+        <MessageSquareReplyIcon className="size-3" />
+      </TooltipTrigger>
+      <TooltipPopup side="top">Reply in side thread</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+/** Slack-style link under a message that side threads were started from. */
+function SideThreadRepliesLink({
+  messageId,
+  className,
+}: {
+  messageId: MessageId;
+  className?: string;
+}) {
+  const sideThreads = use(TimelineSideThreadsCtx);
+  const threads = sideThreads?.byAnchor.get(messageId);
+  if (!sideThreads || !threads || threads.length === 0) return null;
+  const only = threads.length === 1 ? threads[0]! : null;
+  const label =
+    only === null
+      ? `${threads.length} side threads`
+      : only.waiting
+        ? "Side thread · Thinking…"
+        : only.replyCount === 1
+          ? "1 reply"
+          : `${only.replyCount} replies`;
+  return (
+    <div className={cn("flex", className)}>
+      <Button
+        type="button"
+        size="xs"
+        variant="ghost"
+        className="text-info-foreground"
+        onClick={() => sideThreads.onOpen(messageId)}
+      >
+        <MessagesSquareIcon className="size-3" />
+        {label}
+      </Button>
     </div>
   );
 }
@@ -2462,6 +2543,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
             copyStreaming={row.assistantCopyStreaming}
           />
         ) : null}
+        <SideThreadRepliesLink messageId={row.message.id} className="-ms-2 mt-1" />
       </div>
     </>
   );
@@ -2515,6 +2597,7 @@ function AssistantMessageMeta({
         showCopyButton={showCopyButton}
         streaming={copyStreaming}
       />
+      {!message.streaming && <ReplyInSideThreadButton messageId={message.id} />}
       {!message.streaming && (
         <Tooltip>
           <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>

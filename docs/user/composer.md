@@ -159,6 +159,19 @@ Provider commands must start the message to run. T3 Code commands such as
 Send `/compact` in an existing conversation to reduce context usage when the
 provider supports it. Web and desktop also offer compaction from the context meter.
 
+## Side questions
+
+Send `/btw` followed by a question to ask about the conversation without
+interrupting the agent, even while it is working. The answer opens in a side
+thread in the right panel, where you can ask follow-ups. Side questions never
+become part of the conversation the agent sees. To start one about a specific
+message, hover it and choose **Reply in side thread**.
+
+Side threads are read-only: Claude answers only from what the conversation
+already contains, and Codex can read files but cannot change them. They are
+available for Claude and Codex on web and desktop, and are kept with the thread
+until you delete them.
+
 ## Context in your message
 
 Context you attach lands where your cursor is, as a chip inside your text: a terminal excerpt,

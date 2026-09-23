@@ -1316,6 +1316,8 @@ export interface ChatComposerProps {
   bannerItems: readonly ComposerBannerStackItem[];
   /** Picking /usage-limits from the menu is the action itself; the draft keeps nothing of it. */
   onUsageLimitsCommand?: (() => void) | undefined;
+  /** Offers the built-in `/btw` side question; ChatView handles the submit. */
+  sideQuestionsAvailable?: boolean | undefined;
   environmentUnavailable: {
     readonly label: string;
     readonly connection: EnvironmentConnectionPresentation;
@@ -1486,6 +1488,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     compactThreadUnavailable,
     compactDisabled,
     compactDisabledReason,
+    sideQuestionsAvailable = false,
     resolvedTheme,
     settings,
     keybindings,
@@ -2326,6 +2329,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               },
             ] as const)
           : []),
+        // Only a whole message is a side question, so only offered at the start.
+        ...(sideQuestionsAvailable && composerTrigger.rangeStart === 0
+          ? ([
+              {
+                id: "slash:btw",
+                type: "slash-command",
+                command: "btw",
+                label: "/btw",
+                description: "Ask a side question without interrupting the agent",
+              },
+            ] as const)
+          : []),
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const slashMenuSkills = getProviderSkillsForSlashMenu(
         selectedProviderSkills,
@@ -2355,7 +2370,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           (skill.scope ? `${skill.scope} skill` : ""),
       }));
       const visibleProviderSlashCommandItems = providerSlashCommandItems.filter(
-        (item) => item.command.name !== "compact" || compactSlashCommandAvailable,
+        (item) =>
+          (item.command.name !== "compact" || compactSlashCommandAvailable) &&
+          // The built-in /btw stands in for a provider's own, so the menu lists it once.
+          (item.command.name !== "btw" || !sideQuestionsAvailable),
       );
       const slashCommandItems = slashCommandItemsForPromptPosition(
         [...builtInSlashCommandItems, ...visibleProviderSlashCommandItems, ...skillItems],
@@ -2442,6 +2460,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     selectedProviderSlashCommands,
     selectedProviderStatus,
     settings.showSkillsInSlashMenu,
+    sideQuestionsAvailable,
     workspaceEntries.entries,
   ]);
 
@@ -3559,6 +3578,24 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           if (applied) {
             setComposerHighlightedItemId(null);
             setIsComposerModelPickerOpen(true);
+          }
+          return;
+        }
+        if (item.command === "btw") {
+          const replacement = "/btw ";
+          const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+            snapshot.value,
+            trigger.rangeEnd,
+            replacement,
+          );
+          const applied = applyPromptReplacement(
+            trigger.rangeStart,
+            replacementRangeEnd,
+            replacement,
+            { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+          );
+          if (applied) {
+            setComposerHighlightedItemId(null);
           }
           return;
         }

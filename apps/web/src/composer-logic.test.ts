@@ -15,6 +15,7 @@ import {
   expandCollapsedComposerCursor,
   formatAssistantCitationForComposer,
   isCollapsedCursorAdjacentToInlineToken,
+  parseSideQuestionCommand,
   parseStandaloneComposerSlashCommand,
   replaceTextRange,
 } from "./composer-logic";
@@ -694,5 +695,25 @@ describe("parseStandaloneComposerSlashCommand", () => {
 
   it("ignores slash commands with extra message text", () => {
     expect(parseStandaloneComposerSlashCommand("/plan explain this")).toBeNull();
+  });
+});
+
+describe("parseSideQuestionCommand", () => {
+  it("returns the question, keeping its line breaks", () => {
+    expect(parseSideQuestionCommand(" /btw why is this slow?\nand here? ")).toBe(
+      "why is this slow?\nand here?",
+    );
+    expect(parseSideQuestionCommand("/BTW\nsecond line")).toBe("second line");
+  });
+
+  it("returns an empty question for a bare /btw", () => {
+    expect(parseSideQuestionCommand("/btw")).toBe("");
+    expect(parseSideQuestionCommand("/btw   ")).toBe("");
+  });
+
+  it("ignores other commands and mid-message mentions", () => {
+    expect(parseSideQuestionCommand("/btwx question")).toBeNull();
+    expect(parseSideQuestionCommand("hey /btw question")).toBeNull();
+    expect(parseSideQuestionCommand("/plan")).toBeNull();
   });
 });

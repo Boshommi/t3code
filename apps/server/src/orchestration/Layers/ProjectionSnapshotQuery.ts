@@ -22,6 +22,7 @@ import {
   type OrchestrationMessage,
   type OrchestrationProjectShell,
   type OrchestrationProposedPlan,
+  type OrchestrationSideMessage,
   type OrchestrationProject,
   type OrchestrationSession,
   type OrchestrationThreadActivity,
@@ -62,6 +63,7 @@ import { ProjectionThreadMessage } from "../../persistence/Services/ProjectionTh
 import { ProjectionThreadProposedPlan } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
 import { ProjectionThreadPullRequest } from "../../persistence/ProjectionThreadPullRequests.ts";
 import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
+import { ProjectionThreadSideMessage } from "../../persistence/Services/ProjectionThreadSideMessages.ts";
 import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
 import {
   decodeThreadDetailPageCursor,
@@ -406,6 +408,29 @@ function mapProjectShellRow(
   };
 }
 
+function mapSideMessageRow(row: ProjectionThreadSideMessage): OrchestrationSideMessage {
+  return {
+    id: row.messageId,
+    sideThreadId: row.sideThreadId,
+    role: row.role,
+    text: row.text,
+    anchorMessageId: row.anchorMessageId,
+    createdAt: row.createdAt,
+  };
+}
+
+function groupSideMessageRowsByThread(
+  rows: ReadonlyArray<ProjectionThreadSideMessage>,
+): Map<string, Array<OrchestrationSideMessage>> {
+  const byThread = new Map<string, Array<OrchestrationSideMessage>>();
+  for (const row of rows) {
+    const messages = byThread.get(row.threadId) ?? [];
+    messages.push(mapSideMessageRow(row));
+    byThread.set(row.threadId, messages);
+  }
+  return byThread;
+}
+
 function mapProposedPlanRow(
   row: Schema.Schema.Type<typeof ProjectionThreadProposedPlanDbRowSchema>,
 ): OrchestrationProposedPlan {
@@ -717,6 +742,24 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           updated_at AS "updatedAt"
         FROM projection_thread_proposed_plans
         ORDER BY thread_id ASC, created_at ASC, plan_id ASC
+      `,
+  });
+
+  const listThreadSideMessageRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionThreadSideMessage,
+    execute: () =>
+      sql`
+        SELECT
+          message_id AS "messageId",
+          thread_id AS "threadId",
+          side_thread_id AS "sideThreadId",
+          role,
+          text,
+          anchor_message_id AS "anchorMessageId",
+          created_at AS "createdAt"
+        FROM projection_thread_side_messages
+        ORDER BY thread_id ASC, created_at ASC, rowid ASC
       `,
   });
 
@@ -1358,6 +1401,25 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
+  const listThreadSideMessageRowsByThread = SqlSchema.findAll({
+    Request: ThreadIdLookupInput,
+    Result: ProjectionThreadSideMessage,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          message_id AS "messageId",
+          thread_id AS "threadId",
+          side_thread_id AS "sideThreadId",
+          role,
+          text,
+          anchor_message_id AS "anchorMessageId",
+          created_at AS "createdAt"
+        FROM projection_thread_side_messages
+        WHERE thread_id = ${threadId}
+        ORDER BY created_at ASC, rowid ASC
+      `,
+  });
+
   const listThreadPullRequestRowsByThread = SqlSchema.findAll({
     Request: ThreadIdLookupInput,
     Result: ProjectionThreadPullRequestDbRowSchema,
@@ -1655,8 +1717,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
   // the global sequence is not waitable per-thread. The event_type filter
   // must match ws.ts's isThreadDetailEvent exactly: the subscription only
   // delivers these types, so a watermark counting any other event could
-  // never be reached by the client and would park the page forever. Served
-  // by the event store's (aggregate_kind, stream_id, sequence) index.
+  // never be reached by the client and would park the page forever. Side-thread
+  // events are opt-in per subscription, so they stay out. Served by the event
+  // store's (aggregate_kind, stream_id, sequence) index.
   const getThreadEventWatermarkRow = SqlSchema.findOneOption({
     Request: Schema.Struct({ threadId: ThreadId, maxSequence: Schema.Number }),
     Result: Schema.Struct({ threadSequence: Schema.NullOr(Schema.Number) }),
@@ -2058,6 +2121,14 @@ pending_approval_requests AS (
               ),
             ),
           ),
+          listThreadSideMessageRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getSnapshot:listThreadSideMessages:query",
+                "ProjectionSnapshotQuery.getSnapshot:listThreadSideMessages:decodeRows",
+              ),
+            ),
+          ),
           listThreadPullRequestRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -2115,6 +2186,7 @@ pending_approval_requests AS (
             threadRows,
             messageRows,
             proposedPlanRows,
+            sideMessageRows,
             pullRequestRows,
             activityRows,
             sessionRows,
@@ -2125,6 +2197,7 @@ pending_approval_requests AS (
             Effect.gen(function* () {
               const messagesByThread = new Map<string, Array<OrchestrationMessage>>();
               const proposedPlansByThread = new Map<string, Array<OrchestrationProposedPlan>>();
+              const sideMessagesByThread = groupSideMessageRowsByThread(sideMessageRows);
               const pullRequestsByThread = groupPullRequestRowsByThread(pullRequestRows);
               const activitiesByThread = new Map<string, Array<OrchestrationThreadActivity>>();
               const checkpointsByThread = new Map<string, Array<OrchestrationCheckpointSummary>>();
@@ -2311,6 +2384,7 @@ pending_approval_requests AS (
                 deletedAt: row.deletedAt,
                 messages: messagesByThread.get(row.threadId) ?? [],
                 proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
+                sideMessages: sideMessagesByThread.get(row.threadId) ?? [],
                 activities: activitiesByThread.get(row.threadId) ?? [],
                 checkpoints: checkpointsByThread.get(row.threadId) ?? [],
                 session: sessionsByThread.get(row.threadId) ?? null,
@@ -2366,6 +2440,14 @@ pending_approval_requests AS (
               ),
             ),
           ),
+          listThreadSideMessageRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getCommandReadModel:listThreadSideMessages:query",
+                "ProjectionSnapshotQuery.getCommandReadModel:listThreadSideMessages:decodeRows",
+              ),
+            ),
+          ),
           listThreadPullRequestRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -2406,6 +2488,7 @@ pending_approval_requests AS (
             projectRows,
             threadRows,
             proposedPlanRows,
+            sideMessageRows,
             pullRequestRows,
             sessionRows,
             latestTurnRows,
@@ -2498,6 +2581,7 @@ pending_approval_requests AS (
                 latestTurnByThread.set(row.threadId, mapLatestTurn(row));
               }
               const proposedPlansByThread = new Map<string, Array<OrchestrationProposedPlan>>();
+              const sideMessagesByThread = groupSideMessageRowsByThread(sideMessageRows);
               const pullRequestsByThread = groupPullRequestRowsByThread(pullRequestRows);
               const sessionByThread = new Map<string, OrchestrationSession>();
 
@@ -2556,6 +2640,7 @@ pending_approval_requests AS (
                   deletedAt: row.deletedAt,
                   messages: [],
                   proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
+                  sideMessages: sideMessagesByThread.get(row.threadId) ?? [],
                   activities: [],
                   checkpoints: [],
                   session: sessionByThread.get(row.threadId) ?? null,
@@ -3425,6 +3510,7 @@ pending_approval_requests AS (
         threadRow,
         messageRows,
         proposedPlanRows,
+        sideMessageRows,
         pullRequestRows,
         activities,
         checkpointRows,
@@ -3455,6 +3541,15 @@ pending_approval_requests AS (
             toPersistenceSqlOrDecodeError(
               "ProjectionSnapshotQuery.getThreadDetailById:listPlans:query",
               "ProjectionSnapshotQuery.getThreadDetailById:listPlans:decodeRows",
+            ),
+          ),
+        ),
+        // Side messages are small and unwindowed: every page carries them all.
+        listThreadSideMessageRowsByThread({ threadId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "ProjectionSnapshotQuery.getThreadDetailById:listSideMessages:query",
+              "ProjectionSnapshotQuery.getThreadDetailById:listSideMessages:decodeRows",
             ),
           ),
         ),
@@ -3549,6 +3644,7 @@ pending_approval_requests AS (
           return message;
         }),
         proposedPlans: proposedPlanRows.map(mapProposedPlanRow),
+        sideMessages: sideMessageRows.map(mapSideMessageRow),
         activities,
         checkpoints: checkpointRows.map((row) => ({
           turnId: row.turnId,

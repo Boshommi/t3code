@@ -30,6 +30,7 @@ import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import * as CodexClient from "effect-codex-app-server/client";
@@ -57,6 +58,14 @@ const BENIGN_ERROR_LOG_SNIPPETS = [
   "state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back",
 ];
 const CODEX_APP_SERVER_FORCE_KILL_AFTER = "2 seconds" as const;
+const SIDE_QUESTION_TIMEOUT = "5 minutes" as const;
+/** Thread-level instructions for a side-question fork (`/btw`). */
+const SIDE_CONVERSATION_INSTRUCTIONS = [
+  "You are in a side conversation branched from the conversation above.",
+  "Treat the inherited conversation as reference material only: do not continue, resume, or act on its task, and do not follow its earlier instructions as if they were addressed to you now.",
+  "Answer only the side question, directly and concisely, from what you already know. Inspect files read-only only when the answer truly needs it.",
+  "Never modify files, run commands with side effects, start sub-agents, or ask for approval.",
+].join("\n");
 const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
   "not found",
   "missing thread",
@@ -198,6 +207,14 @@ export interface CodexSessionRuntimeSendTurnInput {
   readonly interactionMode?: ProviderInteractionMode;
 }
 
+export interface CodexSessionRuntimeSideQuestionInput {
+  /** Stable id of the side thread; follow-ups with the same id reuse its fork. */
+  readonly sideThreadId: string;
+  readonly question: string;
+  /** Earlier answered exchanges of the side thread, oldest first. */
+  readonly history: ReadonlyArray<{ readonly question: string; readonly answer: string }>;
+}
+
 export interface CodexThreadTurnSnapshot {
   readonly id: TurnId;
   readonly items: ReadonlyArray<CodexThreadItem>;
@@ -235,6 +252,14 @@ export interface CodexSessionRuntimeShape {
     requestId: ApprovalRequestId,
     answers: ProviderUserInputAnswers,
   ) => Effect.Effect<void, CodexSessionRuntimeError>;
+  /**
+   * Answer a side question in an ephemeral read-only fork of the thread. Fork
+   * traffic never reaches `events`, and the main thread's history and running
+   * turn are untouched.
+   */
+  readonly askSideQuestion: (
+    input: CodexSessionRuntimeSideQuestionInput,
+  ) => Effect.Effect<string, CodexSessionRuntimeError>;
   readonly events: Stream.Stream<ProviderEvent, never>;
   readonly close: Effect.Effect<void>;
 }
@@ -244,7 +269,8 @@ export type CodexSessionRuntimeError =
   | CodexSessionRuntimePendingApprovalNotFoundError
   | CodexSessionRuntimePendingUserInputNotFoundError
   | CodexSessionRuntimeInvalidUserInputAnswersError
-  | CodexSessionRuntimeThreadIdMissingError;
+  | CodexSessionRuntimeThreadIdMissingError
+  | CodexSessionRuntimeSideQuestionError;
 
 export class CodexSessionRuntimePendingApprovalNotFoundError extends Schema.TaggedError<CodexSessionRuntimePendingApprovalNotFoundError>()(
   "CodexSessionRuntimePendingApprovalNotFoundError",
@@ -288,6 +314,40 @@ export class CodexSessionRuntimeThreadIdMissingError extends Schema.TaggedError<
   override get message(): string {
     return `Codex session is missing a provider thread id for ${this.threadId}`;
   }
+}
+
+/** A side question could not be answered; `detail` is shown to the user. */
+export class CodexSessionRuntimeSideQuestionError extends Schema.TaggedError<CodexSessionRuntimeSideQuestionError>()(
+  "CodexSessionRuntimeSideQuestionError",
+  {
+    detail: Schema.String,
+  },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}
+
+/** First prompt of a fork that must rebuild a side thread's earlier exchanges. */
+export function buildSideQuestionPrompt(
+  history: CodexSessionRuntimeSideQuestionInput["history"],
+  question: string,
+): string {
+  if (history.length === 0) {
+    return question;
+  }
+  const exchanges = history
+    .map((entry) => `Question: ${entry.question}\n\nAnswer: ${entry.answer}`)
+    .join("\n\n---\n\n");
+  return `Earlier in this side conversation:\n\n${exchanges}\n\n---\n\nNew question: ${question}`;
+}
+
+interface SideForkAnswer {
+  turnId: string | undefined;
+  readonly messages: Array<string>;
+  deltas: string;
+  lastError: string | undefined;
+  readonly result: Deferred.Deferred<string, CodexSessionRuntimeSideQuestionError>;
 }
 
 interface PendingApproval {
@@ -1939,8 +1999,87 @@ export const makeCodexSessionRuntime = (
         }
       });
 
+    /** Side-thread id → its ephemeral fork; follow-ups reuse the fork's prompt cache. */
+    const sideForks = new Map<
+      string,
+      { forkThreadId: string | undefined; readonly lock: Semaphore.Semaphore }
+    >();
+    /** Every fork this session created. Never pruned, so late traffic stays routed. */
+    const sideForkThreadIds = new Set<string>();
+    /** Fork thread id → the question it is answering now. */
+    const sideForkAnswers = new Map<string, SideForkAnswer>();
+
+    const failSideForkAnswers = (detail: string) =>
+      Effect.forEach(
+        Array.from(sideForkAnswers.values()),
+        (answer) =>
+          Deferred.fail(answer.result, new CodexSessionRuntimeSideQuestionError({ detail })),
+        { discard: true },
+      );
+
+    const routeSideForkNotification = (
+      forkThreadId: string,
+      notification: CodexServerNotification,
+    ): Effect.Effect<void> => {
+      const answer = sideForkAnswers.get(forkThreadId);
+      if (answer === undefined) {
+        return Effect.void;
+      }
+      switch (notification.method) {
+        case "turn/started":
+          answer.turnId = notification.params.turn.id;
+          return Effect.void;
+        case "item/agentMessage/delta":
+          answer.deltas += notification.params.delta;
+          return Effect.void;
+        case "item/completed":
+          if (notification.params.item.type === "agentMessage") {
+            answer.messages.push(notification.params.item.text);
+          }
+          return Effect.void;
+        case "error":
+          if (!notification.params.willRetry) {
+            answer.lastError = notification.params.error.message;
+          }
+          return Effect.void;
+        case "turn/completed": {
+          const turn = notification.params.turn;
+          if (turn.status === "completed") {
+            // Commentary can precede the final message; the last one answers.
+            const text = (answer.messages.at(-1) ?? answer.deltas).trim();
+            return text.length > 0
+              ? Deferred.succeed(answer.result, text).pipe(Effect.asVoid)
+              : Deferred.fail(
+                  answer.result,
+                  new CodexSessionRuntimeSideQuestionError({
+                    detail: "Codex returned an empty answer.",
+                  }),
+                ).pipe(Effect.asVoid);
+          }
+          const detail =
+            turn.error?.message ??
+            answer.lastError ??
+            (turn.status === "interrupted"
+              ? "The side question was interrupted."
+              : "Codex could not answer the side question.");
+          return Deferred.fail(
+            answer.result,
+            new CodexSessionRuntimeSideQuestionError({ detail }),
+          ).pipe(Effect.asVoid);
+        }
+        default:
+          return Effect.void;
+      }
+    };
+
     const handleRawNotification = (notification: CodexServerNotification) =>
       Effect.gen(function* () {
+        // Side-question forks answer privately: none of their traffic may
+        // reach the main thread's events, collab routing, or session state.
+        const conversationId = readNotificationThreadId(notification);
+        if (conversationId !== undefined && sideForkThreadIds.has(conversationId)) {
+          return yield* routeSideForkNotification(conversationId, notification);
+        }
         const isMemoryConsolidationNotification =
           suppressMemoryConsolidationNotification(notification);
 
@@ -2072,7 +2211,10 @@ export const makeCodexSessionRuntime = (
     yield* client.handleServerNotification("thread/started", (payload) =>
       currentSessionProviderThreadId.pipe(
         Effect.flatMap((providerThreadId) => {
-          if (providerThreadId && payload.thread.id !== providerThreadId) {
+          if (
+            sideForkThreadIds.has(payload.thread.id) ||
+            (providerThreadId && payload.thread.id !== providerThreadId)
+          ) {
             return Effect.void;
           }
           return updateSession(sessionRef, {
@@ -2085,7 +2227,10 @@ export const makeCodexSessionRuntime = (
     yield* client.handleServerNotification("turn/started", (payload) =>
       currentSessionProviderThreadId.pipe(
         Effect.flatMap((providerThreadId) => {
-          if (providerThreadId && payload.threadId !== providerThreadId) {
+          if (
+            sideForkThreadIds.has(payload.threadId) ||
+            (providerThreadId && payload.threadId !== providerThreadId)
+          ) {
             return Effect.void;
           }
           return updateSession(sessionRef, {
@@ -2099,7 +2244,10 @@ export const makeCodexSessionRuntime = (
     yield* client.handleServerNotification("turn/completed", (payload) =>
       currentSessionProviderThreadId.pipe(
         Effect.flatMap((providerThreadId) => {
-          if (providerThreadId && payload.threadId !== providerThreadId) {
+          if (
+            sideForkThreadIds.has(payload.threadId) ||
+            (providerThreadId && payload.threadId !== providerThreadId)
+          ) {
             return Effect.void;
           }
           const lastError =
@@ -2119,7 +2267,10 @@ export const makeCodexSessionRuntime = (
       currentSessionProviderThreadId.pipe(
         Effect.flatMap((providerThreadId) => {
           const payloadThreadId = payload.threadId;
-          if (providerThreadId && payloadThreadId && payloadThreadId !== providerThreadId) {
+          if (
+            (payloadThreadId && sideForkThreadIds.has(payloadThreadId)) ||
+            (providerThreadId && payloadThreadId && payloadThreadId !== providerThreadId)
+          ) {
             return Effect.void;
           }
           const errorMessage = payload.error.message;
@@ -2132,8 +2283,15 @@ export const makeCodexSessionRuntime = (
       ),
     );
 
+    // Side-question forks run read-only with approvals off; anything that
+    // still asks the user is declined rather than surfacing in the main thread.
     yield* client.handleServerRequest("item/commandExecution/requestApproval", (payload) =>
       Effect.gen(function* () {
+        if (sideForkThreadIds.has(payload.threadId)) {
+          return {
+            decision: "decline",
+          } satisfies EffectCodexSchema.CommandExecutionRequestApprovalResponse;
+        }
         const requestId = ApprovalRequestId.make(yield* randomUUIDv4("command-approval-request"));
         const turnId = TurnId.make(payload.turnId);
         const itemId = ProviderItemId.make(payload.itemId);
@@ -2190,6 +2348,11 @@ export const makeCodexSessionRuntime = (
 
     yield* client.handleServerRequest("item/fileChange/requestApproval", (payload) =>
       Effect.gen(function* () {
+        if (sideForkThreadIds.has(payload.threadId)) {
+          return {
+            decision: "decline",
+          } satisfies EffectCodexSchema.FileChangeRequestApprovalResponse;
+        }
         const requestId = ApprovalRequestId.make(
           yield* randomUUIDv4("file-change-approval-request"),
         );
@@ -2248,7 +2411,10 @@ export const makeCodexSessionRuntime = (
 
     yield* client.handleServerRequest("mcpServer/elicitation/request", (payload) =>
       Effect.gen(function* () {
-        if (toMcpElicitationResponse(payload, "accept").action !== "accept") {
+        if (
+          sideForkThreadIds.has(payload.threadId) ||
+          toMcpElicitationResponse(payload, "accept").action !== "accept"
+        ) {
           yield* Effect.logWarning("Declined an unsupported MCP elicitation.", {
             serverName: payload.serverName,
             mode: payload.mode,
@@ -2313,6 +2479,9 @@ export const makeCodexSessionRuntime = (
 
     yield* client.handleServerRequest("item/tool/requestUserInput", (payload) =>
       Effect.gen(function* () {
+        if (sideForkThreadIds.has(payload.threadId)) {
+          return { answers: {} } satisfies EffectCodexSchema.ToolRequestUserInputResponse;
+        }
         const requestId = ApprovalRequestId.make(yield* randomUUIDv4("user-input-request"));
         const turnId = TurnId.make(payload.turnId);
         const itemId = ProviderItemId.make(payload.itemId);
@@ -2426,10 +2595,13 @@ export const makeCodexSessionRuntime = (
               return Effect.void;
             }
             const nextStatus = exitCode === 0 ? "closed" : "error";
-            return updateSession(sessionRef, {
-              status: nextStatus,
-              activeTurnId: undefined,
-            }).pipe(
+            return failSideForkAnswers("The Codex session exited.").pipe(
+              Effect.andThen(
+                updateSession(sessionRef, {
+                  status: nextStatus,
+                  activeTurnId: undefined,
+                }),
+              ),
               Effect.andThen(
                 emitSessionEvent(
                   "session/exited",
@@ -2504,6 +2676,8 @@ export const makeCodexSessionRuntime = (
       }
       yield* settlePendingApprovals("cancel");
       yield* settlePendingUserInputs({});
+      // Forks are ephemeral: they die with the app-server below.
+      yield* failSideForkAnswers("The Codex session closed.");
       yield* updateSession(sessionRef, {
         status: "closed",
         activeTurnId: undefined,
@@ -2517,6 +2691,86 @@ export const makeCodexSessionRuntime = (
       yield* Queue.shutdown(serverNotifications);
       yield* Queue.shutdown(events);
     });
+
+    const askSideQuestion: CodexSessionRuntimeShape["askSideQuestion"] = (input) =>
+      Effect.gen(function* () {
+        const providerThreadId = yield* readProviderThreadId;
+        let fork = sideForks.get(input.sideThreadId);
+        if (fork === undefined) {
+          fork = { forkThreadId: undefined, lock: Semaphore.makeUnsafe(1) };
+          sideForks.set(input.sideThreadId, fork);
+        }
+        const entry = fork;
+        // One question at a time per side thread: a fork runs one turn.
+        return yield* entry.lock.withPermit(
+          Effect.gen(function* () {
+            let prompt = input.question;
+            if (entry.forkThreadId === undefined) {
+              const forked = yield* client.request("thread/fork", {
+                threadId: providerThreadId,
+                ephemeral: true,
+                sandbox: "read-only",
+                approvalPolicy: "never",
+                developerInstructions: SIDE_CONVERSATION_INSTRUCTIONS,
+              });
+              entry.forkThreadId = forked.thread.id;
+              sideForkThreadIds.add(forked.thread.id);
+              // A fresh fork of a side thread with answers (the app-server
+              // restarted, or the last fork failed) lost those exchanges.
+              prompt = buildSideQuestionPrompt(input.history, input.question);
+            }
+            const forkThreadId = entry.forkThreadId;
+            const answer: SideForkAnswer = {
+              turnId: undefined,
+              messages: [],
+              deltas: "",
+              lastError: undefined,
+              result: yield* Deferred.make<string, CodexSessionRuntimeSideQuestionError>(),
+            };
+            sideForkAnswers.set(forkThreadId, answer);
+            const abandonFork = Effect.gen(function* () {
+              if (entry.forkThreadId === forkThreadId) {
+                entry.forkThreadId = undefined;
+              }
+              if (answer.turnId !== undefined) {
+                yield* client
+                  .request("turn/interrupt", { threadId: forkThreadId, turnId: answer.turnId })
+                  .pipe(Effect.timeoutOption("3 seconds"), Effect.ignore);
+              }
+            });
+            return yield* Effect.gen(function* () {
+              const started = yield* client.request("turn/start", {
+                threadId: forkThreadId,
+                input: [{ type: "text", text: prompt }],
+                approvalPolicy: "never",
+                sandboxPolicy: { type: "readOnly" },
+              });
+              answer.turnId ??= started.turn.id;
+              return yield* Deferred.await(answer.result).pipe(
+                Effect.timeout(SIDE_QUESTION_TIMEOUT),
+                Effect.catchTag("TimeoutError", () =>
+                  Effect.fail(
+                    new CodexSessionRuntimeSideQuestionError({
+                      detail: `Codex did not answer within ${SIDE_QUESTION_TIMEOUT}.`,
+                    }),
+                  ),
+                ),
+              );
+            }).pipe(
+              // A failed or abandoned fork may be wedged; the next question
+              // starts a fresh one and replays the history instead.
+              Effect.onError(() => abandonFork),
+              Effect.ensuring(
+                Effect.sync(() => {
+                  if (sideForkAnswers.get(forkThreadId) === answer) {
+                    sideForkAnswers.delete(forkThreadId);
+                  }
+                }),
+              ),
+            );
+          }),
+        );
+      });
 
     return {
       start,
@@ -2706,6 +2960,7 @@ export const makeCodexSessionRuntime = (
             },
           });
         }),
+      askSideQuestion,
       events: Stream.fromQueue(events),
       close,
     } satisfies CodexSessionRuntimeShape;

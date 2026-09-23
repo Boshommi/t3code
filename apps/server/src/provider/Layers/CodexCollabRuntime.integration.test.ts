@@ -766,3 +766,148 @@ describe("CodexSessionRuntime collab integration", () => {
     );
   }
 });
+
+describe("CodexSessionRuntime side questions", () => {
+  const writeScript = (script: Record<string, unknown>) => {
+    // @effect-diagnostics-next-line preferSchemaOverJson:off
+    NodeFS.writeFileSync(
+      scriptPath,
+      JSON.stringify({ rootThreadId: ROOT, recordRequests: true, notifications: [], ...script }),
+      "utf8",
+    );
+    NodeFS.rmSync(`${scriptPath}.requests`, { force: true });
+  };
+  const cleanupScript = Effect.addFinalizer(() =>
+    Effect.sync(() => {
+      NodeFS.rmSync(scriptPath, { force: true });
+      NodeFS.rmSync(`${scriptPath}.requests`, { force: true });
+      NodeFS.rmSync(`${scriptPath}.interrupts`, { force: true });
+    }),
+  );
+  const makeRuntime = (threadId: string) =>
+    makeCodexSessionRuntime({
+      threadId: ThreadId.make(threadId),
+      binaryPath: peerPath,
+      cwd: NodeOS.tmpdir(),
+      runtimeMode: "full-access",
+      environment: { ...process.env, T3_CODEX_COLLAB_SCRIPT: scriptPath },
+    });
+  const sideRequests = () =>
+    readRecordedRequests().filter(
+      (request) =>
+        request.method === "thread/fork" ||
+        (request.method === "turn/start" &&
+          String(request.params.threadId).startsWith("side-fork-")),
+    );
+
+  it.live("answers in a private read-only fork and reuses it for follow-ups", () =>
+    Effect.gen(function* () {
+      yield* cleanupScript;
+      writeScript({ sideAnswers: ["first answer", "second answer", "third answer"] });
+      const runtime = yield* makeRuntime("thread-side-questions");
+      const eventsFiber = yield* runtime.events.pipe(
+        Stream.takeUntil((event) => event.method === "turn/completed"),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      yield* runtime.start();
+
+      const first = yield* runtime.askSideQuestion({
+        sideThreadId: "side-1",
+        question: "What is running?",
+        history: [],
+      });
+      const followUp = yield* runtime.askSideQuestion({
+        sideThreadId: "side-1",
+        question: "Why?",
+        history: [{ question: "What is running?", answer: first }],
+      });
+      // A new side thread that already has answers (e.g. after an app-server
+      // restart) gets a fresh fork primed with its history.
+      const restored = yield* runtime.askSideQuestion({
+        sideThreadId: "side-2",
+        question: "And now?",
+        history: [{ question: "Before?", answer: "Earlier answer." }],
+      });
+
+      assert.equal(first, "first answer");
+      assert.equal(followUp, "second answer");
+      assert.equal(restored, "third answer");
+      const session = yield* runtime.getSession;
+      assert.equal(session.status, "ready");
+      assert.isUndefined(session.activeTurnId);
+
+      const requests = sideRequests();
+      assert.deepEqual(
+        requests.map((request) => [request.method, request.params.threadId]),
+        [
+          ["thread/fork", ROOT],
+          ["turn/start", "side-fork-1"],
+          ["turn/start", "side-fork-1"],
+          ["thread/fork", ROOT],
+          ["turn/start", "side-fork-2"],
+        ],
+      );
+      assert.deepInclude(requests[0]!.params, {
+        ephemeral: true,
+        sandbox: "read-only",
+        approvalPolicy: "never",
+      });
+      assert.isString(requests[0]!.params.developerInstructions);
+      assert.deepInclude(requests[1]!.params, {
+        input: [{ type: "text", text: "What is running?" }],
+        approvalPolicy: "never",
+        sandboxPolicy: { type: "readOnly" },
+      });
+      assert.deepEqual(requests[2]!.params.input, [{ type: "text", text: "Why?" }]);
+      const restoredPrompt = (requests[4]!.params.input as Array<{ text: string }>)[0]!.text;
+      assert.include(restoredPrompt, "Question: Before?\n\nAnswer: Earlier answer.");
+      assert.include(restoredPrompt, "New question: And now?");
+
+      // Queue order: fork traffic would precede the main turn's events.
+      yield* runtime.sendTurn({ input: "main turn" });
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      const leaked = events.filter((event) => {
+        const payload = event.payload as { threadId?: string; thread?: { id?: string } };
+        return (
+          String(payload?.threadId ?? payload?.thread?.id ?? "").startsWith("side-fork-") ||
+          event.textDelta !== undefined
+        );
+      });
+      assert.deepEqual(
+        leaked.map((event) => event.method),
+        [],
+      );
+      assert.isTrue(events.some((event) => event.method === "turn/completed"));
+
+      yield* runtime.close;
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("fails a question whose fork turn fails and re-forks the next one", () =>
+    Effect.gen(function* () {
+      yield* cleanupScript;
+      writeScript({ failSideTurns: true });
+      const runtime = yield* makeRuntime("thread-side-question-failure");
+      yield* runtime.start();
+
+      const ask = runtime.askSideQuestion({ sideThreadId: "side-1", question: "Hm?", history: [] });
+      const error = yield* ask.pipe(Effect.flip);
+      assert.equal(error._tag, "CodexSessionRuntimeSideQuestionError");
+      assert.equal(error.message, "side model unavailable");
+      yield* ask.pipe(Effect.flip);
+
+      assert.deepEqual(
+        sideRequests().map((request) => [request.method, request.params.threadId]),
+        [
+          ["thread/fork", ROOT],
+          ["turn/start", "side-fork-1"],
+          ["thread/fork", ROOT],
+          ["turn/start", "side-fork-2"],
+        ],
+      );
+
+      yield* runtime.close;
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});

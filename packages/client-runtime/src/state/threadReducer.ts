@@ -724,6 +724,41 @@ export function applyThreadDetailEvent(
       };
     }
 
+    // ── Side threads ────────────────────────────────────────────────
+    // Side messages never touch the conversation, so they leave `updatedAt`
+    // alone: asking a side question must not reorder the thread list.
+    case "thread.side-message-added": {
+      const message = event.payload.message;
+      const sideMessages = thread.sideMessages ?? [];
+      const index = sideMessages.findIndex((entry) => entry.id === message.id);
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          sideMessages:
+            index === -1
+              ? [...sideMessages, message]
+              : sideMessages.map((entry, entryIndex) => (entryIndex === index ? message : entry)),
+        },
+      };
+    }
+
+    case "thread.side-thread-deleted": {
+      const sideMessages = thread.sideMessages ?? [];
+      if (!sideMessages.some((entry) => entry.sideThreadId === event.payload.sideThreadId)) {
+        return { kind: "unchanged" };
+      }
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          sideMessages: sideMessages.filter(
+            (entry) => entry.sideThreadId !== event.payload.sideThreadId,
+          ),
+        },
+      };
+    }
+
     // ── Events that don't mutate thread state directly ──────────────
     case "thread.approval-response-requested":
     case "thread.user-input-response-requested":

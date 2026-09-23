@@ -579,6 +579,26 @@ export const OrchestrationProposedPlan = Schema.Struct({
 });
 export type OrchestrationProposedPlan = typeof OrchestrationProposedPlan.Type;
 
+/** Side threads (`/btw`) are read-only questions about a thread that never
+ *  enter its provider history or interrupt its turn. A side thread is the
+ *  messages sharing one `sideThreadId`, which is the id of its first question.
+ *  `error` carries a failed answer so the thread can be asked again. */
+export const OrchestrationSideMessageRole = Schema.Literals(["user", "assistant", "error"]);
+export type OrchestrationSideMessageRole = typeof OrchestrationSideMessageRole.Type;
+
+export const SIDE_QUESTION_MAX_CHARS = 8_000;
+
+export const OrchestrationSideMessage = Schema.Struct({
+  id: MessageId,
+  sideThreadId: MessageId,
+  role: OrchestrationSideMessageRole,
+  text: Schema.String,
+  // The main-thread message the side thread was started from, if any.
+  anchorMessageId: Schema.NullOr(MessageId),
+  createdAt: IsoDateTime,
+});
+export type OrchestrationSideMessage = typeof OrchestrationSideMessage.Type;
+
 const SourceProposedPlanReference = Schema.Struct({
   threadId: ThreadId,
   planId: OrchestrationProposedPlanId,
@@ -825,6 +845,8 @@ export const OrchestrationThread = Schema.Struct({
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
+  // Optional so payloads from pre-side-thread servers still decode.
+  sideMessages: Schema.optional(Schema.Array(OrchestrationSideMessage)),
   activities: Schema.Array(OrchestrationThreadActivity),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
   session: Schema.NullOr(OrchestrationSession),
@@ -983,6 +1005,8 @@ export const OrchestrationSubscribeThreadInput = Schema.Struct({
   threadId: ThreadId,
   /** Opt in to reasoning roles; older clients receive system messages instead. */
   reasoningMessages: Schema.optionalKey(Schema.Boolean),
+  /** Opt in to side-thread events; older clients cannot decode them. */
+  sideThreads: Schema.optionalKey(Schema.Boolean),
   /**
    * When provided, the server skips the initial snapshot frame and instead
    * replays events after this sequence before streaming live events. Clients
@@ -1389,6 +1413,26 @@ const ThreadSessionStopCommand = Schema.Struct({
   onlyIfSettled: Schema.optional(Schema.Boolean),
 });
 
+const ThreadSideQuestionAskCommand = Schema.Struct({
+  type: Schema.Literal("thread.side-question.ask"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  // Equal to messageId when the question starts a new side thread.
+  sideThreadId: MessageId,
+  messageId: MessageId,
+  text: TrimmedNonEmptyString.check(Schema.isMaxLength(SIDE_QUESTION_MAX_CHARS)),
+  anchorMessageId: Schema.NullOr(MessageId),
+  createdAt: IsoDateTime,
+});
+
+const ThreadSideThreadDeleteCommand = Schema.Struct({
+  type: Schema.Literal("thread.side-thread.delete"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  sideThreadId: MessageId,
+  createdAt: IsoDateTime,
+});
+
 const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
@@ -1418,6 +1462,8 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadCheckpointRevertCommand,
   ThreadConversationRevertCommand,
   ThreadSessionStopCommand,
+  ThreadSideQuestionAskCommand,
+  ThreadSideThreadDeleteCommand,
 ]);
 export type DispatchableClientOrchestrationCommand =
   typeof DispatchableClientOrchestrationCommand.Type;
@@ -1451,6 +1497,8 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadCheckpointRevertCommand,
   ThreadConversationRevertCommand,
   ThreadSessionStopCommand,
+  ThreadSideQuestionAskCommand,
+  ThreadSideThreadDeleteCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
 
@@ -1623,6 +1671,17 @@ const ThreadPullRequestLinkSyncCommand = Schema.Struct({
   stack: Schema.NullOr(ThreadPullRequestStack),
 });
 
+const ThreadSideAnswerCompleteCommand = Schema.Struct({
+  type: Schema.Literal("thread.side-answer.complete"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  sideThreadId: MessageId,
+  messageId: MessageId,
+  role: Schema.Literals(["assistant", "error"]),
+  text: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   ThreadAutoSettleCommand,
   ThreadPullRequestSyncCommand,
@@ -1643,6 +1702,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadTitleRefineCommand,
   ThreadPullRequestSyncCommand,
   ThreadPullRequestLinkSyncCommand,
+  ThreadSideAnswerCompleteCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 
@@ -1685,6 +1745,8 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.proposed-plan-upserted",
   "thread.turn-diff-completed",
   "thread.activity-appended",
+  "thread.side-message-added",
+  "thread.side-thread-deleted",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
@@ -1956,6 +2018,16 @@ export const ThreadActivityAppendedPayload = Schema.Struct({
   activity: OrchestrationThreadActivity,
 });
 
+export const ThreadSideMessageAddedPayload = Schema.Struct({
+  threadId: ThreadId,
+  message: OrchestrationSideMessage,
+});
+
+export const ThreadSideThreadDeletedPayload = Schema.Struct({
+  threadId: ThreadId,
+  sideThreadId: MessageId,
+});
+
 /**
  * Which client connection dispatched the command that produced an event.
  * Stamped by the orchestration engine on client-dispatched commands; absent on
@@ -2157,6 +2229,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.activity-appended"),
     payload: ThreadActivityAppendedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.side-message-added"),
+    payload: ThreadSideMessageAddedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.side-thread-deleted"),
+    payload: ThreadSideThreadDeletedPayload,
   }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;

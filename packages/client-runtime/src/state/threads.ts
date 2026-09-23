@@ -603,7 +603,9 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       const seenCheckpoints = new Set(loaded.checkpoints.map((row) => row.turnId));
       merged = {
         // Thread metadata stays the loaded (newer) snapshot's; only the
-        // windowed collections gain rows from the older page.
+        // windowed collections gain rows from the older page. Side messages
+        // are not windowed (every page carries all of them), so the loaded
+        // copy, which live events keep current, wins.
         ...loaded,
         messages: mergeById(older.messages, loaded.messages),
         activities: mergeById(older.activities, loaded.activities),
@@ -755,6 +757,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
                 threadResumeCompletionMarker?: boolean;
                 threadSnapshotPagination?: boolean;
                 reasoningMessages?: boolean;
+                sideThreads?: boolean;
               },
           ),
         );
@@ -834,6 +837,9 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
           ...(canResume ? { afterSequence: sequence } : {}),
           ...(supportsCompletionMarker ? { requestCompletionMarker: true as const } : {}),
           ...(supportsReasoningMessages ? { reasoningMessages: true as const } : {}),
+          // Older servers reject the unknown key; newer ones only stream
+          // side-thread events to subscribers that can decode them.
+          ...(config.sideThreads === true ? { sideThreads: true as const } : {}),
           // The WS fallback snapshot (sent when afterSequence is missing or
           // the gap is too large) should be windowed the same as the HTTP
           // path; without this a resume failure re-downloads the full thread.

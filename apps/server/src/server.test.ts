@@ -8644,6 +8644,103 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     );
   }
 
+  for (const sideThreads of [undefined, true] as const) {
+    it.effect(`delivers side-thread events only with opt-in ${sideThreads}`, () =>
+      Effect.gen(function* () {
+        const eventBase = {
+          aggregateKind: "thread" as const,
+          aggregateId: defaultThreadId,
+          occurredAt: "2026-01-01T00:00:01.000Z",
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+        };
+        const sideEvent = {
+          ...eventBase,
+          sequence: 2,
+          eventId: EventId.make("side-question-event"),
+          type: "thread.side-message-added" as const,
+          payload: {
+            threadId: defaultThreadId,
+            message: {
+              id: MessageId.make("side-question"),
+              sideThreadId: MessageId.make("side-question"),
+              role: "user" as const,
+              text: "What does this do?",
+              anchorMessageId: null,
+              createdAt: eventBase.occurredAt,
+            },
+          },
+        } satisfies OrchestrationEvent;
+        const messageEvent = {
+          ...eventBase,
+          sequence: 3,
+          eventId: EventId.make("side-compat-message-event"),
+          type: "thread.message-sent" as const,
+          payload: {
+            messageId: MessageId.make("side-compat-message"),
+            threadId: defaultThreadId,
+            role: "assistant" as const,
+            text: "Main thread answer.",
+            turnId: null,
+            streaming: false,
+            createdAt: eventBase.occurredAt,
+            updatedAt: eventBase.occurredAt,
+          },
+        } satisfies OrchestrationEvent;
+        const liveEvents = yield* PubSub.unbounded<OrchestrationEvent>();
+        yield* buildAppUnderTest({
+          layers: {
+            orchestrationEngine: {
+              streamDomainEvents: Stream.fromPubSub(liveEvents),
+              latestSequence: Effect.succeed(3),
+              getThreadReplayStats: () =>
+                Effect.succeed({ eventCount: 2, payloadBytes: 200, hasCreateEvent: false }),
+              readThreadEvents: () => Stream.make(sideEvent, messageEvent),
+            },
+            projectionSnapshotQuery: {
+              getThreadDetailSnapshot: () =>
+                Effect.gen(function* () {
+                  yield* PubSub.publishAll(liveEvents, [sideEvent, messageEvent]);
+                  return Option.some({
+                    snapshotSequence: 1,
+                    thread: makeDefaultOrchestrationReadModel().threads[0]!,
+                  });
+                }),
+            },
+          },
+        });
+        const wsUrl = yield* getWsServerUrl("/ws");
+        // Replay and live delivery share the same gate.
+        for (const afterSequence of [undefined, 1]) {
+          const items = yield* Effect.scoped(
+            withWsRpcClient(wsUrl, (client) =>
+              client[ORCHESTRATION_WS_METHODS.subscribeThread]({
+                threadId: defaultThreadId,
+                requestCompletionMarker: true,
+                ...(sideThreads ? { sideThreads } : {}),
+                ...(afterSequence !== undefined ? { afterSequence } : {}),
+              }).pipe(
+                Stream.takeUntil((item) => item.kind === "synchronized"),
+                Stream.runCollect,
+              ),
+            ),
+          );
+          const eventTypes = items.flatMap((item) =>
+            item.kind === "event" ? [item.event.type] : [],
+          );
+          assert.deepEqual(
+            eventTypes,
+            sideThreads
+              ? ["thread.side-message-added", "thread.message-sent"]
+              : ["thread.message-sent"],
+          );
+        }
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    );
+  }
+
   it.effect("marks a socket thread snapshot as synchronized when requested", () =>
     Effect.gen(function* () {
       const thread = makeDefaultOrchestrationReadModel().threads[0]!;

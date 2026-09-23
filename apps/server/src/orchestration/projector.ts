@@ -52,6 +52,8 @@ import {
   ThreadUnsnoozedPayload,
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
+  ThreadSideMessageAddedPayload,
+  ThreadSideThreadDeletedPayload,
   ThreadTurnDiffCompletedPayload,
 } from "./Schemas.ts";
 
@@ -1059,6 +1061,55 @@ export function projectEvent(
             threads: updateThread(nextBase.threads, payload.threadId, {
               activities,
               updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+
+    // Side messages leave updatedAt alone and survive reverts: they are not
+    // part of the thread's conversation.
+    case "thread.side-message-added":
+      return decodeForEvent(
+        ThreadSideMessageAddedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              sideMessages: [
+                ...(thread.sideMessages ?? []).filter((entry) => entry.id !== payload.message.id),
+                payload.message,
+              ],
+            }),
+          };
+        }),
+      );
+
+    case "thread.side-thread-deleted":
+      return decodeForEvent(
+        ThreadSideThreadDeletedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              sideMessages: (thread.sideMessages ?? []).filter(
+                (entry) => entry.sideThreadId !== payload.sideThreadId,
+              ),
             }),
           };
         }),

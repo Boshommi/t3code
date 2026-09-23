@@ -62,7 +62,10 @@ import {
   ProviderWorkspaceMissingError,
   type ProviderAdapterError,
 } from "../Errors.ts";
-import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
+import type {
+  ProviderAdapterShape,
+  ProviderSideQuestionInput,
+} from "../Services/ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "../Services/ProviderAdapterRegistry.ts";
 import * as ProviderService from "../Services/ProviderService.ts";
 import * as ProviderSessionDirectory from "../Services/ProviderSessionDirectory.ts";
@@ -276,6 +279,11 @@ function makeFakeCodexAdapter(
       }),
   );
 
+  const askSideQuestion = vi.fn(
+    (input: ProviderSideQuestionInput): Effect.Effect<string, ProviderAdapterError> =>
+      Effect.succeed(`answer to ${input.question}`),
+  );
+
   const stopAll = vi.fn((): Effect.Effect<void, ProviderAdapterError> =>
     Effect.sync(() => {
       sessions.clear();
@@ -306,7 +314,9 @@ function makeFakeCodexAdapter(
     hasSession,
     readThread,
     rollbackThread,
-    ...(provider === CODEX_DRIVER ? { uploadFeedback, readSubagentTranscript } : {}),
+    ...(provider === CODEX_DRIVER
+      ? { uploadFeedback, readSubagentTranscript, askSideQuestion }
+      : {}),
     stopAll,
     get streamEvents() {
       return Stream.fromPubSub(runtimeEventPubSub);
@@ -345,6 +355,7 @@ function makeFakeCodexAdapter(
     rollbackThread,
     uploadFeedback,
     readSubagentTranscript,
+    askSideQuestion,
     stopAll,
   };
 }
@@ -2217,6 +2228,63 @@ routing.layer("ProviderServiceLive routing", (it) => {
 
       assert.instanceOf(error, ProviderValidationError);
       assert.include(error.issue, "does not keep subagent transcripts");
+      assert.strictEqual(routing.claude.startSession.mock.calls.length, 0);
+    }),
+  );
+
+  it.effect("recovers a stopped session before asking a side question", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-side-recover");
+      yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        cwd: fixtureCwd("side-project"),
+        runtimeMode: "full-access",
+      });
+      yield* routing.codex.stopSession(threadId);
+      routing.codex.startSession.mockClear();
+      routing.codex.askSideQuestion.mockClear();
+      const input = {
+        threadId,
+        sideThreadId: MessageId.make("side-1"),
+        question: "What is running?",
+        history: [{ question: "Earlier?", answer: "Yes." }],
+      };
+
+      const answer = yield* provider.askSideQuestion(input);
+
+      assert.strictEqual(answer, "answer to What is running?");
+      assert.strictEqual(routing.codex.startSession.mock.calls.length, 1);
+      assert.deepStrictEqual(routing.codex.askSideQuestion.mock.calls, [[input]]);
+    }),
+  );
+
+  it.effect("rejects side questions for unsupported providers without restarting them", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-side-unsupported");
+      yield* provider.startSession(threadId, {
+        provider: CLAUDE_AGENT_DRIVER,
+        providerInstanceId: claudeAgentInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+      yield* routing.claude.stopSession(threadId);
+      routing.claude.startSession.mockClear();
+
+      const error = yield* provider
+        .askSideQuestion({
+          threadId,
+          sideThreadId: MessageId.make("side-1"),
+          question: "Hello?",
+          history: [],
+        })
+        .pipe(Effect.flip);
+
+      assert.instanceOf(error, ProviderValidationError);
+      assert.strictEqual(error.operation, "ProviderService.askSideQuestion");
       assert.strictEqual(routing.claude.startSession.mock.calls.length, 0);
     }),
   );

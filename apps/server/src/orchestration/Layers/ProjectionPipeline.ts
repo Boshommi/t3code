@@ -37,6 +37,7 @@ import {
   ProjectionThreadProposedPlanRepository,
 } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
 import * as ProjectionThreadPullRequests from "../../persistence/ProjectionThreadPullRequests.ts";
+import { ProjectionThreadSideMessageRepository } from "../../persistence/Services/ProjectionThreadSideMessages.ts";
 import { ProjectionThreadSessionRepository } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import {
   type ProjectionTurn,
@@ -50,6 +51,7 @@ import { ProjectionThreadActivityRepositoryLive } from "../../persistence/Layers
 import { ProjectionThreadMessageRepositoryLive } from "../../persistence/Layers/ProjectionThreadMessages.ts";
 import { ProjectionThreadProposedPlanRepositoryLive } from "../../persistence/Layers/ProjectionThreadProposedPlans.ts";
 import { ProjectionThreadSessionRepositoryLive } from "../../persistence/Layers/ProjectionThreadSessions.ts";
+import { ProjectionThreadSideMessageRepositoryLive } from "../../persistence/Layers/ProjectionThreadSideMessages.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
 import { ServerConfig } from "../../config.ts";
@@ -485,6 +487,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const projectionThreadRepository = yield* ProjectionThreadRepository;
     const projectionThreadMessageRepository = yield* ProjectionThreadMessageRepository;
     const projectionThreadProposedPlanRepository = yield* ProjectionThreadProposedPlanRepository;
+    const projectionThreadSideMessageRepository = yield* ProjectionThreadSideMessageRepository;
     const projectionThreadPullRequestRepository =
       yield* ProjectionThreadPullRequests.ProjectionThreadPullRequestRepository;
     const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
@@ -1124,6 +1127,31 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         case "thread.created":
           yield* projectionThreadMessageRepository.deleteByThreadId({
             threadId: event.payload.threadId,
+          });
+          yield* projectionThreadSideMessageRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          });
+          return;
+
+        // Side messages share this projector's cursor rather than adding one:
+        // a new projector would replay the whole event log on first start.
+        // Reverts leave them alone; they are not part of the conversation.
+        case "thread.side-message-added":
+          yield* projectionThreadSideMessageRepository.upsert({
+            messageId: event.payload.message.id,
+            threadId: event.payload.threadId,
+            sideThreadId: event.payload.message.sideThreadId,
+            role: event.payload.message.role,
+            text: event.payload.message.text,
+            anchorMessageId: event.payload.message.anchorMessageId,
+            createdAt: event.payload.message.createdAt,
+          });
+          return;
+
+        case "thread.side-thread-deleted":
+          yield* projectionThreadSideMessageRepository.deleteBySideThreadId({
+            threadId: event.payload.threadId,
+            sideThreadId: event.payload.sideThreadId,
           });
           return;
 
@@ -2198,6 +2226,7 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionThreadRepositoryLive),
   Layer.provideMerge(ProjectionThreadMessageRepositoryLive),
   Layer.provideMerge(ProjectionThreadProposedPlanRepositoryLive),
+  Layer.provideMerge(ProjectionThreadSideMessageRepositoryLive),
   Layer.provideMerge(ProjectionThreadPullRequests.layer),
   Layer.provideMerge(ProjectionThreadActivityRepositoryLive),
   Layer.provideMerge(ProjectionThreadSessionRepositoryLive),

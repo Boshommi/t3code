@@ -2336,6 +2336,48 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     });
     return yield* read(input);
   });
+  const askSideQuestion: ProviderServiceMethod<"askSideQuestion"> = Effect.fn("askSideQuestion")(
+    function* (input) {
+      // Failures under this operation are shown to the user verbatim; session
+      // routing and recovery report under their own label.
+      const operation = "ProviderService.askSideQuestion";
+      const sessionOperation = "ProviderService.askSideQuestion.session";
+      if (Option.isNone(yield* directory.getBinding(input.threadId))) {
+        return yield* toValidationError(
+          operation,
+          "Send a message in this thread before asking a side question.",
+        );
+      }
+      // Check support before recovery so an unsupported provider never
+      // restarts a stopped session just to be turned away.
+      const routed = yield* resolveRoutableSession({
+        threadId: input.threadId,
+        operation: sessionOperation,
+        allowRecovery: false,
+      });
+      const ask = routed.adapter.askSideQuestion;
+      if (ask === undefined) {
+        return yield* toValidationError(
+          operation,
+          "Side questions are not available for this provider.",
+        );
+      }
+      if (!routed.isActive) {
+        // Same binding, same adapter: this only brings the session back up.
+        yield* resolveRoutableSession({
+          threadId: input.threadId,
+          operation: sessionOperation,
+          allowRecovery: true,
+        });
+      }
+      yield* Effect.annotateCurrentSpan({
+        "provider.operation": "ask-side-question",
+        "provider.kind": routed.adapter.provider,
+        "provider.thread_id": input.threadId,
+      });
+      return yield* ask(input);
+    },
+  );
 
   const runStopAll = Effect.fn("runStopAll")(function* () {
     // Continuation is project-scopable, so decide it per session's project;
@@ -2456,6 +2498,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     rollbackConversation,
     uploadFeedback,
     readSubagentTranscript,
+    askSideQuestion,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each
     // independently receive all runtime events.

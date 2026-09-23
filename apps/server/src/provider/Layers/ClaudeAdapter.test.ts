@@ -1,6 +1,7 @@
 import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
+import * as NodeModule from "node:module";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
@@ -15,6 +16,7 @@ import type {
 import {
   ApprovalRequestId,
   ClaudeSettings,
+  MessageId,
   ProviderDriverKind,
   ProviderItemId,
   ProviderRuntimeEvent,
@@ -46,7 +48,11 @@ import {
   SYNTHETIC_CLAUDE_STANDARD_MODEL,
   SYNTHETIC_CLAUDE_THINKING_MODEL,
 } from "../ClaudeModelCatalog.testFixtures.ts";
-import { ProviderAdapterProcessError, ProviderAdapterValidationError } from "../Errors.ts";
+import {
+  ProviderAdapterProcessError,
+  ProviderAdapterRequestError,
+  ProviderAdapterValidationError,
+} from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import type { ClaudeScopedLimitNames } from "./claudeUsageLimits.ts";
 import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
@@ -72,6 +78,26 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
   public readonly setMaxThinkingTokensCalls: Array<number | null> = [];
   public closeCalls = 0;
   public closeError: unknown | undefined;
+  public readonly sideQuestionCalls: Array<{
+    readonly question: string;
+    readonly history: ReadonlyArray<{ readonly question: string; readonly response: string }>;
+  }> = [];
+  public sideQuestionResponse: { response: string; synthetic: boolean } | null = {
+    response: "  It is waiting on tests.  ",
+    synthetic: false,
+  };
+
+  // Real SDK queries have this at runtime; tests delete it to model an SDK without it.
+  askSideQuestion?: (
+    question: string,
+    options?: {
+      readonly history?: ReadonlyArray<{ readonly question: string; readonly response: string }>;
+      readonly signal?: AbortSignal;
+    },
+  ) => Promise<{ response: string; synthetic: boolean } | null> = async (question, options) => {
+    this.sideQuestionCalls.push({ question, history: options?.history ?? [] });
+    return this.sideQuestionResponse;
+  };
 
   emit(message: SDKMessage): void {
     if (this.done) {
@@ -368,6 +394,80 @@ const sendCompletedClaudeTurn = (
   });
 
 describe("ClaudeAdapterLive", () => {
+  it("the installed Agent SDK still implements Query.askSideQuestion", () => {
+    // The method is missing from the SDK's public types, so guard its presence
+    // in the shipped bundle instead of trusting the declarations.
+    const sdkPath = NodeModule.createRequire(import.meta.url).resolve(
+      "@anthropic-ai/claude-agent-sdk",
+    );
+    const source = NodeFS.readFileSync(sdkPath, "utf8");
+    assert.match(source, /async askSideQuestion\(/);
+    assert.include(source, 'subtype:"side_question"');
+  });
+
+  it.effect("answers a side question through the live query without starting a turn", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      const answer = yield* adapter.askSideQuestion!({
+        threadId: THREAD_ID,
+        sideThreadId: MessageId.make("side-1"),
+        question: "What is it doing?",
+        history: [{ question: "Which file?", answer: "src/app.ts" }],
+      });
+
+      assert.equal(answer, "It is waiting on tests.");
+      assert.deepEqual(harness.query.sideQuestionCalls, [
+        {
+          question: "What is it doing?",
+          history: [{ question: "Which file?", response: "src/app.ts" }],
+        },
+      ]);
+      const sessions = yield* adapter.listSessions();
+      assert.equal(sessions[0]?.activeTurnId, undefined);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("fails side questions clearly when the SDK cannot answer them", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      const ask = adapter.askSideQuestion!({
+        threadId: THREAD_ID,
+        sideThreadId: MessageId.make("side-1"),
+        question: "Anything?",
+        history: [],
+      });
+
+      harness.query.sideQuestionResponse = null;
+      const empty = yield* ask.pipe(Effect.flip);
+      assert.instanceOf(empty, ProviderAdapterRequestError);
+      assert.equal(empty.detail, "Claude returned an empty answer.");
+
+      delete harness.query.askSideQuestion;
+      const missing = yield* ask.pipe(Effect.flip);
+      assert.instanceOf(missing, ProviderAdapterRequestError);
+      assert.equal(missing.detail, "This Claude Agent SDK version cannot answer side questions.");
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("returns validation error for non-claude provider on startSession", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

@@ -32,6 +32,7 @@ import {
 } from "../../persistence/Layers/Sqlite.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { ProjectionStateRepository } from "../../persistence/Services/ProjectionState.ts";
+import { ProjectionThreadSideMessageRepository } from "../../persistence/Services/ProjectionThreadSideMessages.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import {
@@ -4558,6 +4559,7 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
         "projection_turns",
         "projection_thread_proposed_plans",
         "projection_pending_approvals",
+        "projection_thread_side_messages",
       ];
 
       yield* engine.dispatch({
@@ -4632,6 +4634,16 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
         },
         createdAt,
       });
+      yield* engine.dispatch({
+        type: "thread.side-question.ask",
+        commandId: CommandId.make("cmd-retry-side-question-1"),
+        threadId,
+        sideThreadId: MessageId.make("side-retry-1"),
+        messageId: MessageId.make("side-retry-1"),
+        text: "what is this?",
+        anchorMessageId: null,
+        createdAt,
+      });
       for (const table of perThreadTables) {
         assert.isAbove(yield* countRowsForThread(table), 0, `${table} should be populated`);
       }
@@ -4659,8 +4671,130 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
       const detail = Option.getOrThrow(yield* snapshotQuery.getThreadDetailById(threadId));
       assert.deepEqual(detail.messages, []);
       assert.deepEqual(detail.activities, []);
+      assert.deepEqual(detail.sideMessages, []);
       assert.isNull(detail.latestTurn);
       assert.isNull(detail.session);
+    }),
+  );
+
+  it.effect("projects side threads and reports unanswered questions", () =>
+    Effect.gen(function* () {
+      const engine = yield* OrchestrationEngineService;
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sideMessages = yield* ProjectionThreadSideMessageRepository;
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      const projectId = ProjectId.make("project-side");
+      const threadId = ThreadId.make("thread-side");
+      const otherThreadId = ThreadId.make("thread-side-other");
+      const modelSelection = {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5-codex",
+      };
+      const at = (second: number) => `2026-01-01T00:00:${String(second).padStart(2, "0")}.000Z`;
+      const ask = (input: {
+        readonly threadId: ThreadId;
+        readonly sideThreadId: string;
+        readonly messageId: string;
+        readonly second: number;
+      }) =>
+        engine.dispatch({
+          type: "thread.side-question.ask",
+          commandId: CommandId.make(`cmd-ask-${input.messageId}`),
+          threadId: input.threadId,
+          sideThreadId: MessageId.make(input.sideThreadId),
+          messageId: MessageId.make(input.messageId),
+          text: `question ${input.messageId}`,
+          anchorMessageId: MessageId.make("main-anchor"),
+          createdAt: at(input.second),
+        });
+
+      yield* engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-side-project"),
+        projectId,
+        title: "Side Project",
+        workspaceRoot: "/tmp/project-side",
+        defaultModelSelection: modelSelection,
+        createdAt,
+      });
+      for (const id of [threadId, otherThreadId]) {
+        yield* engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make(`cmd-create-${id}`),
+          threadId: id,
+          projectId,
+          title: "Side thread host",
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt,
+        });
+      }
+
+      // side-a: answered, then a pending follow-up. side-b: deleted.
+      // The other thread's pending question disappears with its thread.
+      yield* ask({ threadId, sideThreadId: "side-a", messageId: "side-a", second: 1 });
+      yield* engine.dispatch({
+        type: "thread.side-answer.complete",
+        commandId: CommandId.make("cmd-answer-side-a"),
+        threadId,
+        sideThreadId: MessageId.make("side-a"),
+        messageId: MessageId.make("answer-a"),
+        role: "assistant",
+        text: "an answer",
+        createdAt: at(2),
+      });
+      yield* ask({ threadId, sideThreadId: "side-a", messageId: "follow-up-a", second: 3 });
+      yield* ask({ threadId, sideThreadId: "side-b", messageId: "side-b", second: 4 });
+      yield* engine.dispatch({
+        type: "thread.side-thread.delete",
+        commandId: CommandId.make("cmd-delete-side-b"),
+        threadId,
+        sideThreadId: MessageId.make("side-b"),
+        createdAt: at(5),
+      });
+      yield* ask({
+        threadId: otherThreadId,
+        sideThreadId: "side-other",
+        messageId: "side-other",
+        second: 6,
+      });
+      yield* engine.dispatch({
+        type: "thread.delete",
+        commandId: CommandId.make("cmd-delete-other-thread"),
+        threadId: otherThreadId,
+      });
+
+      const rows = yield* sideMessages.listByThreadId({ threadId });
+      assert.deepEqual(
+        rows.map((row) => `${row.messageId} ${row.role} ${row.anchorMessageId}`),
+        [
+          "side-a user main-anchor",
+          "answer-a assistant main-anchor",
+          "follow-up-a user main-anchor",
+        ],
+      );
+      assert.deepEqual(
+        (yield* sideMessages.listUnansweredQuestions()).map((row) => row.messageId),
+        ["follow-up-a"],
+      );
+
+      const detail = Option.getOrThrow(yield* snapshotQuery.getThreadDetailById(threadId));
+      assert.deepEqual(
+        detail.sideMessages?.map((message) => message.id),
+        ["side-a", "answer-a", "follow-up-a"],
+      );
+      // The command read model is rebuilt from projections on restart, and the
+      // decider validates side threads against it.
+      const commandReadModel = yield* snapshotQuery.getCommandReadModel();
+      assert.deepEqual(
+        commandReadModel.threads
+          .find((thread) => thread.id === threadId)
+          ?.sideMessages?.map((message) => message.id),
+        ["side-a", "answer-a", "follow-up-a"],
+      );
     }),
   );
 

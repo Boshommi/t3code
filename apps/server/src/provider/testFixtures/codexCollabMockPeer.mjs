@@ -18,6 +18,16 @@ const script = JSON.parse(NodeFS.readFileSync(process.env.T3_CODEX_COLLAB_SCRIPT
 const write = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 let turnStartCount = 0;
 let activeTurn;
+let forkCount = 0;
+let sideTurnCount = 0;
+const recordRequest = (method, params) => {
+  if (script.recordRequests) {
+    NodeFS.appendFileSync(
+      `${process.env.T3_CODEX_COLLAB_SCRIPT}.requests`,
+      `${JSON.stringify({ method, params })}\n`,
+    );
+  }
+};
 
 const rl = NodeReadline.createInterface({ input: process.stdin });
 rl.on("line", (line) => {
@@ -115,6 +125,56 @@ rl.on("line", (line) => {
       return;
     }
     write({ id, result: fixture.responses.threadStart });
+    return;
+  }
+  // Side-question forks (`/btw`): answer with scripted text, bracketed by the
+  // same lifecycle a real fork emits, so the runtime must route all of it.
+  if (method === "thread/fork") {
+    recordRequest(method, message.params);
+    forkCount += 1;
+    const forkId = `side-fork-${forkCount}`;
+    const thread = { ...fixture.responses.threadStart.thread, id: forkId, sessionId: forkId };
+    write({ jsonrpc: "2.0", method: "thread/started", params: { thread } });
+    write({ id, result: { ...fixture.responses.threadStart, thread } });
+    return;
+  }
+  if (method === "turn/start" && message.params?.threadId?.startsWith("side-fork-")) {
+    recordRequest(method, message.params);
+    const threadId = message.params.threadId;
+    const answer = script.sideAnswers?.[sideTurnCount] ?? `side answer ${sideTurnCount + 1}`;
+    sideTurnCount += 1;
+    const turn = { ...fixture.responses.turnStart.turn, id: `${threadId}-turn-${sideTurnCount}` };
+    const item = (itemId, text, phase) => ({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        threadId,
+        turnId: turn.id,
+        completedAtMs: 0,
+        item: { type: "agentMessage", id: itemId, text, phase },
+      },
+    });
+    write({ id, result: { ...fixture.responses.turnStart, turn } });
+    write({ jsonrpc: "2.0", method: "turn/started", params: { threadId, turn } });
+    write({
+      jsonrpc: "2.0",
+      method: "item/agentMessage/delta",
+      params: { threadId, turnId: turn.id, itemId: "msg-final", delta: answer },
+    });
+    write(item("msg-commentary", "Looking at the thread.", "commentary"));
+    write(item("msg-final", answer, "final_answer"));
+    write({
+      jsonrpc: "2.0",
+      method: "turn/completed",
+      params: {
+        threadId,
+        turn: {
+          ...turn,
+          status: script.failSideTurns ? "failed" : "completed",
+          error: script.failSideTurns ? { message: "side model unavailable" } : null,
+        },
+      },
+    });
     return;
   }
   if (method === "turn/start") {

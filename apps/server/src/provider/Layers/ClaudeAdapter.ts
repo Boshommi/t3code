@@ -466,6 +466,26 @@ interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
   readonly setPermissionMode: (mode: PermissionMode) => Promise<void>;
   readonly setMaxThinkingTokens: (maxThinkingTokens: number | null) => Promise<void>;
   readonly close: () => void;
+  /**
+   * The CLI's own `/btw`: answers from the live session context without tools
+   * or history writes. Real SDK queries implement it but the SDK's public
+   * types omit it, so read it only through `claudeSideQuestionMethod`.
+   */
+  readonly askSideQuestion?: (
+    question: string,
+    options?: {
+      readonly history?: ReadonlyArray<{ readonly question: string; readonly response: string }>;
+      readonly signal?: AbortSignal;
+    },
+  ) => Promise<{ readonly response: string; readonly synthetic: boolean } | null>;
+}
+
+/** The query's side-question method, or undefined when this SDK build lacks it. */
+function claudeSideQuestionMethod(
+  runtime: ClaudeQueryRuntime,
+): NonNullable<ClaudeQueryRuntime["askSideQuestion"]> | undefined {
+  const method = runtime.askSideQuestion;
+  return typeof method === "function" ? method.bind(runtime) : undefined;
 }
 
 export interface ClaudeAdapterLiveOptions {
@@ -5660,6 +5680,47 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     yield* Deferred.succeed(pending.answers, answers);
   });
 
+  const askSideQuestion: NonNullable<ClaudeAdapterShape["askSideQuestion"]> = Effect.fn(
+    "askSideQuestion",
+  )(function* (input) {
+    const context = yield* requireSession(input.threadId);
+    const ask = claudeSideQuestionMethod(context.query);
+    if (ask === undefined) {
+      return yield* new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method: "side_question",
+        detail: "This Claude Agent SDK version cannot answer side questions.",
+      });
+    }
+    // Interrupting the effect aborts the control request.
+    const result = yield* Effect.tryPromise({
+      try: (signal) =>
+        ask(input.question, {
+          history: input.history.map((entry) => ({
+            question: entry.question,
+            response: entry.answer,
+          })),
+          signal,
+        }),
+      catch: (cause) =>
+        new ProviderAdapterRequestError({
+          provider: PROVIDER,
+          method: "side_question",
+          detail: toMessage(cause, "Claude could not answer the side question."),
+          cause,
+        }),
+    });
+    const response = result?.response.trim() ?? "";
+    if (response.length === 0) {
+      return yield* new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method: "side_question",
+        detail: "Claude returned an empty answer.",
+      });
+    }
+    return response;
+  });
+
   const stopSession: ClaudeAdapterShape["stopSession"] = Effect.fn("stopSession")(
     function* (threadId) {
       const context = yield* requireSession(threadId);
@@ -5720,6 +5781,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     readSubagentTranscript,
     respondToRequest,
     respondToUserInput,
+    askSideQuestion,
     stopSession,
     listSessions,
     hasSession,

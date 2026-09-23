@@ -1649,6 +1649,78 @@ describe("applyThreadDetailEvent", () => {
     });
   });
 
+  describe("side threads", () => {
+    const sideMessage = (
+      id: string,
+      sideThreadId: string,
+      role: "user" | "assistant" | "error",
+      text: string,
+    ) => ({
+      id: MessageId.make(id),
+      sideThreadId: MessageId.make(sideThreadId),
+      role,
+      text,
+      anchorMessageId: null,
+      createdAt: "2026-04-01T14:00:00.000Z",
+    });
+    const added = (message: ReturnType<typeof sideMessage>, sequence: number) =>
+      ({
+        ...baseEventFields,
+        sequence,
+        occurredAt: "2026-04-01T14:00:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.side-message-added",
+        payload: { threadId: ThreadId.make("thread-1"), message },
+      }) as const;
+    const deleted = (sideThreadId: string, sequence: number) =>
+      ({
+        ...baseEventFields,
+        sequence,
+        occurredAt: "2026-04-01T14:00:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.side-thread-deleted",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          sideThreadId: MessageId.make(sideThreadId),
+        },
+      }) as const;
+    const apply = (
+      thread: OrchestrationThread,
+      event: Parameters<typeof applyThreadDetailEvent>[1],
+    ) => {
+      const result = applyThreadDetailEvent(thread, event);
+      if (result.kind !== "updated") throw new Error(`expected update, got ${result.kind}`);
+      return result.thread;
+    };
+
+    it("appends side messages without touching the conversation or updatedAt", () => {
+      const thread = apply(
+        apply(baseThread, added(sideMessage("q-1", "q-1", "user", "why?"), 1)),
+        added(sideMessage("a-1", "q-1", "assistant", "because"), 2),
+      );
+      expect(thread.sideMessages?.map((message) => message.id)).toEqual(["q-1", "a-1"]);
+      expect(thread.messages).toBe(baseThread.messages);
+      expect(thread.updatedAt).toBe(baseThread.updatedAt);
+    });
+
+    it("dedupes a re-delivered side message by id", () => {
+      const first = apply(baseThread, added(sideMessage("q-1", "q-1", "user", "why?"), 1));
+      const again = apply(first, added(sideMessage("q-1", "q-1", "user", "why?"), 1));
+      expect(again.sideMessages).toHaveLength(1);
+    });
+
+    it("drops every message of a deleted side thread and ignores unknown ones", () => {
+      let thread = apply(baseThread, added(sideMessage("q-1", "q-1", "user", "one"), 1));
+      thread = apply(thread, added(sideMessage("a-1", "q-1", "assistant", "two"), 2));
+      thread = apply(thread, added(sideMessage("q-2", "q-2", "user", "three"), 3));
+      thread = apply(thread, deleted("q-1", 4));
+      expect(thread.sideMessages?.map((message) => message.id)).toEqual(["q-2"]);
+      expect(applyThreadDetailEvent(thread, deleted("q-1", 5)).kind).toBe("unchanged");
+    });
+  });
+
   describe("no-op events", () => {
     it("returns unchanged for approval-response-requested", () => {
       const result = applyThreadDetailEvent(baseThread, {

@@ -16,7 +16,9 @@ import {
 } from "./runtime.ts";
 import {
   type ArchiveThreadInput,
+  type AskThreadSideQuestionInput,
   type CreateThreadInput,
+  type DeleteThreadSideThreadInput,
   type DeleteThreadInput,
   type InterruptThreadTurnInput,
   type LinkThreadPullRequestInput,
@@ -40,8 +42,10 @@ import {
   type UnsnoozeThreadInput,
   type UpdateThreadMetadataInput,
   archiveThread,
+  askThreadSideQuestion,
   createThread,
   deleteThread,
+  deleteThreadSideThread,
   interruptThreadTurn,
   linkThreadPullRequest,
   respondToThreadApproval,
@@ -68,7 +72,9 @@ import type { EnvironmentRegistry } from "../connection/registry.ts";
 
 export type {
   ArchiveThreadInput,
+  AskThreadSideQuestionInput,
   CreateThreadInput,
+  DeleteThreadSideThreadInput,
   DeleteThreadInput,
   InterruptThreadTurnInput,
   LinkThreadPullRequestInput,
@@ -245,6 +251,18 @@ export function createThreadEnvironmentAtoms<R, E>(
     stopSession: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:stop-session",
       execute: (input: StopThreadSessionInput) => stopThreadSession(input),
+      scheduler,
+      concurrency,
+    }),
+    askSideQuestion: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:ask-side-question",
+      execute: (input: AskThreadSideQuestionInput) => askThreadSideQuestion(input),
+      scheduler,
+      concurrency,
+    }),
+    deleteSideThread: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:delete-side-thread",
+      execute: (input: DeleteThreadSideThreadInput) => deleteThreadSideThread(input),
       scheduler,
       concurrency,
     }),

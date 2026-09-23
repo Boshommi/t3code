@@ -22,6 +22,7 @@ import {
   FileDiff,
   Files,
   Globe2,
+  MessagesSquare,
   Plus,
   TerminalSquare,
   Volume2,
@@ -117,6 +118,8 @@ interface RightPanelTabsProps {
   onAddPullRequests: () => void;
   onAddAgents: () => void;
   onAddDevice: () => void;
+  /** Absent where side threads do not apply, such as the pull-request list panel. */
+  onAddSideThreads?: (() => void) | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -125,6 +128,7 @@ interface RightPanelTabsProps {
   pullRequestsAvailable: boolean;
   agentsAvailable: boolean;
   deviceAvailable: boolean;
+  sideThreadsAvailable?: boolean | undefined;
   pullRequestStatusSeeds?: Readonly<Record<string, PullRequestTabStatusSeed>>;
   /** Running + waiting subagents; badges the Agents card in the empty state. */
   liveAgentCount: number;
@@ -156,6 +160,7 @@ const SURFACE_DISABLED_REASONS = {
   pullRequests: "No linked pull requests are available for this thread.",
   agents: "Agents are only available from a thread.",
   device: "Devices are only available from a thread.",
+  sideThreads: "Side threads are available for Claude and Codex threads.",
 } as const;
 
 /** Overlays that must win over the launcher's letter shortcuts. */
@@ -180,6 +185,7 @@ const SURFACE_UNAVAILABLE_HINTS = {
   pullRequests: "No linked pull requests available.",
   agents: "Available from a thread.",
   device: "Available from a thread.",
+  sideThreads: "Available for Claude and Codex threads.",
 } as const;
 
 type TabContextMenuAction =
@@ -192,6 +198,8 @@ type TabContextMenuAction =
   | "close-all";
 
 const TAB_SCROLL_EDGE_TOLERANCE = 1;
+
+const NOOP = () => {};
 
 function tabScrollViewport(root: HTMLDivElement | null): HTMLDivElement | null {
   return root?.querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]') ?? null;
@@ -320,6 +328,7 @@ function RightPanelEmptyState(props: {
   onAddPullRequests: () => void;
   onAddAgents: () => void;
   onAddDevice: () => void;
+  onAddSideThreads: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -328,6 +337,7 @@ function RightPanelEmptyState(props: {
   pullRequestsAvailable: boolean;
   agentsAvailable: boolean;
   deviceAvailable: boolean;
+  sideThreadsAvailable: boolean;
   liveAgentCount: number;
 }) {
   // -1 means no highlight: it only appears on hover or arrow use.
@@ -396,6 +406,15 @@ function RightPanelEmptyState(props: {
       disabledReason: SURFACE_UNAVAILABLE_HINTS.agents,
       onClick: props.onAddAgents,
       badgeCount: props.liveAgentCount,
+    },
+    {
+      label: "Side threads",
+      icon: MessagesSquare,
+      shortcut: "S",
+      available: props.sideThreadsAvailable,
+      disabledReason: SURFACE_UNAVAILABLE_HINTS.sideThreads,
+      onClick: props.onAddSideThreads,
+      badgeCount: 0,
     },
     {
       label: "Device",
@@ -629,6 +648,8 @@ function surfaceTitle(
       return "Pull requests";
     case "agents":
       return "Agents";
+    case "side-threads":
+      return "Side threads";
     case "device":
       return surface.title ?? surface.target?.name ?? "Device";
     case "preview": {
@@ -714,6 +735,8 @@ function SurfaceIcon({
       return <PullRequestGlyph.link className="size-3 shrink-0" />;
     case "agents":
       return <Bot className="size-3 shrink-0" />;
+    case "side-threads":
+      return <MessagesSquare className="size-3 shrink-0" />;
     case "device":
       return surface.target?.platform === "ios" ? (
         <AppleIcon className="size-3 shrink-0" />
@@ -916,6 +939,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       available: props.agentsAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.agents,
       onClick: props.onAddAgents,
+    },
+    {
+      label: "Side threads",
+      icon: MessagesSquare,
+      shortcut: "S",
+      available: props.sideThreadsAvailable === true && props.onAddSideThreads !== undefined,
+      disabledReason: SURFACE_DISABLED_REASONS.sideThreads,
+      onClick: props.onAddSideThreads ?? NOOP,
     },
     {
       label: "Device",
@@ -1397,6 +1428,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddPullRequests={props.onAddPullRequests}
             onAddAgents={props.onAddAgents}
             onAddDevice={props.onAddDevice}
+            onAddSideThreads={props.onAddSideThreads ?? NOOP}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}
@@ -1405,6 +1437,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             pullRequestsAvailable={props.pullRequestsAvailable}
             agentsAvailable={props.agentsAvailable}
             deviceAvailable={props.deviceAvailable}
+            sideThreadsAvailable={
+              props.sideThreadsAvailable === true && props.onAddSideThreads !== undefined
+            }
             liveAgentCount={props.liveAgentCount}
           />
         ) : (

@@ -10,7 +10,7 @@ import {
 } from "./composer-editor-mentions";
 
 export type ComposerTriggerKind = "path" | "pull-request" | "slash-command" | "skill";
-export type ComposerSlashCommand = "model" | "plan" | "default";
+export type ComposerSlashCommand = "model" | "plan" | "default" | "btw";
 export type ComposerSubmissionIntent = "foreground" | "background" | "alternate";
 
 export interface ComposerTrigger {
@@ -264,9 +264,7 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
   };
 }
 
-export function parseStandaloneComposerSlashCommand(
-  text: string,
-): Exclude<ComposerSlashCommand, "model"> | null {
+export function parseStandaloneComposerSlashCommand(text: string): "plan" | "default" | null {
   const match = /^\/(plan|default)\s*$/i.exec(text.trim());
   if (!match) {
     return null;
@@ -274,6 +272,15 @@ export function parseStandaloneComposerSlashCommand(
   const command = match[1]?.toLowerCase();
   if (command === "plan") return "plan";
   return "default";
+}
+
+/**
+ * The question of a `/btw` side question, `""` for a bare `/btw` (which opens
+ * the side threads), or null when the text is not a `/btw` command.
+ */
+export function parseSideQuestionCommand(text: string): string | null {
+  const match = /^\/btw(?:\s+([\s\S]*))?$/i.exec(text.trim());
+  return match ? (match[1] ?? "").trim() : null;
 }
 
 export function replaceTextRange(

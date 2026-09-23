@@ -9,6 +9,7 @@ import {
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
+  type OrchestrationSideMessage,
   type OrchestrationThread,
   type ThreadPullRequestKey,
   type ThreadPullRequestLink,
@@ -136,6 +137,13 @@ function findPullRequestLink(
   key: ThreadPullRequestKey,
 ): ThreadPullRequestLink | undefined {
   return thread.pullRequests.find((link) => threadPullRequestKeysEqual(link, key));
+}
+
+function sideThreadMessages(
+  thread: Pick<OrchestrationThread, "sideMessages">,
+  sideThreadId: MessageId,
+): ReadonlyArray<OrchestrationSideMessage> {
+  return (thread.sideMessages ?? []).filter((message) => message.sideThreadId === sideThreadId);
 }
 
 function withEventBase(
@@ -2196,6 +2204,127 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         },
       };
       return [unsettledEvent, activityAppendedEvent];
+    }
+
+    // Side threads never touch the thread's turn, settlement, or updatedAt:
+    // asking about a thread must not change its lifecycle.
+    case "thread.side-question.ask": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      if (thread.deletedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' is deleted.`,
+        });
+      }
+      if ((thread.sideMessages ?? []).some((message) => message.id === command.messageId)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Side message '${command.messageId}' already exists.`,
+        });
+      }
+      // A side thread's id is its first question's id, so the check above also
+      // rejects starting a side thread twice.
+      const sideThread = sideThreadMessages(thread, command.sideThreadId);
+      if (command.sideThreadId !== command.messageId && sideThread.length === 0) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Side thread '${command.sideThreadId}' does not exist.`,
+        });
+      }
+      if (sideThread.at(-1)?.role === "user") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Side thread '${command.sideThreadId}' is still waiting for an answer.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.side-message-added",
+        payload: {
+          threadId: command.threadId,
+          message: {
+            id: command.messageId,
+            sideThreadId: command.sideThreadId,
+            role: "user",
+            text: command.text,
+            // Follow-ups stay anchored where the side thread started.
+            anchorMessageId: sideThread[0]?.anchorMessageId ?? command.anchorMessageId,
+            createdAt: command.createdAt,
+          },
+        },
+      };
+    }
+
+    case "thread.side-thread.delete": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      if (sideThreadMessages(thread, command.sideThreadId).length === 0) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Side thread '${command.sideThreadId}' does not exist.`,
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.side-thread-deleted",
+        payload: {
+          threadId: command.threadId,
+          sideThreadId: command.sideThreadId,
+        },
+      };
+    }
+
+    case "thread.side-answer.complete": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const sideThread = sideThreadMessages(thread, command.sideThreadId);
+      // The side thread or its thread can be deleted, or the question already
+      // answered, while the provider was answering. Like other late internal
+      // completions, the answer lands as a no-op instead of a rejection.
+      const current = thread.deletedAt === null && sideThread.at(-1)?.role === "user";
+      if (!current) {
+        return {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: yield* nowIso,
+            commandId: command.commandId,
+          })),
+          type: "thread.meta-updated",
+          payload: {
+            threadId: command.threadId,
+            updatedAt: thread.updatedAt,
+          },
+        };
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.side-message-added",
+        payload: {
+          threadId: command.threadId,
+          message: {
+            id: command.messageId,
+            sideThreadId: command.sideThreadId,
+            role: command.role,
+            text: command.text,
+            anchorMessageId: sideThread[0]?.anchorMessageId ?? null,
+            createdAt: command.createdAt,
+          },
+        },
+      };
     }
 
     default: {

@@ -42,6 +42,7 @@ import {
   ProviderDriverKind,
   resolveEnvironmentMachineKind,
   RuntimeMode,
+  SIDE_QUESTION_MAX_CHARS,
   TerminalOpenInput,
   type WorktreeSetupSnapshot,
 } from "@t3tools/contracts";
@@ -117,6 +118,7 @@ import { useDiffPanelStore } from "../diffPanelStore";
 import {
   collapseExpandedComposerCursor,
   type ComposerSubmissionIntent,
+  parseSideQuestionCommand,
   parseStandaloneComposerSlashCommand,
 } from "../composer-logic";
 import {
@@ -212,6 +214,9 @@ import { PullRequestDetailGhost } from "./pullRequest/PullRequestGhosts";
 import { PullRequestsUnavailableState } from "./pullRequest/PullRequestsUnavailableState";
 import { RightPanelTabs } from "./RightPanelTabs";
 import { AgentsPanel } from "./AgentsPanel";
+import { SideThreadsPanel, type SideQuestionInput } from "./SideThreadsPanel";
+import { type SideThreadPanelView, useSideThreadPanelStore } from "../sideThreadPanelStore";
+import { groupSideThreads, sideThreadsByAnchor } from "@t3tools/client-runtime/state/side-threads";
 import { LinkPullRequestDialogHost } from "./pullRequest/LinkPullRequestDialog";
 import { ThreadPullRequestsPanel } from "./pullRequest/ThreadPullRequestsPanel";
 import { useDeviceState } from "~/state/device";
@@ -371,7 +376,7 @@ import { createPageScrollController, type PageScrollKey } from "./chat/pageScrol
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
-import { MessagesTimeline } from "./chat/MessagesTimeline";
+import { MessagesTimeline, type TimelineSideThreadsState } from "./chat/MessagesTimeline";
 import type { AssistantCitationRequest } from "./chat/AssistantCitationSource";
 import { resolveTimelineIsAtEnd, worktreeSetupAgentStarted } from "./chat/MessagesTimeline.logic";
 import { resolveComposerTimelineInset, resolveScrollToEndClearance } from "./composerFooterLayout";
@@ -2912,6 +2917,106 @@ export default function ChatView(props: ChatViewProps) {
         agents: foldSubagentActivities(threadActivities, { sessionLive: agentSessionLive }),
       }),
     [agentSessionLive, threadActivities],
+  );
+  // Side threads (`/btw`): gated on the provider that owns the conversation.
+  // Existing side threads stay readable after a switch to one that cannot answer.
+  const supportsSideQuestions =
+    isServerThread && conversationProviderStatus?.supportsSideQuestions === true;
+  const activeSideMessages = activeThread?.sideMessages;
+  const sideThreads = useMemo(() => groupSideThreads(activeSideMessages), [activeSideMessages]);
+  const sideThreadsByAnchorMessage = useMemo(() => sideThreadsByAnchor(sideThreads), [sideThreads]);
+  const sideThreadsAvailable = supportsSideQuestions || sideThreads.length > 0;
+  const activeThreadMessages = activeThread?.messages;
+  // /btw and the panel's "New" anchor to the newest conversation message.
+  const latestSideAnchorMessageId = useMemo(() => {
+    if (!activeThreadMessages) return null;
+    for (let index = activeThreadMessages.length - 1; index >= 0; index -= 1) {
+      const message = activeThreadMessages[index]!;
+      if (message.role === "user" || message.role === "assistant") return message.id;
+    }
+    return null;
+  }, [activeThreadMessages]);
+  const openSideThreads = useCallback(
+    (view: SideThreadPanelView) => {
+      if (!activeThreadRef) return;
+      useSideThreadPanelStore.getState().setView(scopedThreadKey(activeThreadRef), view);
+      useRightPanelStore.getState().open(activeThreadRef, "side-threads");
+    },
+    [activeThreadRef],
+  );
+  const addSideThreadsSurface = useCallback(() => {
+    if (!activeThreadRef) return;
+    useRightPanelStore.getState().open(activeThreadRef, "side-threads");
+  }, [activeThreadRef]);
+  const askThreadSideQuestion = useAtomCommand(threadEnvironment.askSideQuestion, {
+    reportFailure: false,
+  });
+  const deleteThreadSideThread = useAtomCommand(threadEnvironment.deleteSideThread, {
+    reportFailure: false,
+  });
+  const askSideQuestion = useCallback(
+    async (input: SideQuestionInput) => {
+      if (!activeThreadRef) return false;
+      const result = await askThreadSideQuestion({
+        environmentId: activeThreadRef.environmentId,
+        input: { threadId: activeThreadRef.threadId, ...input },
+      });
+      if (result._tag === "Success") return true;
+      if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not ask the side question",
+            description: error instanceof Error ? error.message : "Try again in a moment.",
+          }),
+        );
+      }
+      return false;
+    },
+    [activeThreadRef, askThreadSideQuestion],
+  );
+  const deleteSideThread = useCallback(
+    async (sideThreadId: MessageId) => {
+      if (!activeThreadRef) return false;
+      const result = await deleteThreadSideThread({
+        environmentId: activeThreadRef.environmentId,
+        input: { threadId: activeThreadRef.threadId, sideThreadId },
+      });
+      if (result._tag === "Success") return true;
+      if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not delete the side thread",
+            description: error instanceof Error ? error.message : "Try again in a moment.",
+          }),
+        );
+      }
+      return false;
+    },
+    [activeThreadRef, deleteThreadSideThread],
+  );
+  const sideThreadsTimelineState = useMemo<TimelineSideThreadsState | null>(
+    () =>
+      sideThreadsAvailable
+        ? {
+            byAnchor: sideThreadsByAnchorMessage,
+            onReply: supportsSideQuestions
+              ? (messageId) => openSideThreads({ kind: "compose", anchorMessageId: messageId })
+              : null,
+            onOpen: (anchorMessageId) => {
+              const anchored = sideThreadsByAnchorMessage.get(anchorMessageId);
+              openSideThreads(
+                anchored?.length === 1
+                  ? { kind: "thread", sideThreadId: anchored[0]!.id }
+                  : { kind: "list", anchorMessageId },
+              );
+            },
+          }
+        : null,
+    [openSideThreads, sideThreadsAvailable, sideThreadsByAnchorMessage, supportsSideQuestions],
   );
   const { approvals: pendingApprovals, userInputs: pendingUserInputs } = useMemo(
     () => derivePendingRequests(threadActivities),
@@ -7316,6 +7421,51 @@ export default function ChatView(props: ChatViewProps) {
       }
       return;
     }
+    // `/btw` never reaches the conversation, so it skips the queue and steer
+    // paths below and works while a turn is running.
+    const sideQuestion =
+      supportsSideQuestions && !directAnnotation && !queuedMessage && !composerHasNonPromptContent
+        ? parseSideQuestionCommand(promptRef.current)
+        : null;
+    if (sideQuestion !== null) {
+      if (sideQuestion.length > SIDE_QUESTION_MAX_CHARS) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: "Side question too long",
+            description: `Keep side questions under ${SIDE_QUESTION_MAX_CHARS.toLocaleString()} characters.`,
+          }),
+        );
+        return;
+      }
+      const sidePrompt = promptRef.current;
+      promptRef.current = "";
+      setComposerDraftPrompt(composerDraftTarget, "");
+      composerRef.current?.resetCursorState();
+      if (sideQuestion.length === 0) {
+        openSideThreads({ kind: "list" });
+        return;
+      }
+      const messageId = newMessageId();
+      openSideThreads({ kind: "thread", sideThreadId: messageId, pendingQuestion: sideQuestion });
+      const sent = await askSideQuestion({
+        sideThreadId: messageId,
+        messageId,
+        text: sideQuestion,
+        anchorMessageId: latestSideAnchorMessageId,
+      });
+      if (!sent) {
+        if (activeThreadKey) {
+          useSideThreadPanelStore.getState().setView(activeThreadKey, { kind: "list" });
+        }
+        // Give the question back unless the user already started a new draft.
+        if (promptRef.current === "") {
+          promptRef.current = sidePrompt;
+          setComposerDraftPrompt(composerDraftTarget, sidePrompt);
+        }
+      }
+      return;
+    }
 
     const notifyDirectAnnotationAttached = () => {
       if (!directAnnotation) return;
@@ -9425,6 +9575,19 @@ export default function ChatView(props: ChatViewProps) {
         threadId={activeThreadRef?.threadId ?? null}
         providerDriver={activeThread?.session?.providerName ?? null}
       />
+    ) : renderedRightPanelSurface?.kind === "side-threads" && activeThreadKey ? (
+      <SideThreadsPanel
+        threadKey={activeThreadKey}
+        threadRef={activeThreadRef}
+        sideThreads={sideThreads}
+        messages={activeThread.messages}
+        latestMessageId={latestSideAnchorMessageId}
+        canAsk={supportsSideQuestions}
+        markdownCwd={gitCwd ?? undefined}
+        timestampFormat={timestampFormat}
+        onAsk={askSideQuestion}
+        onDelete={deleteSideThread}
+      />
     ) : renderedRightPanelSurface?.kind === "device" ? (
       <Suspense fallback={null}>
         <DevicePanel
@@ -9710,6 +9873,7 @@ export default function ChatView(props: ChatViewProps) {
                 )}
                 onRemoveQueuedMessage={onRemoveQueuedMessage}
                 findReveal={paintOnlyDisplayedTimeline ? null : chatFind.reveal}
+                sideThreads={paintOnlyDisplayedTimeline ? null : sideThreadsTimelineState}
               />
 
               {/* scroll to end pill — shown when user has scrolled away from the live edge */}
@@ -9856,6 +10020,7 @@ export default function ChatView(props: ChatViewProps) {
                             activeThreadModelSelection={activeThread?.modelSelection}
                             activeContextWindow={activeContextWindow}
                             compactThreadUnavailable={compactThreadUnavailable}
+                            sideQuestionsAvailable={supportsSideQuestions}
                             compactDisabled={compactDisabled}
                             compactDisabledReason={compactDisabledReason}
                             resolvedTheme={resolvedTheme}
@@ -10086,6 +10251,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddPullRequests={addPullRequestsSurface}
           onAddAgents={addAgentsSurface}
           onAddDevice={addDeviceSurface}
+          onAddSideThreads={addSideThreadsSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
           terminalAvailable={activeProject !== null}
           diffAvailable={isServerThread && isGitRepo}
@@ -10094,6 +10260,7 @@ export default function ChatView(props: ChatViewProps) {
           pullRequestsAvailable={pullRequestsSurfaceAvailable}
           agentsAvailable
           deviceAvailable={activeThreadRef !== null}
+          sideThreadsAvailable={sideThreadsAvailable}
           liveAgentCount={agentPanelModel.liveCount}
         >
           {rightPanelContent}
@@ -10144,6 +10311,7 @@ export default function ChatView(props: ChatViewProps) {
             onAddPullRequests={addPullRequestsSurface}
             onAddAgents={addAgentsSurface}
             onAddDevice={addDeviceSurface}
+            onAddSideThreads={addSideThreadsSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
             terminalAvailable={activeProject !== null}
             diffAvailable={isServerThread && isGitRepo}
@@ -10152,6 +10320,7 @@ export default function ChatView(props: ChatViewProps) {
             pullRequestsAvailable={pullRequestsSurfaceAvailable}
             agentsAvailable
             deviceAvailable={activeThreadRef !== null}
+            sideThreadsAvailable={sideThreadsAvailable}
             liveAgentCount={agentPanelModel.liveCount}
           >
             {rightPanelContent}
