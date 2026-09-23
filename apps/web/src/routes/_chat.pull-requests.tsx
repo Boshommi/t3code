@@ -156,6 +156,7 @@ function getShortcutContext() {
     terminalOpen: false,
     previewFocus: false,
     previewOpen: false,
+    rightPanelOpen: true,
     modelPickerOpen: false,
   };
 }

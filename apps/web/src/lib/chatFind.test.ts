@@ -74,11 +74,11 @@ describe("chatFind", () => {
     const documents = collectChatFindDocuments([
       userMessage(
         "user-1",
-        "Look at this\n<terminal_context>\n- term-1:\nsecret token\n</terminal_context>",
+        "Look at this\n<terminal_context>\n- Terminal line 1:\n  secret token\n</terminal_context>",
       ),
     ]);
 
-    expect(documents[0]?.text).toBe("Look at this");
+    expect(documents[0]?.text).toBe("Look at this\n\nTerminal line 1");
     expect(findChatFindMatches(documents, "secret")).toEqual([]);
     expect(findChatFindMatches(documents, "look")).toHaveLength(1);
   });
