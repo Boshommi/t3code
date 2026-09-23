@@ -154,7 +154,7 @@ describe("resolveClaudeWorkflowMemberAgentId", () => {
     const writeAgent = Effect.fn(function* (agentId: string, label: string, modifiedAt: number) {
       yield* fileSystem.writeFileString(
         path.join(runDir, `agent-${agentId}.meta.json`),
-        JSON.stringify({ agentType: "workflow-subagent", description: label }),
+        `{"agentType":"workflow-subagent","description":"${label}"}`,
       );
       const transcript = path.join(runDir, `agent-${agentId}.jsonl`);
       yield* fileSystem.writeFileString(transcript, "");
