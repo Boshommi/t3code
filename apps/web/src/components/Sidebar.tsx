@@ -5279,6 +5279,18 @@ export default function Sidebar() {
                   const rows: ReactNode[] = group.cards.map(({ thread, section }) =>
                     renderThreadRowInner(thread, section),
                   );
+                  if (group.expanded && rows.length === 0) {
+                    rows.push(
+                      <li
+                        key="empty"
+                        className="list-none px-2.5 py-1.5 text-xs text-sidebar-muted-foreground/55"
+                      >
+                        {group.snoozed.count + group.settled.count > 0
+                          ? "No active threads"
+                          : "No threads yet"}
+                      </li>,
+                    );
+                  }
                   if (group.expanded && group.snoozed.count > 0) {
                     rows.push(
                       <li
@@ -5336,16 +5348,6 @@ export default function Sidebar() {
                           <PlusIcon aria-hidden className="size-3.5 shrink-0" />
                           Show {Math.min(group.settled.hiddenCount, SETTLED_TAIL_PAGE_COUNT)} more
                         </button>
-                      </li>,
-                    );
-                  }
-                  if (group.expanded && rows.length === 0) {
-                    rows.push(
-                      <li
-                        key="empty"
-                        className="list-none px-2.5 py-1.5 text-xs text-sidebar-muted-foreground/55"
-                      >
-                        No threads yet
                       </li>,
                     );
                   }
