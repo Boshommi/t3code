@@ -8,6 +8,7 @@ import {
   forwardPort,
   openPortForwardsDialog,
   stopPortForward,
+  useCanForwardPorts,
   useEnvironmentPortForwards,
   usePortForwardsDialogStore,
 } from "~/browser/portForwards";
@@ -245,6 +246,50 @@ export function PortForwardsChip({ environmentId }: { readonly environmentId: En
         <span className="truncate">{ports}</span>
       </TooltipTrigger>
       <TooltipPopup>Forwarded to localhost on this computer</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+/**
+ * Thread-header entry to the remote's forwarded ports, so they are reachable
+ * without opening the preview. Hidden where nothing can be forwarded.
+ */
+export function PortForwardsHeaderControl({
+  environmentId,
+}: {
+  readonly environmentId: EnvironmentId;
+}) {
+  const canForward = useCanForwardPorts(environmentId);
+  const forwards = useEnvironmentPortForwards(environmentId);
+  if (!canForward) return null;
+  const ports = forwards
+    .map((forward) => forward.remotePort)
+    .toSorted((left, right) => left - right)
+    .join(", ");
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            size="xs"
+            variant="outline"
+            className="w-7 px-0 sm:w-6 @3xl/header-actions:w-auto! @3xl/header-actions:px-[calc(--spacing(2)-1px)]"
+            aria-label={ports ? `Forwarded ports: ${ports}` : "Forward ports"}
+            // The tooltip wrapper replaces data-slot="button", so themed
+            // toolbar styling needs its own hook.
+            data-toolbar-control=""
+            onClick={() => openPortForwardsDialog(environmentId)}
+          />
+        }
+      >
+        <ArrowLeftRight />
+        <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
+          {forwards.length > 0 ? `Ports ${String(forwards.length)}` : "Ports"}
+        </span>
+      </TooltipTrigger>
+      <TooltipPopup side="top">
+        {ports ? `Forwarded to this computer: ${ports}` : "Forward ports to this computer"}
+      </TooltipPopup>
     </Tooltip>
   );
 }
