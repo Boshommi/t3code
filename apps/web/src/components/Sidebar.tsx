@@ -1705,13 +1705,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             {pinIndicator}
             {terminalStatusIcon}
             {prBadge}
+            {/* Give hover actions their own width so they cannot cover the PR badge or title. */}
             <span className="relative flex h-6 min-w-7 shrink-0 items-center justify-end text-xs tabular-nums text-secondary-label">
               <span
                 className={cn(
                   "transition-opacity",
                   hasHoverActions &&
-                    "group-hover/sidebar-row:opacity-0 group-has-[:focus-visible]/sidebar-row:opacity-0",
-                  snoozeMenuOpen && "opacity-0",
+                    "group-hover/sidebar-row:absolute group-hover/sidebar-row:right-0 group-hover/sidebar-row:opacity-0 group-has-[:focus-visible]/sidebar-row:absolute group-has-[:focus-visible]/sidebar-row:right-0 group-has-[:focus-visible]/sidebar-row:opacity-0",
+                  snoozeMenuOpen && "absolute right-0 opacity-0",
                 )}
               >
                 {restingLabel}
@@ -1719,8 +1720,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               {hasHoverActions ? (
                 <span
                   className={cn(
-                    "pointer-events-none absolute inset-y-0 right-0 -mr-1 flex items-stretch opacity-0 transition-opacity has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100",
-                    snoozeMenuOpen && "pointer-events-auto opacity-100",
+                    "pointer-events-none absolute inset-y-0 right-0 -mr-1 flex items-stretch opacity-0 transition-opacity has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:static has-[:focus-visible]:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:static group-hover/sidebar-row:opacity-100",
+                    snoozeMenuOpen && "pointer-events-auto static opacity-100",
                   )}
                 >
                   {variantAction === "unsnooze" ? (
