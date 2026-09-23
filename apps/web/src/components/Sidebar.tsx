@@ -5063,7 +5063,7 @@ export default function Sidebar() {
                     {scopedProjectGroups && scopedProjectGroups.length > 1 ? (
                       <span
                         aria-hidden
-                        className="absolute -right-0.5 -bottom-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] font-semibold leading-none text-primary-foreground tabular-nums"
+                        className="absolute -right-0.5 -bottom-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] font-semibold leading-none text-primary-foreground tabular-nums ring-2 ring-sidebar"
                       >
                         {scopedProjectGroups.length}
                       </span>
