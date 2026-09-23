@@ -183,7 +183,6 @@ import {
   resolveWorkingStartedAt,
   sidebarListItemId,
   sidebarMarkerId,
-  sortLogicalProjectsForSidebar,
   sortPinnedThreadsForSidebar,
   sortSettledThreadsForSidebar,
   sortThreadsForSidebar,
@@ -990,7 +989,9 @@ const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
 
 const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   thread: SidebarThreadSummary;
-  variant: "card" | "slim";
+  // Compact rows are the grouped sidebar's one-liners: the project header
+  // already names the project, and details live in the hover tooltip.
+  variant: "card" | "slim" | "compact";
   // Slim rows are either settled (action: un-settle) or merely quiet
   // (seen Ready threads — action: settle).
   variantAction: "settle" | "unsettle" | "unsnooze";
@@ -1492,7 +1493,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       className={cn(
         "min-w-0 flex-1 text-sm transition-opacity motion-reduce:transition-none",
         shouldRecede ? "font-normal" : "font-medium",
-        variant === "card"
+        variant === "card" || (variant === "compact" && variantAction === "settle")
           ? cn(
               "truncate",
               shouldRecede
@@ -1597,6 +1598,183 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       />
     )
   ) : null;
+
+  if (variant === "compact") {
+    const hoverActionClassName =
+      "inline-flex h-full cursor-pointer items-center rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground";
+    const statusGlyph = topStatus
+      ? topStatus.icon === "working"
+        ? CircleDashedIcon
+        : topStatus.icon === "input"
+          ? MessageCircleQuestionIcon
+          : topStatus.icon === "approval"
+            ? ShieldQuestionIcon
+            : topStatus.icon === "failed"
+              ? CircleAlertIcon
+              : topStatus.icon === "monitoring"
+                ? EyeIcon
+                : topStatus.icon === "woke"
+                  ? AlarmClockIcon
+                  : CircleCheckIcon
+      : null;
+    const StatusGlyph = statusGlyph;
+    // A fixed leading slot keeps every title on one edge whether or not the
+    // row has a status; the label itself lives in the tooltip and aria text.
+    const leading = hasUnsentDraft ? (
+      draftIndicator
+    ) : StatusGlyph && topStatus ? (
+      isWokeStatus ? (
+        <button
+          type="button"
+          aria-label="Dismiss Woke notification"
+          onClick={handleAcknowledgeWokeClick}
+          className={cn("inline-flex shrink-0 cursor-pointer", topStatus.className)}
+        >
+          <AlarmClockIcon aria-hidden className="size-3.5" />
+        </button>
+      ) : (
+        <span
+          role="img"
+          aria-label={topStatus.label}
+          className={cn("shrink-0", topStatus.className)}
+        >
+          <StatusGlyph aria-hidden className="size-3.5" />
+        </span>
+      )
+    ) : (
+      <span aria-hidden className="flex size-3.5 shrink-0 items-center justify-center">
+        <span className="size-1 rounded-full bg-sidebar-muted-foreground/35" />
+      </span>
+    );
+    const restingLabel =
+      variantAction === "unsnooze" && props.snoozeWakeLabelText !== null ? (
+        <span className="text-blue-600 dark:text-blue-400">{props.snoozeWakeLabelText}</span>
+      ) : status === "working" && variantAction === "settle" ? (
+        <span className="text-sky-600 dark:text-sky-400">
+          <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
+        </span>
+      ) : variantAction === "unsettle" ? (
+        settledTimeLabel(thread)
+      ) : (
+        threadTimeLabel(thread)
+      );
+    const hasHoverActions =
+      variantAction === "unsnooze"
+        ? props.snoozeSupported
+        : variantAction === "unsettle"
+          ? props.settlementSupported
+          : props.settlementSupported || showSnoozeButton || hasUnsentDraft;
+    return (
+      <li
+        data-thread-item
+        {...(fileDropHandlers ?? {})}
+        className="list-none [content-visibility:auto] [contain-intrinsic-size:auto_32px]"
+      >
+        <Tooltip disabled={snoozeMenuOpen}>
+          <TooltipTrigger
+            render={
+              <div
+                ref={rowRef}
+                role="button"
+                tabIndex={0}
+                data-testid="sidebar-row-compact"
+                aria-busy={isRegeneratingTitle || undefined}
+                className={cn(rowSurfaceClassName, "flex h-8 items-center gap-2 ps-2.5 pe-2")}
+                onClick={handleClick}
+                onDoubleClick={handleDoubleClick}
+                onKeyDown={handleKeyDown}
+                onContextMenu={handleContextMenu}
+              />
+            }
+          >
+            {leading}
+            {title}
+            {isRegeneratingTitle ? (
+              <span role="status" className="sr-only">
+                Regenerating title
+              </span>
+            ) : null}
+            {pinIndicator}
+            {terminalStatusIcon}
+            {prBadge}
+            <span className="relative flex h-6 min-w-7 shrink-0 items-center justify-end text-xs tabular-nums text-secondary-label">
+              <span
+                className={cn(
+                  "transition-opacity",
+                  hasHoverActions &&
+                    "group-hover/sidebar-row:opacity-0 group-has-[:focus-visible]/sidebar-row:opacity-0",
+                  snoozeMenuOpen && "opacity-0",
+                )}
+              >
+                {restingLabel}
+              </span>
+              {hasHoverActions ? (
+                <span
+                  className={cn(
+                    "pointer-events-none absolute inset-y-0 right-0 -mr-1 flex items-stretch opacity-0 transition-opacity has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100",
+                    snoozeMenuOpen && "pointer-events-auto opacity-100",
+                  )}
+                >
+                  {variantAction === "unsnooze" ? (
+                    <button
+                      type="button"
+                      aria-label="Wake thread now"
+                      onClick={handleUnsnoozeClick}
+                      className={hoverActionClassName}
+                    >
+                      <AlarmClockOffIcon className="size-3.5" />
+                    </button>
+                  ) : variantAction === "unsettle" ? (
+                    <button
+                      type="button"
+                      aria-label="Un-settle thread"
+                      onClick={handleUnsettleClick}
+                      className={hoverActionClassName}
+                    >
+                      <Undo2Icon className="size-3.5" />
+                    </button>
+                  ) : (
+                    <>
+                      {hasUnsentDraft ? (
+                        <button
+                          type="button"
+                          aria-label="Discard draft"
+                          onClick={handleDiscardDraftClick}
+                          className={hoverActionClassName}
+                        >
+                          <XIcon className="size-3.5" />
+                        </button>
+                      ) : null}
+                      {showSnoozeButton ? (
+                        <SnoozePopoverButton
+                          open={snoozeMenuOpen}
+                          onOpenChange={setSnoozeMenuOpen}
+                          onSnooze={handleSnoozePreset}
+                          timestampFormat={props.timestampFormat}
+                        />
+                      ) : null}
+                      {props.settlementSupported ? (
+                        <button
+                          type="button"
+                          aria-label="Settle thread"
+                          onClick={handleSettleClick}
+                          className={hoverActionClassName}
+                        >
+                          <CheckIcon className="size-3.5" />
+                        </button>
+                      ) : null}
+                    </>
+                  )}
+                </span>
+              ) : null}
+            </span>
+            {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
+          </TooltipTrigger>
+          {detailsTooltip}
+        </Tooltip>
+      </li>
+    );
+  }
 
   if (variant === "slim") {
     return (
@@ -2175,7 +2353,6 @@ export default function Sidebar() {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
-  const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const {
@@ -2321,27 +2498,21 @@ export default function Sidebar() {
       }),
     [projectOrder, projects],
   );
-  const unsortedProjectGroups = useMemo(
+  // Always the saved manual order (catalog order for projects never moved):
+  // activity-sorted projects jump around as threads update, which makes a
+  // grouped list and the scope picker impossible to scan by position.
+  const projectGroups = useMemo(
     () =>
       buildSidebarProjectSnapshots({
-        projects: sidebarProjectSortOrder === "manual" ? orderedProjects : projects,
+        projects: orderedProjects,
         settings: projectGroupingSettings,
         primaryEnvironmentId,
         resolveEnvironmentLabel: (environmentId) => environmentLabelById.get(environmentId) ?? null,
       }),
-    [
-      environmentLabelById,
-      orderedProjects,
-      primaryEnvironmentId,
-      projectGroupingSettings,
-      projects,
-      sidebarProjectSortOrder,
-    ],
+    [environmentLabelById, orderedProjects, primaryEnvironmentId, projectGroupingSettings],
   );
-  const projectGroups = useMemo(
-    () => sortLogicalProjectsForSidebar(unsortedProjectGroups, threads, sidebarProjectSortOrder),
-    [sidebarProjectSortOrder, threads, unsortedProjectGroups],
-  );
+  const orderedProjectsRef = useRef(orderedProjects);
+  orderedProjectsRef.current = orderedProjects;
   const projectGroupsRef = useRef(projectGroups);
   projectGroupsRef.current = projectGroups;
   const serverConfigs = useAtomValue(environmentServerConfigsAtom);
@@ -2388,8 +2559,9 @@ export default function Sidebar() {
   // The selection lives in the persisted UI store next to the other sidebar
   // project preferences, so routes that unmount the sidebar (Settings) and
   // app restarts keep it.
-  const projectScopeKey = useUiStateStore((store) => store.sidebarProjectScopeKey);
-  const setProjectScopeKey = useUiStateStore((store) => store.setSidebarProjectScopeKey);
+  const projectScopeKeys = useUiStateStore((store) => store.sidebarProjectScopeKeys);
+  const setProjectScopeKeys = useUiStateStore((store) => store.setSidebarProjectScopeKeys);
+  const reorderProjects = useUiStateStore((store) => store.reorderProjects);
   const groupByProject = useUiStateStore((store) => store.sidebarGroupByProject);
   const setGroupByProject = useUiStateStore((store) => store.setSidebarGroupByProject);
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
@@ -2421,11 +2593,12 @@ export default function Sidebar() {
     () => new Map(projectGroups.map((project) => [project.projectKey, project] as const)),
     [projectGroups],
   );
-  const selectedProjectScopeItem = useMemo(
+  const selectedProjectScopeItems = useMemo(
     () =>
-      projectScopeItems.find((item) => item.value === (projectScopeKey ?? "all")) ??
-      projectScopeItems[0]!,
-    [projectScopeItems, projectScopeKey],
+      projectScopeItems.filter(
+        (item) => item.value !== "all" && projectScopeKeys.includes(item.value),
+      ),
+    [projectScopeItems, projectScopeKeys],
   );
   const [projectScopeMenuState, dispatchProjectScopeMenu] = useReducer(
     reduceSidebarProjectScopeMenuState,
@@ -2448,33 +2621,36 @@ export default function Sidebar() {
       }),
     [projectScopeFilter, projectScopeItems, projectScopeMenuState.query],
   );
-  const scopedProjectGroup = useMemo(
-    () =>
-      projectScopeKey === null
-        ? null
-        : (projectGroups.find((project) => project.projectKey === projectScopeKey) ?? null),
-    [projectGroups, projectScopeKey],
-  );
+  // Selected projects in list order, or null for all projects. A scope whose
+  // projects haven't loaded yet shows everything rather than an empty list.
+  const scopedProjectGroups = useMemo(() => {
+    if (projectScopeKeys.length === 0) return null;
+    const scoped = projectGroups.filter((project) => projectScopeKeys.includes(project.projectKey));
+    return scoped.length === 0 ? null : scoped;
+  }, [projectGroups, projectScopeKeys]);
   const scopedProjectKeys = useMemo(
     () =>
-      scopedProjectGroup === null
+      scopedProjectGroups === null
         ? null
         : new Set(
-            scopedProjectGroup.memberProjectRefs.map(
-              (projectRef) => `${projectRef.environmentId}:${projectRef.projectId}`,
+            scopedProjectGroups.flatMap((project) =>
+              project.memberProjectRefs.map(
+                (projectRef) => `${projectRef.environmentId}:${projectRef.projectId}`,
+              ),
             ),
           ),
-    [scopedProjectGroup],
+    [scopedProjectGroups],
   );
-  // A persisted scope whose project is gone falls back to all projects, but
-  // only after every catalog environment has a live project snapshot. Cached
-  // or disconnected environments cannot establish that the project is gone.
+  const projectScopeResetKey = projectScopeKeys.join("\0");
+  // Persisted scope entries whose project is gone drop out, but only after
+  // every catalog environment has a live project snapshot. Cached or
+  // disconnected environments cannot establish that the project is gone.
   const allProjectSnapshotsReady = useAllEnvironmentProjectSnapshotsReady();
   useEffect(() => {
-    if (projectScopeKey !== null && allProjectSnapshotsReady && scopedProjectGroup === null) {
-      setProjectScopeKey(null);
-    }
-  }, [allProjectSnapshotsReady, projectScopeKey, scopedProjectGroup, setProjectScopeKey]);
+    if (!allProjectSnapshotsReady) return;
+    const liveKeys = projectScopeKeys.filter((key) => projectGroupByScopeKey.has(key));
+    if (liveKeys.length !== projectScopeKeys.length) setProjectScopeKeys(liveKeys);
+  }, [allProjectSnapshotsReady, projectGroupByScopeKey, projectScopeKeys, setProjectScopeKeys]);
   // Count-only subscription: the parent needs "are there draft rows" for the
   // empty state, while SidebarDraftBlock owns the per-keystroke content
   // subscription. Selecting a number keeps typing in a draft composer from
@@ -2505,7 +2681,7 @@ export default function Sidebar() {
   // hidden now, and bulk actions must never count or touch invisible rows.
   useEffect(() => {
     clearSelection();
-  }, [clearSelection, groupByProject, projectScopeKey]);
+  }, [clearSelection, groupByProject, projectScopeResetKey]);
 
   const openProjectSettings = useCallback(
     (projectGroup: SidebarProjectSnapshot) => {
@@ -2757,7 +2933,7 @@ export default function Sidebar() {
   // filter context changes so a scope/search flip never inherits a deep
   // page state.
   const [settledVisibleCount, setSettledVisibleCount] = useState(SETTLED_TAIL_INITIAL_COUNT);
-  const settledResetKey = projectScopeKey ?? "all";
+  const settledResetKey = projectScopeResetKey;
   const lastSettledResetKeyRef = useRef(settledResetKey);
   if (lastSettledResetKeyRef.current !== settledResetKey) {
     lastSettledResetKeyRef.current = settledResetKey;
@@ -2847,9 +3023,7 @@ export default function Sidebar() {
       ),
     );
     const groups = groupSidebarThreadsByProject({
-      projectKeys: scopedProjectGroup
-        ? [scopedProjectGroup.projectKey]
-        : projectGroups.map((group) => group.projectKey),
+      projectKeys: (scopedProjectGroups ?? projectGroups).map((group) => group.projectKey),
       projectKeyByMemberKey,
       sections: {
         pinned: pinnedThreads,
@@ -2895,6 +3069,12 @@ export default function Sidebar() {
         expanded,
         activeThreads: group.active,
         cardCount: cards.length,
+        stats: {
+          liveThreads: [...group.pinned, ...group.active],
+          pinnedCount: group.pinned.length,
+          snoozedCount: group.snoozed.length,
+          settledCount: group.settled.length,
+        },
         cards: expanded
           ? cards
           : cards.filter(
@@ -2924,7 +3104,7 @@ export default function Sidebar() {
     projectSettledVisibleCount,
     projectShelfExpandedByKey,
     routeThreadKey,
-    scopedProjectGroup,
+    scopedProjectGroups,
     settledThreads,
     snoozedThreads,
   ]);
@@ -3373,11 +3553,28 @@ export default function Sidebar() {
             true,
         );
         const hasColor = useUiStateStore.getState().projectColorByKey[projectKey] !== undefined;
+        // Moves swap with the visible neighbor, so a filtered list still moves
+        // one step per click; the saved order is the one legacy drag uses.
+        const visibleProjects = (projectGroupLayoutsRef.current ?? []).flatMap((group) =>
+          group.project ? [group.project] : [],
+        );
+        const index = visibleProjects.findIndex((group) => group.projectKey === projectKey);
+        const neighborAbove = index > 0 ? visibleProjects[index - 1]! : null;
+        const neighborBelow =
+          index >= 0 && index < visibleProjects.length - 1 ? visibleProjects[index + 1]! : null;
+        const memberKeys = (group: SidebarProjectSnapshot) =>
+          group.memberProjects.map((member) => member.physicalProjectKey);
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
             [
               { id: "new-thread", label: "New thread" },
-              { id: "color", label: hasColor ? "Change color…" : "Set color…" },
+              { id: "move-up", label: "Move up", disabled: neighborAbove === null },
+              { id: "move-down", label: "Move down", disabled: neighborBelow === null },
+              {
+                id: "color",
+                label: hasColor ? "Change color…" : "Set color…",
+                separatorBefore: true,
+              },
               ...(hasColor ? [{ id: "clear-color", label: "Clear color" }] : []),
               ...(settleable.length > 0
                 ? [
@@ -3398,6 +3595,17 @@ export default function Sidebar() {
           case "new-thread":
             handleProjectGroupNewThread(projectKey);
             return;
+          case "move-up":
+          case "move-down": {
+            const neighbor = clicked.value === "move-up" ? neighborAbove : neighborBelow;
+            if (neighbor === null) return;
+            reorderProjects(
+              orderedProjectsRef.current.map(getProjectOrderKey),
+              memberKeys(project),
+              memberKeys(neighbor),
+            );
+            return;
+          }
           case "color":
             // Let the menu's own close settle before the popover claims focus.
             window.setTimeout(() => setColorPickerProjectKey(projectKey), 0);
@@ -3427,6 +3635,7 @@ export default function Sidebar() {
       handleProjectGroupNewThread,
       openProjectSettings,
       projectGroupByScopeKey,
+      reorderProjects,
       serverConfigs,
       setProjectColor,
     ],
@@ -4698,7 +4907,7 @@ export default function Sidebar() {
     // from users (or the auto rules) actually parking work,
     // not from the sidebar second-guessing what still matters.
     const isCard = section === "active" || section === "pinned";
-    const rowVariant = isCard ? "card" : "slim";
+    const rowVariant = projectGroupLayouts !== null ? "compact" : isCard ? "card" : "slim";
     return (
       <SidebarThreadRow
         // Fade between card and compact rows while the outer
@@ -4789,6 +4998,7 @@ export default function Sidebar() {
               onToggleGroupByProject={() => setGroupByProject(!groupByProject)}
               projectScope={
                 <Combobox
+                  multiple
                   items={projectScopeItems}
                   filteredItems={filteredProjectScopeItems}
                   autoHighlight
@@ -4802,36 +5012,51 @@ export default function Sidebar() {
                   onItemHighlighted={(item) => {
                     highlightedProjectScopeKeyRef.current = item?.value ?? null;
                   }}
-                  value={selectedProjectScopeItem}
-                  onValueChange={(item) => {
+                  value={selectedProjectScopeItems}
+                  onValueChange={(items) => {
                     if (suppressNextScopeChangeRef.current) {
                       suppressNextScopeChangeRef.current = false;
                       return;
                     }
-                    if (!item) return;
-                    setProjectScopeKey(item.value === "all" ? null : item.value);
+                    // Picking "All projects" clears the subset; picking a
+                    // project toggles it and keeps the popup open.
+                    setProjectScopeKeys(
+                      items.some((item) => item.value === "all")
+                        ? []
+                        : items.map((item) => item.value),
+                    );
                   }}
                 >
                   <ComboboxTrigger
                     render={
                       <SidebarHeaderIconButton
                         label={
-                          scopedProjectGroup
-                            ? `Filter threads by project: ${scopedProjectGroup.displayName}`
+                          scopedProjectGroups
+                            ? `Filter threads by project: ${scopedProjectGroups
+                                .map((project) => project.displayName)
+                                .join(", ")}`
                             : "Filter threads by project"
                         }
                       />
                     }
                   >
-                    {scopedProjectGroup ? (
+                    {scopedProjectGroups?.length === 1 ? (
                       // Wrapped so the button's direct-child svg color rule cannot override
                       // a project's own icon color.
                       <span className="flex shrink-0">
-                        <ProjectFavicon project={scopedProjectGroup} className="size-4" />
+                        <ProjectFavicon project={scopedProjectGroups[0]!} className="size-4" />
                       </span>
                     ) : (
                       <FolderIcon className="size-4" />
                     )}
+                    {scopedProjectGroups && scopedProjectGroups.length > 1 ? (
+                      <span
+                        aria-hidden
+                        className="absolute -right-0.5 -bottom-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] font-semibold leading-none text-primary-foreground tabular-nums"
+                      >
+                        {scopedProjectGroups.length}
+                      </span>
+                    ) : null}
                   </ComboboxTrigger>
                   <ComboboxPopup
                     align="start"
@@ -4874,6 +5099,10 @@ export default function Sidebar() {
                     <ComboboxList>
                       {(item: (typeof projectScopeItems)[number]) => {
                         const project = projectGroupByScopeKey.get(item.value) ?? null;
+                        const checked =
+                          item.value === "all"
+                            ? scopedProjectGroups === null
+                            : projectScopeKeys.includes(item.value);
                         return (
                           <ComboboxItem
                             key={item.value}
@@ -4885,6 +5114,19 @@ export default function Sidebar() {
                               if (project) handleProjectSettings(event, project);
                             }}
                           >
+                            <span
+                              aria-hidden
+                              className={cn(
+                                "flex size-3.5 shrink-0 items-center justify-center rounded-[4px] border",
+                                checked
+                                  ? "border-primary bg-primary"
+                                  : "border-muted-foreground/40",
+                              )}
+                            >
+                              {checked ? (
+                                <CheckIcon className="size-2.5 text-primary-foreground" />
+                              ) : null}
+                            </span>
                             {project ? (
                               <ProjectFavicon project={project} className="size-4 shrink-0" />
                             ) : (
@@ -5115,6 +5357,7 @@ export default function Sidebar() {
                       displayName={group.displayName}
                       expanded={group.expanded}
                       cardCount={group.cardCount}
+                      stats={group.stats}
                       colorPickerOpen={colorPickerProjectKey === group.projectKey}
                       onColorPickerOpenChange={handleProjectColorPickerOpenChange}
                       onToggleExpanded={toggleProjectGroupExpanded}
@@ -5332,8 +5575,10 @@ export default function Sidebar() {
                     Add project
                   </button>
                 </>
-              ) : scopedProjectGroup ? (
-                `No threads in ${scopedProjectGroup.displayName} yet`
+              ) : scopedProjectGroups?.length === 1 ? (
+                `No threads in ${scopedProjectGroups[0]!.displayName} yet`
+              ) : scopedProjectGroups ? (
+                "No threads in these projects yet"
               ) : (
                 "No threads yet"
               )}

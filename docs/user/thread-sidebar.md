@@ -25,7 +25,11 @@ worktree**, each background submission creates its own worktree.
 On web and desktop, the sidebar lists threads under a header for each project. Click a header
 to collapse or expand that project, or use its pen button to start a thread there. Each project
 has its own **Snoozed** and **Settled** shelves. Right-click a project header to settle all of its
-active threads at once (pinned threads stay) or to open project settings.
+active threads at once (pinned threads stay), to move it up or down, or to open project settings.
+Projects keep the order you give them; thread activity does not reorder them.
+
+To show only some projects, open the folder button in the sidebar header and check each project
+you want. Choose **All projects** to clear the filter.
 
 To tint a project, hover its header and choose the palette button, or right-click the header and
 choose **Set color…**. The sidebar shows the color and opacity while you adjust them. Colors are

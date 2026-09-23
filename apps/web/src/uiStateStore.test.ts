@@ -14,7 +14,7 @@ import {
   setDefaultAdvertisedEndpointKey,
   setProjectColor,
   setProjectExpanded,
-  setSidebarProjectScopeKey,
+  setSidebarProjectScopeKeys,
   setThreadChangedFilesExpanded,
   type UiState,
 } from "./uiStateStore";
@@ -23,7 +23,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
   return {
     projectExpandedById: {},
     projectOrder: [],
-    sidebarProjectScopeKey: null,
+    sidebarProjectScopeKeys: [],
     sidebarGroupByProject: true,
     projectColorByKey: {},
     projectShelfExpandedByKey: {},
@@ -153,12 +153,11 @@ describe("uiStateStore pure functions", () => {
   });
 
   it("stores the sidebar project scope and resets it to all projects", () => {
-    const scoped = setSidebarProjectScopeKey(makeUiState(), "github.com/pingdotgg/t3code");
+    const scoped = setSidebarProjectScopeKeys(makeUiState(), ["repo-a", "", "repo-b", "repo-a"]);
 
-    expect(scoped.sidebarProjectScopeKey).toBe("github.com/pingdotgg/t3code");
-    expect(setSidebarProjectScopeKey(scoped, "github.com/pingdotgg/t3code")).toBe(scoped);
-    expect(setSidebarProjectScopeKey(scoped, null).sidebarProjectScopeKey).toBeNull();
-    expect(setSidebarProjectScopeKey(scoped, "").sidebarProjectScopeKey).toBeNull();
+    expect(scoped.sidebarProjectScopeKeys).toEqual(["repo-a", "repo-b"]);
+    expect(setSidebarProjectScopeKeys(scoped, ["repo-a", "repo-b"])).toBe(scoped);
+    expect(setSidebarProjectScopeKeys(scoped, []).sidebarProjectScopeKeys).toEqual([]);
   });
 });
 
@@ -225,7 +224,7 @@ describe("parsePersistedState", () => {
         "environment:thread-1": "2026-02-25T12:35:00.000Z",
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
-      sidebarProjectScopeKey: null,
+      sidebarProjectScopeKeys: [],
       sidebarGroupByProject: true,
       projectColorByKey: {},
       projectShelfExpandedByKey: {},
@@ -350,7 +349,7 @@ describe("uiStateStore persistence", () => {
         "environment:thread-1": "2026-02-25T12:35:00.000Z",
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
-      sidebarProjectScopeKey: null,
+      sidebarProjectScopeKeys: [],
       sidebarGroupByProject: true,
       projectColorByKey: {},
       projectShelfExpandedByKey: {},
@@ -384,14 +383,21 @@ describe("uiStateStore persistence", () => {
   });
 
   it("restores the sidebar project scope across reloads", () => {
-    persistState(makeUiState({ sidebarProjectScopeKey: "github.com/pingdotgg/t3code" }));
+    persistState(makeUiState({ sidebarProjectScopeKeys: ["repo-a", "repo-b"] }));
 
     const persisted = JSON.parse(
       localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
     ) as PersistedUiState;
 
-    expect(parsePersistedState(persisted).sidebarProjectScopeKey).toBe(
-      "github.com/pingdotgg/t3code",
+    expect(parsePersistedState(persisted).sidebarProjectScopeKeys).toEqual(["repo-a", "repo-b"]);
+  });
+
+  it("migrates a single-project scope into the multi-project scope", () => {
+    expect(
+      parsePersistedState({ sidebarProjectScopeKey: "repo-a" }).sidebarProjectScopeKeys,
+    ).toEqual(["repo-a"]);
+    expect(parsePersistedState({ sidebarProjectScopeKey: null }).sidebarProjectScopeKeys).toEqual(
+      [],
     );
   });
 
