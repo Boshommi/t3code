@@ -99,6 +99,7 @@ function makeDesktopWindowLayer(
     closeMain: Effect.void,
     zoomMain: () => Effect.void,
     syncAppearance: Effect.void,
+    setMaterial: () => Effect.succeed(false),
   });
 }
 

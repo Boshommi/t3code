@@ -290,6 +290,16 @@ export const setTheme = DesktopIpc.makeIpcMethod({
   }),
 });
 
+export const setWindowMaterial = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.SET_WINDOW_MATERIAL_CHANNEL,
+  payload: Schema.NullOr(Schema.Literal("glass")),
+  result: Schema.Boolean,
+  handler: Effect.fn("desktop.ipc.window.setWindowMaterial")(function* (material) {
+    const desktopWindow = yield* DesktopWindow.DesktopWindow;
+    return yield* desktopWindow.setMaterial(material);
+  }),
+});
+
 export const showContextMenu = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.CONTEXT_MENU_CHANNEL,
   payload: ContextMenuInput,

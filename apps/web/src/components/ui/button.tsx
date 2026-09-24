@@ -83,6 +83,7 @@ function Button({ className, variant, size, render, ...props }: ButtonProps) {
     className:
       variant === "chip" ? cn(className) : cn(buttonVariants({ className, size, variant })),
     "data-slot": "button",
+    "data-variant": variant ?? "default",
     type: typeValue,
   };
 
