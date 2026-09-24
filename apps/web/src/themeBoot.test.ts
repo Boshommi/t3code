@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import indexHtml from "../index.html?raw";
 import {
+  BUILT_IN_THEME_DEFINITIONS,
   CUSTOM_THEMES_STORAGE_KEY,
   getDefaultThemeColors,
   getThemeColorsForMode,
@@ -9,10 +10,7 @@ import {
   isKnownThemePreference,
   resolveThemeAppearance,
   T3_CHAT_THEME,
-  EMBER_THEME,
   GROVE_THEME,
-  IRIS_THEME,
-  OCEAN_THEME,
   THEME_APPEARANCE_MODE_STORAGE_KEY,
   THEME_FOLLOW_SYSTEM_STORAGE_KEY,
   toCanonicalThemeColor,
@@ -33,6 +31,7 @@ type BootResult = {
   isDark: boolean;
   themeId: string | undefined;
   themeSelected: string | undefined;
+  material: string | undefined;
   backgroundColor: string;
   bootVariables: Record<string, string>;
   metaContent: string | null;
@@ -95,6 +94,7 @@ function runBootScript(options: {
     isDark: classes.has("dark"),
     themeId: documentElement.dataset.themeId,
     themeSelected: documentElement.dataset.themeSelected,
+    material: documentElement.dataset.material,
     backgroundColor: documentElement.style.backgroundColor,
     bootVariables,
     metaContent: meta.content,
@@ -275,6 +275,7 @@ describe("index.html boot script", () => {
       prefersDark: true,
     });
     expect(aurora.themeId).toBe("aurora");
+    expect(aurora.material).toBeUndefined();
     expect(aurora.isDark).toBe(true);
     expect(aurora.backgroundColor).toBe(DEFAULT_DARK_CHROME);
     expect(aurora.bootVariables["--boot-background"]).toBe(AURORA_DUAL.variants.dark.canvas);
@@ -342,7 +343,7 @@ describe("index.html boot script", () => {
   // boot script's hand-maintained copy into a CI-enforced contract: any
   // palette change breaks this test until the copy in index.html is updated.
   it("keeps every built-in boot splash in sync with the real palettes", () => {
-    for (const theme of [T3_CHAT_THEME, GROVE_THEME, OCEAN_THEME, EMBER_THEME, IRIS_THEME]) {
+    for (const theme of BUILT_IN_THEME_DEFINITIONS) {
       // The boot script resolves every built-in from a light base appearance.
       expect(theme.appearance).toBe("light");
       for (const mode of ["light", "dark"] as const) {
@@ -356,6 +357,7 @@ describe("index.html boot script", () => {
           prefersDark: mode === "dark",
         });
         expect(boot.themeId).toBe(theme.id);
+        expect(boot.material).toBe(theme.material);
         expect(boot.isDark).toBe(mode === "dark");
         expect(boot.bootVariables["--boot-background"]).toBe(colors!.canvas);
         expect(boot.bootVariables["--boot-foreground"]).toBe(colors!.text);
