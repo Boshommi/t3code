@@ -137,6 +137,11 @@ export class DesktopWindow extends Context.Service<
     // the main window.
     readonly zoomMain: (direction: MainWindowZoomDirection) => Effect.Effect<void>;
     readonly syncAppearance: Effect.Effect<void>;
+    /**
+     * Records the material for the next main window and reports whether the
+     * current one already shows glass (it was created translucent).
+     */
+    readonly setMaterial: (material: DesktopWindowMaterial) => Effect.Effect<boolean>;
   }
 >()("@t3tools/desktop/window/DesktopWindow") {}
 
@@ -158,6 +163,14 @@ function getIconOption(
 function getInitialWindowBackgroundColor(shouldUseDarkColors: boolean): string {
   return shouldUseDarkColors ? "#0a0a0a" : "#ffffff";
 }
+
+export type DesktopWindowMaterial = "glass" | null;
+
+const GLASS_WINDOW_BACKGROUND = "#00000000";
+
+// Glass windows must be born translucent: an opaque window turned clear at
+// runtime keeps an opaque compositor surface, which leaves stale text behind.
+const glassWindows = new WeakSet<Electron.BrowserWindow>();
 
 type DisplayBounds = Pick<Electron.Rectangle, "x" | "y" | "width" | "height">;
 
@@ -286,7 +299,11 @@ function syncWindowAppearance(
       return;
     }
 
-    window.setBackgroundColor(getInitialWindowBackgroundColor(shouldUseDarkColors));
+    window.setBackgroundColor(
+      glassWindows.has(window)
+        ? GLASS_WINDOW_BACKGROUND
+        : getInitialWindowBackgroundColor(shouldUseDarkColors),
+    );
     const { titleBarOverlay } = getWindowTitleBarOptions(shouldUseDarkColors, platform);
     if (typeof titleBarOverlay === "object") {
       window.setTitleBarOverlay(titleBarOverlay);
@@ -395,6 +412,7 @@ export const make = Effect.gen(function* () {
     if (persistedBounds !== null && initialBounds === DesktopAppSettings.DEFAULT_MAIN_WINDOW_SIZE) {
       yield* logWindowWarning("saved main window bounds could not be restored; using defaults");
     }
+    const glassWindow = persistedSettings.glassWindow && environment.platform === "darwin";
     const window = yield* electronWindow.create({
       ...initialBounds,
       minWidth: 840,
@@ -402,7 +420,13 @@ export const make = Effect.gen(function* () {
       show: false,
       autoHideMenuBar: true,
       ...(environment.platform === "darwin" ? { disableAutoHideCursor: true } : {}),
-      backgroundColor: getInitialWindowBackgroundColor(shouldUseDarkColors),
+      ...(glassWindow
+        ? {
+            transparent: true,
+            vibrancy: "under-window" as const,
+            backgroundColor: GLASS_WINDOW_BACKGROUND,
+          }
+        : { backgroundColor: getInitialWindowBackgroundColor(shouldUseDarkColors) }),
       ...iconOption,
       title: environment.displayName,
       ...getWindowTitleBarOptions(shouldUseDarkColors, environment.platform),
@@ -420,6 +444,7 @@ export const make = Effect.gen(function* () {
         webviewTag: true,
       },
     });
+    if (glassWindow) glassWindows.add(window);
 
     if (environment.platform === "darwin") {
       window.setAutoHideCursor(false);
@@ -1029,6 +1054,17 @@ export const make = Effect.gen(function* () {
         syncWindowAppearance(window, shouldUseDarkColors, environment.platform),
       );
     }).pipe(Effect.withSpan("desktop.window.syncAppearance")),
+    setMaterial: Effect.fn("desktop.window.setMaterial")(function* (material) {
+      yield* desktopSettings
+        .setGlassWindow(material === "glass")
+        .pipe(
+          Effect.catch((error) =>
+            logWindowWarning("could not persist the window material", { error: error.message }),
+          ),
+        );
+      const main = yield* electronWindow.main;
+      return material === "glass" && Option.isSome(main) && glassWindows.has(main.value);
+    }),
   });
 });
 

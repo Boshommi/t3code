@@ -270,12 +270,17 @@ function ContrastAppearanceSync() {
   return null;
 }
 
+// Menus, dialogs, and the composer stay readable below this; only a see-through
+// glass window uses the setting's full range.
+const OVERLAY_GLASS_OPACITY_FLOOR = 40;
+
 function GlassAppearanceSync() {
   const glassOpacity = useClientSettings((settings) => settings.glassOpacity);
 
   useEffect(() => {
     const style = document.documentElement.style;
-    style.setProperty("--glass-opacity", `${glassOpacity}%`);
+    style.setProperty("--glass-opacity", `${Math.max(glassOpacity, OVERLAY_GLASS_OPACITY_FLOOR)}%`);
+    style.setProperty("--glass-window-opacity", `${glassOpacity}%`);
     if (glassOpacity === 100) {
       style.setProperty("--glass-blur", "0px");
     } else {

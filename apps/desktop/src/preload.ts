@@ -171,6 +171,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     ipcRenderer.invoke(IpcChannels.PICK_PROJECT_FAVICON_CHANNEL, initialPath),
   pickThemeFiles: () => ipcRenderer.invoke(IpcChannels.PICK_THEME_FILES_CHANNEL, undefined),
   setTheme: (theme) => ipcRenderer.invoke(IpcChannels.SET_THEME_CHANNEL, theme),
+  setWindowMaterial: (material) =>
+    ipcRenderer.invoke(IpcChannels.SET_WINDOW_MATERIAL_CHANNEL, material),
   showContextMenu: (items, position) =>
     ipcRenderer.invoke(IpcChannels.CONTEXT_MENU_CHANNEL, {
       items,

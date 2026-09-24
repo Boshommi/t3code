@@ -429,6 +429,157 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
+/*
+ * Liquid Glass material, worn by themes with `material: "glass"`. Glass stays
+ * on the navigation and control layer (sidebar, toolbar controls, composer,
+ * floating overlays); content keeps opaque surfaces. Unlayered so it outranks
+ * the utilities it restyles.
+ */
+:root[data-material="glass"] {
+  --radius: 0.75rem;
+  --glass-blur: 20px;
+  --glass-saturation: 1.8;
+  --glass-panel-inset: 0.5rem;
+  /* Concentric: sidebar rows sit one inset inside the panel edge. */
+  --glass-panel-radius: calc(var(--control-radius) + var(--glass-panel-inset));
+  --glass-edge: color-mix(in srgb, var(--foreground) 9%, transparent);
+  --glass-rim: inset 0 1px 0 0 rgb(255 255 255 / 70%), inset 0 0 0 1px rgb(255 255 255 / 30%);
+  --glass-shadow: 0 12px 32px -14px rgb(0 0 0 / 24%);
+
+  @variant dark {
+    --glass-blur: 24px;
+    --glass-saturation: 1.5;
+    --glass-edge: color-mix(in srgb, var(--color-white) 10%, transparent);
+    --glass-rim: inset 0 1px 0 0 rgb(255 255 255 / 14%), inset 0 0 0 1px rgb(255 255 255 / 5%);
+    --glass-shadow: 0 16px 40px -14px rgb(0 0 0 / 70%);
+  }
+}
+
+/* The sidebar floats as a panel inset from the window edge. */
+:root[data-material="glass"] [data-slot="sidebar-container"][data-app-sidebar] {
+  padding: var(--glass-panel-inset);
+  border: 0;
+  background: transparent;
+}
+
+:root[data-material="glass"] [data-app-sidebar] > [data-slot="sidebar-inner"] {
+  overflow: hidden;
+  border-radius: var(--glass-panel-radius);
+  background-color: color-mix(in srgb, var(--sidebar) 82%, transparent);
+  box-shadow:
+    var(--glass-rim),
+    0 0 0 1px var(--glass-edge),
+    var(--glass-shadow);
+}
+
+/* Keep the header row on the window's titlebar line despite the inset. */
+:root[data-material="glass"]
+  [data-app-sidebar]
+  > [data-slot="sidebar-inner"]
+  > [data-slot="sidebar-header"]:first-child {
+  margin-top: calc(var(--glass-panel-inset) * -1);
+}
+
+:root[data-material="glass"]
+  :is([data-chat-header], [data-workspace-titlebar-controls])
+  [data-slot="button"][data-variant="outline"] {
+  border-color: var(--glass-edge);
+  background-color: color-mix(in srgb, var(--popover) 72%, transparent);
+  box-shadow: var(--glass-rim);
+}
+
+:root[data-material="glass"] [data-slot="composer-shell"] {
+  --chat-composer-outline: var(--glass-edge);
+}
+
+/* An attached banner tab widens the host past the input; the input draws its own edge then. */
+:root[data-material="glass"]
+  [data-slot="composer-shell"]:not(:has([data-composer-banner-surface="attached"]))
+  [data-slot="composer-host"] {
+  box-shadow: var(--glass-rim), var(--glass-shadow);
+}
+
+:root[data-material="glass"] :is(.dropdown-glass, .dialog-glass, .surface-glass, .alert-glass) {
+  border-color: var(--glass-edge);
+  box-shadow: var(--glass-rim), var(--glass-shadow);
+}
+
+/*
+ * Desktop on macOS: the window's native vibrancy shows through. The canvas
+ * tint is painted once on body and the stacked page containers go clear,
+ * because tinting each layer would compound back to opaque.
+ */
+:root[data-material="glass"][data-window-material="glass"] {
+  /* The Glass opacity setting (10-100%) spans fully clear to solid. */
+  --glass-window-tint: calc((var(--glass-window-opacity, 80%) - 10%) * 10 / 9);
+  --glass-sidebar-tint: calc(var(--glass-window-tint) * 0.9);
+  /* Shadows fall on the desktop now, not the canvas, so keep them soft. */
+  --glass-shadow: 0 8px 24px -12px rgb(0 0 0 / 30%);
+  /* Overrides the inline root and body colors the theme sync writes. */
+  background-color: transparent !important;
+}
+
+:root[data-material="glass"][data-window-material="glass"] body {
+  /*
+   * CSS blur cannot reach behind the window, so floating layers (menus,
+   * dialogs, the composer) need their own near-solid fill. The root keeps the
+   * setting's value, which drives the window tints above.
+   */
+  --glass-opacity: 94%;
+  background-color: color-mix(
+    in srgb,
+    var(--app-theme-canvas) var(--glass-window-tint),
+    transparent
+  ) !important;
+}
+
+:root[data-material="glass"][data-window-material="glass"]
+  :is(
+    [data-slot="sidebar-inset"],
+    [data-slot="sidebar-inset"] > .bg-background,
+    [data-chat-header],
+    [data-chat-workspace-drop-target] > .bg-background,
+    [data-preview-panel-mode].bg-background,
+    [data-timeline-loading]
+  ) {
+  background-color: transparent;
+}
+
+:root[data-material="glass"][data-window-material="glass"]
+  [data-app-sidebar]
+  > [data-slot="sidebar-inner"] {
+  background-color: color-mix(in srgb, var(--sidebar) var(--glass-sidebar-tint), transparent);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  /* !important: the Glass opacity setting writes these inline. */
+  :root[data-material="glass"] {
+    --glass-opacity: 100% !important;
+    --glass-blur: 0px !important;
+    --glass-saturation: 1;
+  }
+
+  :root[data-material="glass"] [data-app-sidebar] > [data-slot="sidebar-inner"] {
+    background-color: var(--sidebar);
+  }
+
+  :root[data-material="glass"][data-window-material="glass"] {
+    --glass-window-tint: 100%;
+    --glass-sidebar-tint: 100%;
+  }
+
+  :root[data-material="glass"][data-window-material="glass"] body {
+    --glass-opacity: 100%;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root[data-material="glass"] {
+    --glass-opacity: 96% !important;
+    --glass-edge: color-mix(in srgb, var(--foreground) 40%, transparent);
+  }
+}
+
 @keyframes live-tool-shine {
   from {
     background-position:

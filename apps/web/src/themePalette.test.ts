@@ -31,6 +31,7 @@ import {
   EMBER_THEME,
   GROVE_THEME,
   IRIS_THEME,
+  LIQUID_GLASS_THEME,
   OCEAN_THEME,
   updateCustomTheme,
   CUSTOM_THEMES_STORAGE_KEY,
@@ -329,6 +330,42 @@ describe("theme files", () => {
 
     expect(theme.sidebarArtwork).toBeUndefined();
     expect(JSON.parse(serializeThemeFile(theme))).not.toHaveProperty("sidebarArtwork");
+  });
+
+  it("keeps the glass material to the reviewed built-in", () => {
+    const theme = parseThemeFile({
+      version: THEME_FILE_VERSION,
+      name: "Glass copy",
+      appearance: "light",
+      colors: { accent: "#007aff" },
+      material: "glass",
+    });
+
+    expect(theme.material).toBeUndefined();
+    expect(JSON.parse(serializeThemeFile(theme))).not.toHaveProperty("material");
+  });
+
+  it("marks the document while a glass theme is applied", () => {
+    const dataset: Record<string, string | undefined> = {};
+    vi.stubGlobal("document", {
+      documentElement: {
+        classList: { toggle: vi.fn() },
+        dataset,
+        style: { removeProperty: vi.fn(), setProperty: vi.fn() },
+      },
+    });
+
+    applyThemePalette(LIQUID_GLASS_THEME.id, "dark");
+    expect(dataset.material).toBe("glass");
+
+    applyThemeColorPreview(LIQUID_GLASS_THEME.colors, "light");
+    expect(dataset.material).toBeUndefined();
+
+    applyThemePalette(LIQUID_GLASS_THEME.id, "light");
+    applyThemePalette(GROVE_THEME.id, "light");
+    expect(dataset.material).toBeUndefined();
+
+    vi.unstubAllGlobals();
   });
 
   it("suppresses sidebar artwork during a live custom-theme preview", () => {

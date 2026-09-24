@@ -183,7 +183,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "setting-glass-opacity",
     title: "Glass opacity",
     to: "/settings/appearance",
-    searchTerms: ["transparent transparency solid menus dialogs composer"],
+    searchTerms: ["transparent transparency solid menus dialogs composer window background"],
   },
   {
     id: "diff-color-scheme",

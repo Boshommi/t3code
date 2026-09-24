@@ -121,7 +121,24 @@
               chrome: "oklch(0.225975 0.031062 293.741)",
             },
           },
+          "liquid-glass": {
+            light: {
+              background: "oklch(0.970714 0.002651 286.35)",
+              foreground: "oklch(0.231576 0.003805 286.099)",
+              accent: "oklch(0.602765 0.217712 257.424)",
+              chrome: "oklch(0.970714 0.002651 286.35)",
+            },
+            dark: {
+              background: "oklch(0.22728 0.003823 286.092)",
+              foreground: "oklch(0.970714 0.002651 286.35)",
+              accent: "oklch(0.624254 0.205577 255.486)",
+              chrome: "oklch(0.22728 0.003823 286.092)",
+            },
+          },
         };
+        // Built-ins that render chrome as floating glass. Mirrors the
+        // runtime's ThemeDefinition.material so the layout does not jump.
+        const GLASS_THEME_IDS = ["liquid-glass"];
         // Keep the built-in mode list in sync with the runtime so the selected
         // T3 Chat palette is visible before React has mounted.
         const BUILT_IN_THEME_MODES = Object.fromEntries(
@@ -139,6 +156,7 @@
           "ocean",
           "ember",
           "iris",
+          "liquid-glass",
           "t3-chat-dark",
           "t3-grove",
           "t3-ocean",
@@ -357,6 +375,15 @@
               : effectiveThemeId;
           } else {
             delete document.documentElement.dataset.themeId;
+          }
+          if (
+            effectiveIsThemed &&
+            !effectiveCustomTheme &&
+            GLASS_THEME_IDS.includes(effectiveThemeId)
+          ) {
+            document.documentElement.dataset.material = "glass";
+          } else {
+            delete document.documentElement.dataset.material;
           }
           // A resolved half is a selection even when the base theme is gone
           // (deleting the base leaves the mix pointing at a real theme).

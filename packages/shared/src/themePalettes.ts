@@ -1,5 +1,7 @@
 export const BUILT_IN_THEME_IDS = ["t3-chat", "grove", "ocean", "ember", "iris"] as const;
 
+export const LIQUID_GLASS_THEME_ID = "liquid-glass";
+
 /** The mobile app's own hand-tuned palette, which is not part of the built-in library. */
 export const MOBILE_DEFAULT_THEME_ID = "t3-code";
 
@@ -21,6 +23,7 @@ export const RESERVED_THEME_IDS: ReadonlySet<string> = new Set([
   "light",
   "dark",
   ...BUILT_IN_THEME_IDS,
+  LIQUID_GLASS_THEME_ID,
   "t3-chat-dark",
   "t3-grove",
   "t3-ocean",
@@ -117,6 +120,8 @@ export type ThemeDefinition = Readonly<{
   collection?: Readonly<{ id: string; label: string }>;
   /** Allows reviewed built-ins to render product artwork over their sidebar. */
   sidebarArtwork?: boolean;
+  /** Renders navigation chrome as floating Liquid Glass instead of flat panels. */
+  material?: "glass";
   /** Generated from the guided editor's canvas and accent roles. */
   managed?: boolean;
 }>;
@@ -754,6 +759,137 @@ export const IRIS_THEME: ThemeDefinition = {
     },
   },
   sidebarArtwork: true,
+};
+
+/**
+ * Web and desktop only: the glass material restyles web chrome, so this
+ * theme stays out of BUILT_IN_THEMES, which mobile renders.
+ */
+export const LIQUID_GLASS_THEME: ThemeDefinition = {
+  id: LIQUID_GLASS_THEME_ID,
+  label: "Liquid Glass",
+  appearance: "light",
+  colors: {
+    canvas: "oklch(0.970714 0.002651 286.35)",
+    chrome: "oklch(0.970714 0.002651 286.35)",
+    toolbar: "oklch(0.970714 0.002651 286.35)",
+    toolbarForeground: "oklch(0.231576 0.003805 286.099)",
+    toolbarBorder: "oklch(0.883398 0.005432 286.288)",
+    toolbarControl: "oklch(0.932432 0.006701 286.269)",
+    toolbarControlForeground: "oklch(0.231576 0.003805 286.099)",
+    toolbarControlHover: "oklch(0.895939 0.006769 286.262)",
+    surface: "oklch(0.988648 0.002638 286.351)",
+    surfaceRaised: "oklch(1 0 0)",
+    surfaceOverlay: "oklch(1 0 0)",
+    text: "oklch(0.231576 0.003805 286.099)",
+    textMuted: "oklch(0.539901 0.007695 286.139)",
+    border: "oklch(0.917271 0.006729 286.266)",
+    input: "oklch(0.865242 0.006829 286.256)",
+    focus: "oklch(0.602765 0.217712 257.424)",
+    accent: "oklch(0.602765 0.217712 257.424)",
+    accentForeground: "oklch(1 0 0)",
+    secondary: "oklch(0.932432 0.006701 286.269)",
+    secondaryForeground: "oklch(0.231576 0.003805 286.099)",
+    muted: "oklch(0.944229 0.005342 286.297)",
+    mutedForeground: "oklch(0.539901 0.007695 286.139)",
+    placeholder: "oklch(0.557176 0.007634 286.149)",
+    secondaryLabel: "oklch(0.539901 0.007695 286.139)",
+    iconMuted: "oklch(0.539901 0.007695 286.139)",
+    error: "oklch(0.654215 0.232135 28.659)",
+    errorForeground: "oklch(0.552875 0.22549 27.269)",
+    errorSurface: "oklch(0.956016 0.018724 25.604)",
+    warning: "oklch(0.76524 0.175207 62.574)",
+    warningForeground: "oklch(0.547366 0.147079 48.886)",
+    warningSurface: "oklch(0.971734 0.023076 75.863)",
+    update: "oklch(0.602765 0.217712 257.424)",
+    updateForeground: "oklch(0.495775 0.173947 257.604)",
+    updateSurface: "oklch(0.951339 0.023416 256.101)",
+    accentSurface: "oklch(0.951339 0.023416 256.101)",
+    accentSurfaceForeground: "oklch(0.444543 0.156753 258.068)",
+    messageSurface: "oklch(0.935457 0.006696 286.27)",
+    messageForeground: "oklch(0.231576 0.003805 286.099)",
+    messageAction: "oklch(0.602765 0.217712 257.424)",
+    messageActionForeground: "oklch(1 0 0)",
+    messageActionHover: "oklch(0.529627 0.189866 257.243)",
+    codeBackground: "oklch(0.953556 0.006663 286.273)",
+    codeForeground: "oklch(0.231576 0.003805 286.099)",
+    sidebar: "oklch(0.9415 0.006685 286.271)",
+    sidebarForeground: "oklch(0.231576 0.003805 286.099)",
+    sidebarMutedForeground: "oklch(0.539901 0.007695 286.139)",
+    sidebarControlSurface: "oklch(1 0 0)",
+    sidebarRowHover: "oklch(0.902341 0.008111 286.236)",
+    sidebarRowActive: "oklch(0.871998 0.009549 286.2)",
+    sidebarRowSelected: "oklch(0.88735 0.009507 286.204)",
+    sidebarBorder: "oklch(0.883398 0.005432 286.288)",
+    terminalBackground: "oklch(0.970714 0.002651 286.35)",
+    terminalForeground: "oklch(0.231576 0.003805 286.099)",
+    terminalCursor: "oklch(0.602765 0.217712 257.424)",
+    terminalSelection: "oklch(0.901672 0.047788 259.102)",
+    terminalScrollbar: "oklch(0.831158 0.006898 286.249)",
+    terminalScrollbarHover: "oklch(0.752035 0.005657 286.263)",
+  },
+  variants: {
+    dark: {
+      canvas: "oklch(0.22728 0.003823 286.092)",
+      chrome: "oklch(0.22728 0.003823 286.092)",
+      toolbar: "oklch(0.22728 0.003823 286.092)",
+      toolbarForeground: "oklch(0.970714 0.002651 286.35)",
+      toolbarBorder: "oklch(0.341438 0.003448 286.216)",
+      toolbarControl: "oklch(0.293901 0.003582 286.177)",
+      toolbarControlForeground: "oklch(0.970714 0.002651 286.35)",
+      toolbarControlHover: "oklch(0.349196 0.003429 286.221)",
+      surface: "oklch(0.256955 0.003706 286.136)",
+      surfaceRaised: "oklch(0.293901 0.003582 286.177)",
+      surfaceOverlay: "oklch(0.293901 0.003582 286.177)",
+      text: "oklch(0.970714 0.002651 286.35)",
+      textMuted: "oklch(0.68124 0.007254 286.206)",
+      border: "oklch(0.341438 0.003448 286.216)",
+      input: "oklch(0.402375 0.003308 286.25)",
+      focus: "oklch(0.624254 0.205577 255.486)",
+      accent: "oklch(0.624254 0.205577 255.486)",
+      accentForeground: "oklch(1 0 0)",
+      secondary: "oklch(0.293901 0.003582 286.177)",
+      secondaryForeground: "oklch(0.970714 0.002651 286.35)",
+      muted: "oklch(0.293901 0.003582 286.177)",
+      mutedForeground: "oklch(0.68124 0.007254 286.206)",
+      placeholder: "oklch(0.648309 0.007346 286.193)",
+      secondaryLabel: "oklch(0.68124 0.007254 286.206)",
+      iconMuted: "oklch(0.68124 0.007254 286.206)",
+      error: "oklch(0.663303 0.22361 28.292)",
+      errorForeground: "oklch(0.707322 0.184697 25.944)",
+      errorSurface: "oklch(0.274891 0.042529 24.736)",
+      warning: "oklch(0.782365 0.171055 67.223)",
+      warningForeground: "oklch(0.820286 0.15236 73.25)",
+      warningSurface: "oklch(0.303001 0.042824 79.494)",
+      update: "oklch(0.624254 0.205577 255.486)",
+      updateForeground: "oklch(0.724542 0.145147 255.343)",
+      updateSurface: "oklch(0.282884 0.067603 254.425)",
+      accentSurface: "oklch(0.282884 0.067603 254.425)",
+      accentSurfaceForeground: "oklch(0.909781 0.044013 256.786)",
+      messageSurface: "oklch(0.293901 0.003582 286.177)",
+      messageForeground: "oklch(0.970714 0.002651 286.35)",
+      messageAction: "oklch(0.624254 0.205577 255.486)",
+      messageActionForeground: "oklch(1 0 0)",
+      messageActionHover: "oklch(0.666856 0.180599 253.716)",
+      codeBackground: "oklch(0.256955 0.003706 286.136)",
+      codeForeground: "oklch(0.970714 0.002651 286.35)",
+      sidebar: "oklch(0.269409 0.003662 286.151)",
+      sidebarForeground: "oklch(0.970714 0.002651 286.35)",
+      sidebarMutedForeground: "oklch(0.68124 0.007254 286.206)",
+      sidebarControlSurface: "oklch(0.349196 0.003429 286.221)",
+      sidebarRowHover: "oklch(0.313925 0.003522 286.195)",
+      sidebarRowActive: "oklch(0.349196 0.003429 286.221)",
+      sidebarRowSelected: "oklch(0.333636 0.003468 286.21)",
+      sidebarBorder: "oklch(0.341438 0.003448 286.216)",
+      terminalBackground: "oklch(0.22728 0.003823 286.092)",
+      terminalForeground: "oklch(0.970714 0.002651 286.35)",
+      terminalCursor: "oklch(0.624254 0.205577 255.486)",
+      terminalSelection: "oklch(0.358859 0.080063 256.716)",
+      terminalScrollbar: "oklch(0.402375 0.003308 286.25)",
+      terminalScrollbarHover: "oklch(0.500704 0.004699 286.229)",
+    },
+  },
+  material: "glass",
 };
 
 export const BUILT_IN_THEMES: ReadonlyArray<ThemeDefinition> = [

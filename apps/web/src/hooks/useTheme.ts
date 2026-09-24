@@ -2,6 +2,8 @@ import type { DesktopBridge } from "@t3tools/contracts";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
 import * as Schema from "effect/Schema";
 import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { toastManager } from "../components/ui/toast";
+import { isMacPlatform } from "../lib/utils";
 import {
   applyThemePalette,
   CUSTOM_THEMES_STORAGE_KEY,
@@ -352,6 +354,7 @@ function applyTheme(theme: Theme, { suppressTransitions = false, preservePreview
     themeHalves,
   );
   applyThemePalette(resolveThemeHalf(theme, themeHalves, resolvedAppearance), resolvedAppearance);
+  syncDesktopWindowMaterial();
   document.documentElement.classList.toggle("dark", resolvedAppearance === "dark");
   lastAppliedTheme = { theme, systemDark, followSystem, appearanceMode, themeHalves };
   syncBrowserChromeTheme();
@@ -377,6 +380,46 @@ export async function syncDesktopThemePreference(
   } catch (cause) {
     throw new DesktopThemeSyncError({ theme, cause });
   }
+}
+
+let lastDesktopMaterial: "glass" | null | undefined;
+
+/**
+ * Glass themes ask the macOS shell for window vibrancy. The page turns
+ * translucent only once the shell confirms, and opaque before it is released,
+ * so the window is never see-through with nothing behind it.
+ */
+function syncDesktopWindowMaterial() {
+  const bridge = window.desktopBridge;
+  const root = document.documentElement;
+  const material = root.dataset.material === "glass" ? "glass" : null;
+  if (
+    typeof bridge?.setWindowMaterial !== "function" ||
+    !isMacPlatform(navigator.platform) ||
+    lastDesktopMaterial === material
+  ) {
+    return;
+  }
+  lastDesktopMaterial = material;
+  if (material === null) delete root.dataset.windowMaterial;
+  bridge.setWindowMaterial(material).then(
+    (active) => {
+      if (lastDesktopMaterial !== "glass") return;
+      if (active) {
+        root.dataset.windowMaterial = "glass";
+      } else {
+        toastManager.add({
+          type: "info",
+          title: "Restart to see through the window",
+          description: "The desktop shows through Liquid Glass after the app restarts.",
+        });
+      }
+    },
+    (cause: unknown) => {
+      console.error("Could not set the desktop window material.", cause);
+      lastDesktopMaterial = undefined;
+    },
+  );
 }
 
 export function syncDesktopTheme(
