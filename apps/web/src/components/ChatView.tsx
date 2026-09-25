@@ -1785,6 +1785,8 @@ export default function ChatView(props: ChatViewProps) {
     useState<Record<string, number>>({});
   const shouldUseRightPanelSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const isMobileViewport = useMediaQuery("max-sm");
+  const hasTouchInput = useMediaQuery("(any-pointer: coarse)");
+  const shouldAutoFocusComposer = !isMobileViewport && !hasTouchInput;
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
   const [pullRequestDialogState, setPullRequestDialogState] =
     useState<PullRequestDialogState | null>(null);
@@ -5874,22 +5876,22 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeThread?.id, routeThreadKey]);
 
   useEffect(() => {
-    if (!activeThread?.id || terminalUiState.terminalOpen) return;
+    if (!activeThread?.id || terminalUiState.terminalOpen || !shouldAutoFocusComposer) return;
     const frame = window.requestAnimationFrame(() => {
       focusComposer();
     });
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [activeThread?.id, focusComposer, terminalUiState.terminalOpen]);
+  }, [activeThread?.id, focusComposer, shouldAutoFocusComposer, terminalUiState.terminalOpen]);
 
   // Tabbing back into the app lands focus wherever it last was, often the right panel or the
   // body. Put it in the composer unless something that takes typing already holds it. The
   // drawer terminal owns keyboard input while it is open, so it opts out here; a right panel
-  // terminal is a surface and is recognized by the predicate instead. Mobile is left alone so
-  // returning to the app does not raise the keyboard.
+  // terminal is a surface and is recognized by the predicate instead. Touch devices are left
+  // alone so returning to the app does not raise the keyboard.
   useEffect(() => {
-    if (!activeThread?.id || terminalUiState.terminalOpen || isMobileViewport) return;
+    if (!activeThread?.id || terminalUiState.terminalOpen || !shouldAutoFocusComposer) return;
     let frame: number | null = null;
     const onWindowFocus = () => {
       if (frame !== null) window.cancelAnimationFrame(frame);
@@ -5908,7 +5910,7 @@ export default function ChatView(props: ChatViewProps) {
       window.removeEventListener("focus", onWindowFocus);
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
-  }, [activeThread?.id, focusComposer, isMobileViewport, terminalUiState.terminalOpen]);
+  }, [activeThread?.id, focusComposer, shouldAutoFocusComposer, terminalUiState.terminalOpen]);
 
   useEffect(() => {
     if (!activeThread?.id) return;
@@ -6790,7 +6792,7 @@ export default function ChatView(props: ChatViewProps) {
       terminalUiOpenByThreadRef.current[activeThreadKey] = current;
       setTerminalFocusRequestId((value) => value + 1);
       return;
-    } else if (previous && !current) {
+    } else if (previous && !current && shouldAutoFocusComposer) {
       terminalUiOpenByThreadRef.current[activeThreadKey] = current;
       const frame = window.requestAnimationFrame(() => {
         focusComposer();
@@ -6801,7 +6803,7 @@ export default function ChatView(props: ChatViewProps) {
     }
 
     terminalUiOpenByThreadRef.current[activeThreadKey] = current;
-  }, [activeThreadKey, focusComposer, terminalUiState.terminalOpen]);
+  }, [activeThreadKey, focusComposer, shouldAutoFocusComposer, terminalUiState.terminalOpen]);
 
   const getShortcutContext = useCallback(
     (eventTarget: EventTarget | null = document.activeElement) => ({
