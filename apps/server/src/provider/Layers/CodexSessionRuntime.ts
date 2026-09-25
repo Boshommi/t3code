@@ -1331,6 +1331,9 @@ const CodexThreadSourceMetadata = Schema.Struct({
 });
 const decodeCodexThreadSourceMetadata = Schema.decodeUnknownEffect(CodexThreadSourceMetadata);
 
+const CodexForkedThread = Schema.Struct({ thread: Schema.Struct({ id: Schema.String }) });
+const decodeCodexForkedThread = Schema.decodeUnknownEffect(CodexForkedThread);
+
 const MAX_SUBAGENT_DEPTH = 8;
 
 /** True when `threadId` was spawned (directly or through nested agents) by `rootThreadId`. */
@@ -2706,13 +2709,26 @@ export const makeCodexSessionRuntime = (
           Effect.gen(function* () {
             let prompt = input.question;
             if (entry.forkThreadId === undefined) {
-              const forked = yield* client.request("thread/fork", {
+              // Raw request: current Codex rejects an ephemeral fork of a
+              // paginated thread unless `excludeTurns` (absent from the
+              // generated schema) keeps the history out of the response.
+              const forkResponse = yield* client.raw.request("thread/fork", {
                 threadId: providerThreadId,
                 ephemeral: true,
+                excludeTurns: true,
                 sandbox: "read-only",
                 approvalPolicy: "never",
                 developerInstructions: SIDE_CONVERSATION_INSTRUCTIONS,
               });
+              const forked = yield* decodeCodexForkedThread(forkResponse).pipe(
+                Effect.mapError((error) =>
+                  CodexErrors.CodexAppServerRequestError.invalidPayload(
+                    "thread/fork",
+                    "decode-payload",
+                    error,
+                  ),
+                ),
+              );
               entry.forkThreadId = forked.thread.id;
               sideForkThreadIds.add(forked.thread.id);
               // A fresh fork of a side thread with answers (the app-server

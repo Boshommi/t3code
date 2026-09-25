@@ -850,6 +850,7 @@ describe("CodexSessionRuntime side questions", () => {
       );
       assert.deepInclude(requests[0]!.params, {
         ephemeral: true,
+        excludeTurns: true,
         sandbox: "read-only",
         approvalPolicy: "never",
       });
