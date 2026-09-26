@@ -1707,9 +1707,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             {prBadge}
             {/* Give hover actions their own width so they cannot cover the PR badge or title. */}
             <span className="relative flex h-6 min-w-7 shrink-0 items-center justify-end text-xs tabular-nums text-secondary-label">
+              {/* The transparent, positioned label otherwise intercepts clicks on the actions. */}
               <span
                 className={cn(
-                  "transition-opacity",
+                  "pointer-events-none transition-opacity",
                   hasHoverActions &&
                     "group-hover/sidebar-row:absolute group-hover/sidebar-row:right-0 group-hover/sidebar-row:opacity-0 group-has-[:focus-visible]/sidebar-row:absolute group-has-[:focus-visible]/sidebar-row:right-0 group-has-[:focus-visible]/sidebar-row:opacity-0",
                   snoozeMenuOpen && "absolute right-0 opacity-0",
