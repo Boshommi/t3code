@@ -159,6 +159,7 @@ import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import { listLinkedPullRequestThreads } from "./pullRequest/linkedThreads.ts";
 import { pullRequestSyncKey } from "./pullRequest/pullRequestSyncKey.ts";
+import { PromptStash } from "./promptStash.ts";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as PullRequestSyncReactor from "./orchestration/PullRequestSyncReactor.ts";
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
@@ -580,6 +581,7 @@ const makeWsRpcLayer = (
       const serverUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
       const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
+      const promptStash = yield* PromptStash;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
@@ -2541,6 +2543,22 @@ const makeWsRpcLayer = (
             }),
             { "rpc.aggregate": "server" },
           ),
+        [WS_METHODS.promptStashSubscribe]: () =>
+          observeRpcStream(WS_METHODS.promptStashSubscribe, promptStash.subscribe, {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.promptStashGet]: ({ id }) =>
+          observeRpcEffect(WS_METHODS.promptStashGet, promptStash.get(id), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.promptStashSave]: ({ entry }) =>
+          observeRpcEffect(WS_METHODS.promptStashSave, promptStash.save(entry), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.promptStashDelete]: ({ id }) =>
+          observeRpcEffect(WS_METHODS.promptStashDelete, promptStash.remove(id), {
+            "rpc.aggregate": "server",
+          }),
         [WS_METHODS.serverGetSettings]: (_input) =>
           observeRpcEffect(
             WS_METHODS.serverGetSettings,

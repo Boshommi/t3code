@@ -92,6 +92,7 @@ import * as ThreadPullRequestReactor from "./orchestration/ThreadPullRequestReac
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry.ts";
+import * as PromptStash from "./promptStash.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as NativeAppIconResolver from "./assets/NativeAppIconResolver.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
@@ -488,6 +489,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(AntigravityInstallationRefreshLive),
   Layer.provideMerge(ProviderAuthServiceLive),
   // Core Services
+  Layer.provideMerge(PromptStash.layer.pipe(Layer.provide(SqlitePersistenceLayerLive))),
   Layer.provideMerge(ServerSettingsLayerLive),
   Layer.provideMerge(CheckpointingLayerLive),
   // `GitHubCli` is the registry's own instance, exposed because the asset route fetches

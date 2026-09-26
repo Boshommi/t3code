@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
+import { PromptStashEntry, PromptStashSummary, PromptStashError } from "./promptStash.ts";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
@@ -368,6 +369,10 @@ export const WS_METHODS = {
   serverCommitDesktopUpdate: "server.commitDesktopUpdate",
   serverUpsertKeybinding: "server.upsertKeybinding",
   serverRemoveKeybinding: "server.removeKeybinding",
+  promptStashSubscribe: "promptStash.subscribe",
+  promptStashGet: "promptStash.get",
+  promptStashSave: "promptStash.save",
+  promptStashDelete: "promptStash.delete",
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
   serverDiscoverSourceControl: "server.discoverSourceControl",
@@ -568,6 +573,28 @@ const WsServerCommitDesktopUpdateRpc = Rpc.make(WS_METHODS.serverCommitDesktopUp
   payload: DesktopUpdateCommitInput,
   success: ServerSelfUpdateResult,
   error: Schema.Union([ServerSelfUpdateError, EnvironmentAuthorizationError]),
+});
+
+const WsPromptStashSubscribeRpc = Rpc.make(WS_METHODS.promptStashSubscribe, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(PromptStashSummary),
+  error: Schema.Union([PromptStashError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+const WsPromptStashGetRpc = Rpc.make(WS_METHODS.promptStashGet, {
+  payload: Schema.Struct({ id: Schema.String }),
+  success: Schema.NullOr(PromptStashEntry),
+  error: Schema.Union([PromptStashError, EnvironmentAuthorizationError]),
+});
+const WsPromptStashSaveRpc = Rpc.make(WS_METHODS.promptStashSave, {
+  payload: Schema.Struct({ entry: PromptStashEntry }),
+  success: Schema.Void,
+  error: Schema.Union([PromptStashError, EnvironmentAuthorizationError]),
+});
+const WsPromptStashDeleteRpc = Rpc.make(WS_METHODS.promptStashDelete, {
+  payload: Schema.Struct({ id: Schema.String }),
+  success: Schema.Void,
+  error: Schema.Union([PromptStashError, EnvironmentAuthorizationError]),
 });
 
 const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {
@@ -1387,6 +1414,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerCommitDesktopUpdateRpc,
   WsServerUpsertKeybindingRpc,
   WsServerRemoveKeybindingRpc,
+  WsPromptStashSubscribeRpc,
+  WsPromptStashGetRpc,
+  WsPromptStashSaveRpc,
+  WsPromptStashDeleteRpc,
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
   WsServerDiscoverSourceControlRpc,

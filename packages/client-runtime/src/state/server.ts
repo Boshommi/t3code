@@ -1092,6 +1092,22 @@ export function createServerEnvironmentAtoms<R, E>(
       scheduler: configScheduler,
       concurrency: configConcurrency,
     }),
+    promptStash: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:prompt-stash",
+      tag: WS_METHODS.promptStashSubscribe,
+    }),
+    getPromptStashEntry: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:prompt-stash-get",
+      tag: WS_METHODS.promptStashGet,
+    }),
+    savePromptStashEntry: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:prompt-stash-save",
+      tag: WS_METHODS.promptStashSave,
+    }),
+    deletePromptStashEntry: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:prompt-stash-delete",
+      tag: WS_METHODS.promptStashDelete,
+    }),
     updateSettings: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:update-settings",
       tag: WS_METHODS.serverUpdateSettings,

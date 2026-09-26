@@ -126,6 +126,12 @@ the current prompt and its attachments for later. Wait for uploads to finish fir
 With an empty composer, the same shortcut restores a single stash or opens the
 stash menu when there are several.
 
+Saved prompts are stored on the connected server and shared with other web and desktop
+clients connected to that environment. Existing local prompts migrate automatically when
+you open a composer on a server; prompts with uploaded files migrate to the server that owns the files.
+Migration keeps the local copy until the server confirms it is saved. Saving new prompts
+requires a connection to the server.
+
 Stashes containing uploaded files must be restored in their original environment.
 Those files are retained for 24 hours. After an upload expires, restore the prompt
 and use **Attach again** or remove the missing file before sending.

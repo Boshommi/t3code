@@ -114,12 +114,9 @@ import {
   useComposerThreadDraft,
   useEffectiveComposerModelState,
 } from "../../composerDraftStore";
-import {
-  MAX_STASH_ENTRIES,
-  partitionStashAttachments,
-  usePromptStashStore,
-  type PromptStashEntry,
-} from "../../promptStashStore";
+import { MAX_STASH_ENTRIES, partitionStashAttachments } from "../../promptStashStore";
+import { type PromptStashSummary } from "@t3tools/contracts";
+import { usePromptStash } from "../../hooks/usePromptStash";
 import { ComposerStashBadge } from "./ComposerStashBadge";
 import { ComposerStashMenu } from "./ComposerStashMenu";
 import { useComposerMenuState } from "./useComposerMenuState";
@@ -4049,10 +4046,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Files remain tied to the environment that owns their uploaded bytes.
   // Restore copies a saved prompt into the composer; the entry stays until
   // the user deletes it.
-  const stashQueue = usePromptStashStore((state) => state.entries);
-  const stashEntryToQueue = usePromptStashStore((state) => state.stashEntry);
-  const takeStashEntry = usePromptStashStore((state) => state.takeEntry);
-  const finalizeStashEntryImages = usePromptStashStore((state) => state.finalizeEntryImages);
+  const {
+    entries: stashQueue,
+    stashEntry: stashEntryToQueue,
+    takeEntry: takeStashEntry,
+    getEntry: getStashEntry,
+  } = usePromptStash(environmentId);
 
   useEffect(() => {
     return () => {
@@ -4076,8 +4075,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, []);
 
   const restoreStashEntry = useCallback(
-    async (menuEntry: PromptStashEntry) => {
-      const filesToVerify = menuEntry.files ?? [];
+    async (menuEntry: PromptStashSummary) => {
+      const entry = await getStashEntry(menuEntry.id);
+      if (!entry) {
+        toastManager.add({
+          type: "error",
+          title: "Could not load saved prompt",
+          description: "Check your connection and try again.",
+        });
+        return;
+      }
+      const filesToVerify = entry.files ?? [];
       if (filesToVerify.some((file) => file.environmentId !== environmentId)) {
         toastManager.add({
           type: "error",
@@ -4114,8 +4122,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
 
       // Restore copies into the composer. Saved prompts stay until deleted.
-      const entry = menuEntry;
-
       const rewrittenContextIds = entry.records
         ? importContextRecords(entry.records, null)
         : new Map<string, string>();
@@ -4323,6 +4329,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
     },
     [
+      getStashEntry,
       addComposerDraftFiles,
       addComposerDraftImages,
       composerDraftTarget,
@@ -4336,8 +4343,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
 
   const deleteStashEntry = useCallback(
-    (entry: PromptStashEntry) => {
-      const { entry: removed, durable } = takeStashEntry(entry.id);
+    async (entry: PromptStashSummary) => {
+      const { entry: removed, durable } = await takeStashEntry(entry.id);
       if (!stashQueue.some((candidate) => candidate.id !== entry.id)) {
         setIsStashMenuOpen(false);
       }
@@ -4353,9 +4360,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       if (!durable) {
         toastManager.add({
           type: "warning",
-          title: "Stash entry may come back",
-          description:
-            "Browser storage rejected the delete, so this prompt could reappear after a reload.",
+          title: "Could not delete saved prompt",
+          description: "The delete could not be saved. Check your connection and try again.",
           data: { hideCopyButton: true },
         });
       }
@@ -4374,7 +4380,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       });
       return;
     }
-    const prompt = promptRef.current.trim();
+    const originalPrompt = promptRef.current;
+    const prompt = originalPrompt.trim();
     const images = [...composerImagesRef.current];
     const files = [...composerFilesRef.current];
     // Context chips keep their links in the prompt; the payloads behind them travel as
@@ -4391,7 +4398,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ),
     ];
     if (prompt.length === 0 && images.length === 0 && files.length === 0) {
-      const entries = usePromptStashStore.getState().entries;
+      const entries = stashQueue;
       const entry = entries.length === 1 ? entries[0] : undefined;
       if (entry && !entry.pendingImageCount) {
         await restoreStashEntry(entry);
@@ -4428,10 +4435,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       });
     }
     // A repeat ⌘S on the *same* still-unencoded snapshot would stash it
-    // twice. Guard on the snapshot itself rather than a bare boolean: once
-    // the composer has been cleared the user can type something genuinely
-    // new (or switch threads) while encoding continues, and that deserves its
-    // own entry.
+    // twice. Other drafts can still be saved while this one is in flight.
     const attachmentKey = images
       .map((image) => `image:${image.id}`)
       .concat(files.map((file) => `file:${file.id}`))
@@ -4441,35 +4445,57 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     stashInFlightRef.current.add(snapshotKey);
 
     const stashTarget = composerDraftTarget;
+    const draftSnapshot = getComposerDraft(stashTarget);
     const entryId = randomUUID();
     try {
-      // Persist the text-only entry *first*, then clear. Ordering matters in
-      // both directions: writing before clearing means a crash or closed tab
-      // mid-encode still leaves the prompt recoverable, while clearing before
-      // the async image work means edits typed during encoding are not wiped.
-      // Images are appended to the stored entry as they finish encoding.
-      const { evicted, written, durable } = stashEntryToQueue({
+      // Compress saved copies to bound upload and restore costs. Keep originals in the draft
+      // until the complete entry has been saved.
+      const candidateAttachments: PersistedComposerImageAttachment[] = [];
+      const oversizedImageNames: string[] = [];
+      const unreadableImageNames: string[] = [];
+      for (const image of images) {
+        const result = await compressImageForStash(image.file);
+        if (!result.ok) {
+          // "too large" and "could not be read" are distinct outcomes; the
+          // menu and restore toast report them separately.
+          (result.reason === "too-large" ? oversizedImageNames : unreadableImageNames).push(
+            image.name,
+          );
+          continue;
+        }
+        candidateAttachments.push({
+          id: image.id,
+          name: image.name,
+          mimeType: result.image.mimeType,
+          sizeBytes: result.image.sizeBytes,
+          dataUrl: result.image.dataUrl,
+          ...(image.source
+            ? { source: resizeSnapShotSource(image.source, result.image.imageSize) }
+            : {}),
+        });
+      }
+      const { kept, droppedNames } = partitionStashAttachments(candidateAttachments);
+
+      const { evicted, written, durable } = await stashEntryToQueue({
         id: entryId,
         createdAt: new Date().toISOString(),
         prompt,
-        attachments: [],
+        attachments: kept,
         ...(stashedFiles.length > 0 ? { files: stashedFiles } : {}),
-        droppedImageNames: [],
-        unreadableImageNames: [],
-        pendingImageCount: images.length,
+        droppedImageNames: [...oversizedImageNames, ...droppedNames],
+        unreadableImageNames,
+        pendingImageCount: 0,
         ...(stashedRecords.length > 0 ? { records: stashedRecords } : {}),
       });
 
       // Clearing the composer is only safe once the write actually landed.
-      // If it was rejected (quota) the store has already rolled itself back,
-      // so leave the composer untouched rather than making it the second
-      // casualty of a reload.
+      // A failed write leaves the draft available to retry.
       if (!written) {
         toastManager.add({
           type: "error",
           title: "Could not stash this prompt",
           description:
-            "Browser storage rejected the write, so the composer was left as-is. Free up site data and try again.",
+            "The prompt could not be saved. Your draft is still here; check your connection or available storage and try again.",
           data: { hideCopyButton: true },
         });
         return;
@@ -4487,6 +4513,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         });
       }
 
+      // A save is asynchronous. Never clear edits made while it was in flight, or another thread.
+      if (
+        composerTargetKey(stashTarget) !== composerDraftTargetKeyRef.current ||
+        getComposerDraft(stashTarget) !== draftSnapshot ||
+        promptRef.current !== originalPrompt
+      ) {
+        toastManager.add({
+          type: "info",
+          title: "Prompt saved",
+          description: "Your newer draft was kept in the composer.",
+        });
+        return;
+      }
       // Everything the entry carries leaves the draft with it.
       promptRef.current = "";
       clearComposerDraftPromptAndImages(stashTarget);
@@ -4521,68 +4560,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           data: { hideCopyButton: true },
         });
       }
-
-      // Images are re-encoded for the stash rather than stored verbatim: the
-      // composer allows up to 10MB per image, but localStorage gives the whole
-      // origin ~5MB. Only the stashed copy shrinks; the live attachment (and
-      // anything sent without stashing) keeps the original file.
-      const candidateAttachments: PersistedComposerImageAttachment[] = [];
-      const oversizedImageNames: string[] = [];
-      const unreadableImageNames: string[] = [];
-      for (const image of images) {
-        const result = await compressImageForStash(image.file);
-        if (!result.ok) {
-          // "too large" and "could not be read" are distinct outcomes; the
-          // menu and restore toast report them separately.
-          (result.reason === "too-large" ? oversizedImageNames : unreadableImageNames).push(
-            image.name,
-          );
-          continue;
-        }
-        candidateAttachments.push({
-          id: image.id,
-          name: image.name,
-          mimeType: result.image.mimeType,
-          sizeBytes: result.image.sizeBytes,
-          dataUrl: result.image.dataUrl,
-          ...(image.source
-            ? { source: resizeSnapShotSource(image.source, result.image.imageSize) }
-            : {}),
-        });
-      }
-      const { kept, droppedNames } = partitionStashAttachments(candidateAttachments);
-
-      const { attached, durable: imagesDurable } = finalizeStashEntryImages(entryId, {
-        attachments: kept,
-        droppedImageNames: [...oversizedImageNames, ...droppedNames],
-        unreadableImageNames,
-      });
-      if (attached) {
-        // The second phase can be rejected on its own: the text-only entry
-        // fit, but adding image payloads pushed past the quota. Disk would
-        // then still hold the phase-one entry with pendingImageCount set,
-        // which reads as an orphan after reload — so say so now. Gated on the
-        // entry write having been durable: on the in-memory fallback nothing
-        // is ever durable, and the session-only warning already covered it.
-        if (!imagesDurable && durable && images.length > 0) {
-          toastManager.add({
-            type: "warning",
-            title: "Stashed images were not saved",
-            description:
-              "The prompt was stashed, but browser storage rejected its images. They will be missing if you reload.",
-            data: { hideCopyButton: true },
-          });
-        }
-      } else if (kept.length > 0) {
-        // The entry was deleted before its images finished encoding, so they
-        // have nowhere to land. Say so rather than letting them evaporate.
-        toastManager.add({
-          type: "warning",
-          title: "Stashed images did not attach",
-          description: `That prompt was deleted before ${kept.length} image${kept.length === 1 ? "" : "s"} finished saving. Re-attach ${kept.length === 1 ? "it" : "them"} if you still need ${kept.length === 1 ? "it" : "them"}.`,
-          data: { hideCopyButton: true },
-        });
-      }
     } finally {
       // Must clear on every path: a throw that left this set would wedge this
       // snapshot's ⌘S until the composer remounts.
@@ -4601,7 +4578,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     removeComposerDraftReviewComment,
     removeComposerDraftPreviewAnnotation,
     environmentId,
-    finalizeStashEntryImages,
+    stashQueue,
+    getComposerDraft,
     promptRef,
     pulseStashBadge,
     restoreStashEntry,

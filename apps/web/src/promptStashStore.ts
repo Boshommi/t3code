@@ -1,11 +1,8 @@
-import { ComposerContextRecord, ForwardCompatibleArray } from "@t3tools/contracts";
+import { type EnvironmentId, PromptStashEntry as StashEntrySchema } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { create } from "zustand";
 
-import {
-  PersistedComposerFileAttachment,
-  PersistedComposerImageAttachment,
-} from "./composerDraftStore";
+import { PersistedComposerImageAttachment } from "./composerDraftStore";
 import { createMemoryStorage, type StateStorage } from "./lib/storage";
 
 export const PROMPT_STASH_STORAGE_KEY = "t3code:prompt-stash:v2";
@@ -35,35 +32,6 @@ export const MAX_STASH_ENTRY_ATTACHMENT_CHARS = 2_700_000;
  * Image payloads remain subject to the localStorage budget. Restore copies a
  * saved prompt into the composer; entries stay until deleted.
  */
-const StashEntrySchema = Schema.Struct({
-  id: Schema.String,
-  createdAt: Schema.String,
-  prompt: Schema.String,
-  attachments: Schema.Array(PersistedComposerImageAttachment),
-  files: Schema.optionalKey(Schema.Array(PersistedComposerFileAttachment)),
-  /** Names of images that exceeded the attachment budget and were not saved. */
-  droppedImageNames: Schema.Array(Schema.String),
-  /**
-   * Names of images that could not be decoded or re-encoded at all — a
-   * distinct failure from exceeding the size budget, so the menu can explain
-   * which actually happened. Optional: entries written before this field
-   * existed decode without it.
-   */
-  unreadableImageNames: Schema.optionalKey(Schema.Array(Schema.String)),
-  /**
-   * Images still being encoded when the entry was written. The entry is
-   * persisted before its images so a crash mid-encode cannot lose the prompt;
-   * this field lets the UI show "N images still saving" until
-   * `finalizeEntryImages` lands, and flags entries orphaned by a reload.
-   */
-  pendingImageCount: Schema.optionalKey(Schema.Number),
-  /**
-   * Payloads behind the prompt's context links (terminal excerpts, review comments, preview
-   * annotations). Images and files have their own fields above. Optional: older entries
-   * decode without it.
-   */
-  records: Schema.optionalKey(ForwardCompatibleArray(ComposerContextRecord)),
-});
 export type PromptStashEntry = typeof StashEntrySchema.Type;
 
 const PersistedPromptStashState = Schema.Struct({
@@ -300,4 +268,58 @@ export const usePromptStashStore = create<PromptStashStoreState>()((set, get) =>
 export function writePromptStashStorageForTest(raw: string): void {
   baseStashStorage.setItem(PROMPT_STASH_STORAGE_KEY, raw);
   usePromptStashStore.setState({ entries: readPersistedEntries() ?? [] });
+}
+
+const MIGRATION_TARGETS_KEY = "t3code:prompt-stash:migration-targets:v1";
+const migrationInFlight = new Set<string>();
+const decodeMigrationTargets = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.String)),
+);
+
+/** Local entries remain usable until their destination server acknowledges the import. */
+export function localPromptStashEntriesForEnvironment(
+  entries: ReadonlyArray<PromptStashEntry>,
+  environmentId: EnvironmentId,
+): ReadonlyArray<PromptStashEntry> {
+  let targets: Record<string, string> = {};
+  try {
+    const raw = baseStashStorage.getItem(MIGRATION_TARGETS_KEY);
+    if (typeof raw === "string" && raw) targets = decodeMigrationTargets(raw);
+  } catch {
+    // Even if storage is unavailable, keep the in-memory copies recoverable.
+  }
+  return entries.filter((entry) => {
+    const target = targets[entry.id] ?? entry.files?.[0]?.environmentId ?? environmentId;
+    return target === environmentId;
+  });
+}
+
+/** Acknowledge each entry separately; interrupted migrations resume without replacing server data. */
+export async function migrateLocalPromptStash(
+  environmentId: EnvironmentId,
+  save: (entry: PromptStashEntry) => Promise<boolean>,
+): Promise<void> {
+  for (const entry of usePromptStashStore.getState().entries) {
+    if (migrationInFlight.has(entry.id) || entry.pendingImageCount) continue;
+    migrationInFlight.add(entry.id);
+    try {
+      const raw = baseStashStorage.getItem(MIGRATION_TARGETS_KEY);
+      const targets = typeof raw === "string" && raw ? decodeMigrationTargets(raw) : {};
+      const fileEnvironment = entry.files?.[0]?.environmentId;
+      if (entry.files?.some((file) => file.environmentId !== fileEnvironment)) continue;
+      const target = targets[entry.id] ?? fileEnvironment ?? environmentId;
+      if (target !== environmentId) continue;
+      baseStashStorage.setItem(
+        MIGRATION_TARGETS_KEY,
+        JSON.stringify({ ...targets, [entry.id]: target }),
+      );
+      if (await save(entry)) {
+        usePromptStashStore.getState().takeEntry(entry.id);
+      }
+    } catch {
+      // Keep the local copy. The next connection or list change retries the migration.
+    } finally {
+      migrationInFlight.delete(entry.id);
+    }
+  }
 }
