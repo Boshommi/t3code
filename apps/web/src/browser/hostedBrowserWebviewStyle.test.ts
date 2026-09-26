@@ -63,7 +63,7 @@ describe("resolveHostedBrowserWebviewWrapperStyle", () => {
     });
   });
 
-  it("keeps an active background task paintable behind the app", () => {
+  it("keeps an active background task paintable without showing through a translucent app", () => {
     const style = resolveHostedBrowserWebviewWrapperStyle({
       active: false,
       renderingActive: true,
@@ -79,6 +79,7 @@ describe("resolveHostedBrowserWebviewWrapperStyle", () => {
       zIndex: -1,
       pointerEvents: "none",
       visibility: "visible",
+      opacity: 0,
     });
   });
 

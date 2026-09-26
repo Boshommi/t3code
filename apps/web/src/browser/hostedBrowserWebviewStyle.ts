@@ -14,6 +14,7 @@ export interface HostedBrowserWebviewWrapperStyle {
   readonly pointerEvents: "auto" | "none";
   readonly borderRadius?: number;
   readonly visibility?: "hidden" | "visible";
+  readonly opacity?: number;
 }
 
 export const HIDDEN_BROWSER_WEBVIEW_OFFSET = -100_000;
@@ -52,6 +53,8 @@ export function resolveHostedBrowserWebviewWrapperStyle(input: {
     // Electron stops compositing a guest that is fully outside the window, even
     // when background throttling is disabled. Keep capture-active guests inside
     // the viewport but behind the app so recordings receive complete frames.
+    // The app can be translucent (Liquid Glass), so stacking alone cannot hide
+    // these guests. Opacity hides the embed without suspending guest capture.
     return {
       left: 0,
       top: 0,
@@ -60,6 +63,7 @@ export function resolveHostedBrowserWebviewWrapperStyle(input: {
       zIndex: -1,
       pointerEvents: "none",
       visibility: "visible",
+      opacity: 0,
     };
   }
 
