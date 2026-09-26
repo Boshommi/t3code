@@ -5,7 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { ComposerStashMenu } from "./ComposerStashMenu";
 
 describe("ComposerStashMenu", () => {
-  it("shows saved image thumbnails and incomplete image states", () => {
+  it("shows incomplete image states", () => {
     const markup = renderToStaticMarkup(
       <ComposerStashMenu
         entries={[
@@ -13,15 +13,7 @@ describe("ComposerStashMenu", () => {
             id: "with-images",
             createdAt: new Date(0).toISOString(),
             prompt: "Compare these screenshots",
-            attachments: [
-              {
-                id: "image-one",
-                name: "before.png",
-                mimeType: "image/png",
-                sizeBytes: 128,
-                dataUrl: "data:image/png;base64,AA==",
-              },
-            ],
+            imageCount: 1,
             droppedImageNames: ["after.png"],
             unreadableImageNames: [],
             pendingImageCount: 0,
@@ -30,7 +22,7 @@ describe("ComposerStashMenu", () => {
             id: "saving-images",
             createdAt: new Date(0).toISOString(),
             prompt: "Save this image",
-            attachments: [],
+            imageCount: 0,
             droppedImageNames: [],
             unreadableImageNames: [],
             pendingImageCount: 1,
@@ -43,7 +35,6 @@ describe("ComposerStashMenu", () => {
       />,
     );
 
-    expect(markup).toContain('src="data:image/png;base64,AA=="');
     expect(markup).toContain("1 image dropped");
     expect(markup).toContain("saving 1 image");
   });
@@ -56,15 +47,7 @@ describe("ComposerStashMenu", () => {
             id: "mixed-attachments",
             createdAt: new Date(0).toISOString(),
             prompt: "",
-            attachments: [
-              {
-                id: "image-one",
-                name: "before.png",
-                mimeType: "image/png",
-                sizeBytes: 128,
-                dataUrl: "data:image/png;base64,AA==",
-              },
-            ],
+            imageCount: 1,
             files: [
               {
                 id: "file-one",

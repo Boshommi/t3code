@@ -150,6 +150,7 @@ import {
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
+import * as PromptStash from "./promptStash.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
@@ -839,6 +840,7 @@ const buildAppUnderTest = (options?: {
             listBindings: () => Effect.succeed([]),
             ...options?.layers?.providerSessionDirectory,
           }),
+          PromptStash.layer,
           Layer.mock(DeviceService.DeviceService)({
             state: Effect.succeed(EMPTY_DEVICE_STATE),
             currentReadiness: () => Effect.succeed(null),
@@ -8060,6 +8062,79 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             connectionMethod: "direct",
           },
         ],
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("saved prompts allow read-only access without allowing mutations", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+      const token = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+        scope: "orchestration:read",
+      });
+      const ticketResponse = yield* HttpClient.post("/api/auth/websocket-ticket", {
+        headers: { authorization: `Bearer ${token.body.access_token ?? ""}` },
+      });
+      const { ticket } = yield* responseJsonEffect<{ readonly ticket: string }>(ticketResponse);
+      const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(ticket)}`;
+      yield* withWsRpcClient(wsUrl, (client) =>
+        Effect.gen(function* () {
+          assert.deepEqual(
+            yield* client[WS_METHODS.promptStashSubscribe]({}).pipe(
+              Stream.runHead,
+              Effect.map(Option.getOrThrow),
+            ),
+            [],
+          );
+          assert.equal(yield* client[WS_METHODS.promptStashGet]({ id: "missing" }), null);
+          const entry = {
+            id: "denied",
+            createdAt: "2026-09-26T00:00:00.000Z",
+            prompt: "denied",
+            attachments: [],
+            droppedImageNames: [],
+          };
+          const saveError = yield* client[WS_METHODS.promptStashSave]({ entry }).pipe(Effect.flip);
+          const deleteError = yield* client[WS_METHODS.promptStashDelete]({ id: "denied" }).pipe(
+            Effect.flip,
+          );
+          assert.equal(saveError._tag, "EnvironmentAuthorizationError");
+          assert.equal(deleteError._tag, "EnvironmentAuthorizationError");
+        }),
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("shares saved prompts and deletions across websocket clients", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+      const wsUrl = yield* getWsServerUrl("/ws");
+      yield* withWsRpcClient(wsUrl, (reader) =>
+        withWsRpcClient(wsUrl, (writer) =>
+          Effect.gen(function* () {
+            const entry = {
+              id: "shared-prompt",
+              createdAt: "2026-09-26T00:00:00.000Z",
+              prompt: "Resume this later",
+              attachments: [],
+              droppedImageNames: [],
+            };
+            let received = 0;
+            const snapshots = yield* reader[WS_METHODS.promptStashSubscribe]({}).pipe(
+              Stream.tap(() =>
+                ++received === 1 ? writer[WS_METHODS.promptStashSave]({ entry }) : Effect.void,
+              ),
+              Stream.take(2),
+              Stream.runCollect,
+            );
+            assert.deepEqual(snapshots[0], []);
+            assert.equal(snapshots[1]?.[0]?.id, entry.id);
+            assert.deepEqual(yield* reader[WS_METHODS.promptStashGet]({ id: entry.id }), entry);
+            yield* writer[WS_METHODS.promptStashDelete]({ id: entry.id });
+            yield* writer[WS_METHODS.promptStashSave]({ entry });
+            assert.equal(yield* reader[WS_METHODS.promptStashGet]({ id: entry.id }), null);
+          }),
+        ),
       );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );

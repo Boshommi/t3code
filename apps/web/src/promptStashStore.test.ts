@@ -12,6 +12,7 @@ import {
   PROMPT_STASH_STORAGE_KEY,
   MAX_STASH_ENTRY_ATTACHMENT_CHARS,
   partitionStashAttachments,
+  localPromptStashEntriesForEnvironment,
   usePromptStashStore,
   writePromptStashStorageForTest,
   type PromptStashEntry,
@@ -322,5 +323,93 @@ describe("prompt stash context records", () => {
     });
     const taken = usePromptStashStore.getState().takeEntry("entry-records");
     expect(taken.entry?.records).toEqual(records);
+  });
+});
+
+describe("server migration", () => {
+  beforeEach(resetPromptStashStore);
+  afterEach(resetPromptStashStore);
+
+  it("keeps failed entries locally and removes only acknowledged entries", async () => {
+    const { migrateLocalPromptStash } = await import("./promptStashStore");
+    const environmentId = EnvironmentId.make("migration-server");
+    usePromptStashStore.getState().stashEntry(makeEntry({ id: "migration-fail" }));
+    usePromptStashStore.getState().stashEntry(makeEntry({ id: "migration-ok" }));
+    const saved: string[] = [];
+    await migrateLocalPromptStash(environmentId, async (entry) => {
+      saved.push(entry.id);
+      return entry.id === "migration-ok";
+    });
+    expect(saved).toEqual(["migration-ok", "migration-fail"]);
+    expect(usePromptStashStore.getState().entries.map((entry) => entry.id)).toEqual([
+      "migration-fail",
+    ]);
+    await migrateLocalPromptStash(environmentId, async () => true);
+    expect(usePromptStashStore.getState().entries).toEqual([]);
+  });
+
+  it("pins an interrupted migration to its server and routes uploaded files to their owner", async () => {
+    const { migrateLocalPromptStash } = await import("./promptStashStore");
+    const first = EnvironmentId.make("migration-first");
+    const second = EnvironmentId.make("migration-second");
+    usePromptStashStore.getState().stashEntry(makeEntry({ id: "migration-pinned" }));
+    await migrateLocalPromptStash(first, async () => false);
+    const saved: string[] = [];
+    await migrateLocalPromptStash(second, async (entry) => {
+      saved.push(entry.id);
+      return true;
+    });
+    expect(saved).toEqual([]);
+    expect(
+      localPromptStashEntriesForEnvironment(usePromptStashStore.getState().entries, first).map(
+        (entry) => entry.id,
+      ),
+    ).toEqual(["migration-pinned"]);
+    expect(
+      localPromptStashEntriesForEnvironment(usePromptStashStore.getState().entries, second),
+    ).toEqual([]);
+    usePromptStashStore.getState().stashEntry({
+      ...makeEntry({ id: "migration-file" }),
+      files: [
+        {
+          id: "file",
+          name: "a.pdf",
+          mimeType: "application/pdf",
+          sizeBytes: 1,
+          attachmentId: "upload",
+          environmentId: second,
+        },
+      ],
+    });
+    await migrateLocalPromptStash(first, async (entry) => {
+      saved.push(entry.id);
+      return true;
+    });
+    expect(saved).toEqual(["migration-pinned"]);
+    await migrateLocalPromptStash(second, async (entry) => {
+      saved.push(entry.id);
+      return true;
+    });
+    expect(saved).toEqual(["migration-pinned", "migration-file"]);
+  });
+
+  it("does not migrate one entry twice when multiple composers mount", async () => {
+    const { migrateLocalPromptStash } = await import("./promptStashStore");
+    usePromptStashStore.getState().stashEntry(makeEntry({ id: "migration-concurrent" }));
+    const environmentId = EnvironmentId.make("migration-concurrent-server");
+    let resolveSave!: (saved: boolean) => void;
+    let calls = 0;
+    const save = () => {
+      calls++;
+      return new Promise<boolean>((resolve) => {
+        resolveSave = resolve;
+      });
+    };
+    const first = migrateLocalPromptStash(environmentId, save);
+    await migrateLocalPromptStash(environmentId, save);
+    expect(calls).toBe(1);
+    resolveSave(true);
+    await first;
+    expect(usePromptStashStore.getState().entries).toEqual([]);
   });
 });

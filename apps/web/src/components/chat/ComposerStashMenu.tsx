@@ -1,25 +1,25 @@
-import { BookmarkIcon, FileIcon, FileTextIcon } from "lucide-react";
+import { BookmarkIcon, FileIcon, FileTextIcon, ImageIcon } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { cn } from "~/lib/utils";
-import { type PromptStashEntry } from "../../promptStashStore";
+import { type PromptStashSummary } from "@t3tools/contracts";
 import { ComposerBanner } from "./ComposerBanner";
 
 const SNIPPET_MAX_CHARS = 90;
 
 /** Images that did not make it into the entry, whatever the reason. */
-function missingImageCount(entry: PromptStashEntry): number {
+function missingImageCount(entry: PromptStashSummary): number {
   return entry.droppedImageNames.length + (entry.unreadableImageNames?.length ?? 0);
 }
 
-function stashEntrySnippet(entry: PromptStashEntry): string {
+function stashEntrySnippet(entry: PromptStashSummary): string {
   const trimmed = assistantCitationsToPlainText(entry.prompt).trim().replace(/\s+/g, " ");
   if (trimmed.length > 0) {
     return trimmed.length > SNIPPET_MAX_CHARS ? `${trimmed.slice(0, SNIPPET_MAX_CHARS)}…` : trimmed;
   }
-  const imageCount = entry.attachments.length + entry.droppedImageNames.length;
+  const imageCount = entry.imageCount + entry.droppedImageNames.length;
   const fileCount = entry.files?.length ?? 0;
   const attachmentCount = imageCount + fileCount;
   if (attachmentCount === 0) {
@@ -37,10 +37,10 @@ function stashEntrySnippet(entry: PromptStashEntry): string {
  * composer's handlers while the menu is open.
  */
 export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
-  entries: ReadonlyArray<PromptStashEntry>;
+  entries: ReadonlyArray<PromptStashSummary>;
   stashShortcutLabel: string | null;
-  onRestore: (entry: PromptStashEntry) => void;
-  onDelete: (entry: PromptStashEntry) => void;
+  onRestore: (entry: PromptStashSummary) => void;
+  onDelete: (entry: PromptStashSummary) => void;
   onClose: () => void;
 }) {
   const { entries, stashShortcutLabel, onRestore, onDelete, onClose } = props;
@@ -186,17 +186,10 @@ export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
                       {missingImageCount(entry) === 1 ? "" : "s"} dropped
                     </span>
                   ) : null}
-                  {entry.attachments.length > 0 ? (
-                    <span className="flex shrink-0 items-center -space-x-1.5">
-                      {entry.attachments.slice(0, 3).map((attachment) => (
-                        <img
-                          key={attachment.id}
-                          src={attachment.dataUrl}
-                          alt=""
-                          aria-hidden="true"
-                          className="size-4 rounded border border-border/70 object-cover"
-                        />
-                      ))}
+                  {entry.imageCount > 0 ? (
+                    <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
+                      <ImageIcon className="size-3" aria-hidden />
+                      {entry.imageCount}
                     </span>
                   ) : null}
                   {(entry.files?.length ?? 0) > 0 ? (
