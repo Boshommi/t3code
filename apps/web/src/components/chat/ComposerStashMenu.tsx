@@ -41,8 +41,8 @@ function stashEntrySnippet(entry: PromptStashSummary): string {
 export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
   entries: ReadonlyArray<PromptStashSummary>;
   stashShortcutLabel: string | null;
-  /** Other environments that can receive a copy of every saved prompt. */
-  copyTargets?: ReadonlyArray<{ id: string; label: string }>;
+  /** Other environments; those with `unavailableReason` are shown but cannot receive copies. */
+  copyTargets?: ReadonlyArray<{ id: string; label: string; unavailableReason?: string }>;
   onCopyAll?: (targetId: string) => void;
   onRestore: (entry: PromptStashSummary) => void;
   onDelete: (entry: PromptStashSummary) => void;
@@ -225,33 +225,42 @@ export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
               </ComposerBanner.Row>
             ))
           )}
-          {entries.length > 0 && copyTargets && copyTargets.length > 0 && onCopyAll ? (
-            <ComposerBanner.Row render={<li />}>
-              <ComposerBanner.Icon>
-                <CopyIcon />
-              </ComposerBanner.Icon>
-              <ComposerBanner.Content>
-                <Menu>
-                  <MenuTrigger
-                    className="min-w-0 flex-1 cursor-pointer truncate text-left text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                    aria-label="Copy all saved prompts to another environment"
-                    onPointerDown={(event) => event.preventDefault()}
-                  >
-                    Copy all to another environment…
-                  </MenuTrigger>
-                  <MenuPopup {...composerFloatingLayerProps} side="top" align="start">
-                    {copyTargets.map((target) => (
-                      <MenuItem key={target.id} onClick={() => onCopyAll(target.id)}>
-                        {target.label}
-                      </MenuItem>
-                    ))}
-                  </MenuPopup>
-                </Menu>
-              </ComposerBanner.Content>
-            </ComposerBanner.Row>
-          ) : null}
         </ComposerBanner.Children>
       </ComposerBanner.Scroll>
+      {entries.length > 0 && copyTargets && copyTargets.length > 0 && onCopyAll ? (
+        <ComposerBanner.Row>
+          <ComposerBanner.Icon>
+            <CopyIcon />
+          </ComposerBanner.Icon>
+          <ComposerBanner.Content>
+            <Menu>
+              <MenuTrigger
+                className="min-w-0 flex-1 cursor-pointer truncate text-left text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label="Copy all saved prompts to another environment"
+                onPointerDown={(event) => event.preventDefault()}
+              >
+                Copy all to another environment…
+              </MenuTrigger>
+              <MenuPopup {...composerFloatingLayerProps} side="top" align="start">
+                {copyTargets.map((target) => (
+                  <MenuItem
+                    key={target.id}
+                    disabled={target.unavailableReason !== undefined}
+                    onClick={() => onCopyAll(target.id)}
+                  >
+                    {target.label}
+                    {target.unavailableReason ? (
+                      <span className="ms-auto ps-3 text-muted-foreground text-xs">
+                        {target.unavailableReason}
+                      </span>
+                    ) : null}
+                  </MenuItem>
+                ))}
+              </MenuPopup>
+            </Menu>
+          </ComposerBanner.Content>
+        </ComposerBanner.Row>
+      ) : null}
     </ComposerBanner.Root>
   );
 });

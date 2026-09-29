@@ -4122,19 +4122,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const stashCopyTargets = useMemo(
     () =>
       environments
-        .filter(
-          (environment) =>
-            environment.environmentId !== environmentId &&
-            serverConfigs.get(environment.environmentId)?.environment.capabilities.promptStash ===
-              true,
-        )
-        .map((environment) => ({ id: environment.environmentId, label: environment.label })),
+        .filter((environment) => environment.environmentId !== environmentId)
+        .map((environment) => {
+          const config = serverConfigs.get(environment.environmentId);
+          const unavailableReason = !config
+            ? "Not connected"
+            : config.environment.capabilities.promptStash !== true
+              ? "Server needs an update"
+              : undefined;
+          return {
+            id: environment.environmentId,
+            label: environment.label,
+            ...(unavailableReason ? { unavailableReason } : {}),
+          };
+        }),
     [environments, environmentId, serverConfigs],
   );
   const copyStashToEnvironment = useCallback(
     async (targetId: string) => {
       const target = stashCopyTargets.find((candidate) => candidate.id === targetId);
-      if (!target) return;
+      if (!target || target.unavailableReason) return;
       const { copied, skipped, failed } = await copyStashEntries(target.id);
       const notes = [
         skipped > 0 ? `${skipped} with uploaded files stayed here.` : null,
