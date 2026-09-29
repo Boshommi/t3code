@@ -295,6 +295,7 @@ describe.each([
           terminalOpen: false,
           previewFocus: false,
           previewOpen: false,
+          rightPanelOpen: false,
           isWeb: true,
           isDesktop: false,
         })}

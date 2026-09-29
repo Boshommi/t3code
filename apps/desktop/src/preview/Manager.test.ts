@@ -605,7 +605,8 @@ describe("PreviewManager", () => {
         ).toHaveBeenCalledWith(true);
         const beforeInput = preview.listeners.get("before-input-event")!;
         for (const control of [false, true]) {
-          for (const key of ["k", ",", "w", "j", "q", "+"]) {
+          // Cmd/Ctrl+W is the preview's own close-tab shortcut.
+          for (const key of ["k", ",", "j", "q", "+"]) {
             for (const type of ["keyDown", "keyUp"]) {
               const preventDefault = vi.fn();
               beforeInput(
@@ -651,7 +652,12 @@ describe("PreviewManager", () => {
         yield* manager.registerWebview("tab_editing", 42);
 
         const popup = makeFaviconWebContents({ id: 43 });
-        preview.listeners.get("did-create-window")!({ webContents: popup.webContents } as never);
+        preview.listeners.get("did-create-window")!({
+          webContents: popup.webContents,
+          isDestroyed: () => false,
+          show: vi.fn(),
+          focus: vi.fn(),
+        } as never);
         expect(
           (popup.webContents as Electron.WebContents).setIgnoreMenuShortcuts,
         ).toHaveBeenCalledWith(true);
@@ -678,7 +684,8 @@ describe("PreviewManager", () => {
           );
           expect(contents.setIgnoreMenuShortcuts).toHaveBeenLastCalledWith(false);
 
-          beforeInput({ preventDefault } as never, { ...input, key: "w" } as never);
+          // Cmd+W closes a preview tab, so it gets its own event.
+          beforeInput({ preventDefault: vi.fn() } as never, { ...input, key: "w" } as never);
           expect(contents.setIgnoreMenuShortcuts).toHaveBeenLastCalledWith(true);
 
           // An injected paste in an unfocused guest cannot edit the active renderer.

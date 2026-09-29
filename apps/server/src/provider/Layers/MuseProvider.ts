@@ -259,7 +259,7 @@ const discoverMuseCatalog = (
       clientVersion: "0.0.0",
     },
     (connection) =>
-      Effect.gen(function* (): Generator<Effect.Effect<unknown, unknown>, MuseCatalog, unknown> {
+      Effect.gen(function* () {
         const catalog = yield* connection.request("model/list", {}, MspModelListResult);
         // Hosts older than 1.3 have no usage surface; the models still count.
         const usage = yield* connection

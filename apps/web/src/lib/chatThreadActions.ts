@@ -116,7 +116,7 @@ export function resolveStartFromOriginSettingsPatch(input: {
 
 export function resolveDefaultThreadEnvModeSettingsPatch(input: {
   nextEnvMode: DraftThreadEnvMode;
-  currentDefault: DraftThreadEnvMode;
+  currentDefault: DraftThreadEnvMode | null;
 }): { defaultThreadEnvMode: DraftThreadEnvMode } | null {
   if (input.nextEnvMode === input.currentDefault) {
     return null;

@@ -153,12 +153,7 @@ export function ThreadRouteView({ target }: { target: ThreadRouteTarget }) {
   }, [canonicalThreadRef, navigate]);
 
   useEffect(() => {
-    if (
-      target.kind !== "draft" ||
-      !draftsHydrated ||
-      draftSession ||
-      canonicalThreadRef
-    ) {
+    if (target.kind !== "draft" || !draftsHydrated || draftSession || canonicalThreadRef) {
       return;
     }
     void navigate({ to: "/", replace: true });

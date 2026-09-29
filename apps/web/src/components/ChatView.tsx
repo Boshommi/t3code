@@ -7526,7 +7526,7 @@ export default function ChatView(props: ChatViewProps) {
     // `/btw` never reaches the conversation, so it skips the queue and steer
     // paths below and works while a turn is running.
     const sideQuestion =
-      supportsSideQuestions && !directAnnotation && !queuedMessage && !composerHasNonPromptContent
+      supportsSideQuestions && !directAnnotation && !composerHasNonPromptContent
         ? parseSideQuestionCommand(promptRef.current)
         : null;
     if (sideQuestion !== null) {

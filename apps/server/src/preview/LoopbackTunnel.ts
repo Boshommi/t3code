@@ -80,6 +80,7 @@ export const pipeWebSocketToLoopback = (websocket: Socket.Socket, port: number) 
     Effect.gen(function* () {
       const tcp = yield* connectLoopback(port);
       const writeWs = yield* websocket.writer;
+      const { pull } = yield* websocket.reader;
       const outbound = yield* Queue.unbounded<Uint8Array>();
       tcp.on("data", (buffer: Buffer) => {
         Queue.offerUnsafe(outbound, new Uint8Array(buffer));
@@ -91,16 +92,26 @@ export const pipeWebSocketToLoopback = (websocket: Socket.Socket, port: number) 
         tcp.once("error", done);
       });
       const pumpTcp = Queue.take(outbound).pipe(
-        Effect.flatMap((chunk) => writeWs(chunk)),
+        Effect.flatMap((chunk) => writeWs.write(chunk)),
         Effect.forever,
         Effect.asVoid,
       );
-      yield* Effect.race(
-        websocket.run((chunk) => {
-          tcp.write(Buffer.from(chunk));
-        }),
-        Effect.race(pumpTcp, tcpClosed),
-      ).pipe(Effect.ensuring(Effect.sync(() => tcp.destroy())));
+      const pumpWs = pull.pipe(
+        Effect.flatMap((chunks) =>
+          Effect.sync(() => {
+            for (const chunk of chunks) tcp.write(chunk);
+          }),
+        ),
+        Effect.forever,
+        // The client closing the tunnel ends the pull; that is a normal end.
+        Effect.catchIf(
+          (error) => error.reason._tag === "SocketCloseError",
+          () => Effect.void,
+        ),
+      );
+      yield* Effect.race(pumpWs, Effect.race(pumpTcp, tcpClosed)).pipe(
+        Effect.ensuring(Effect.sync(() => tcp.destroy())),
+      );
     }),
   );
 

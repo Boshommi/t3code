@@ -517,7 +517,6 @@ interface ExpectedAgentInput {
   readonly expiresAt: number;
 }
 
-
 /**
  * Protocols a preview page may open in a real popup window.
  *
@@ -2010,16 +2009,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           webContents.getFocusedWebContents() !== contents,
       );
     };
-    // A popup opens with Electron's default handler, so the page inside it could
-    // otherwise spawn native windows without limit. Nothing in an OAuth flow
-    // opens a second popup, so the chain stops at the first one.
-    const windowCreated = (window: Electron.BrowserWindow): void => {
-      window.webContents.setIgnoreMenuShortcuts(true);
-      window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-      window.webContents.on("before-input-event", (_event, input) => {
-        syncMenuShortcuts(window.webContents, input);
-      });
-    };
     const requestCloseTab = Effect.fn("PreviewManager.requestCloseTab")(function* () {
       const mainWindow = yield* Ref.get(mainWindowRef);
       if (Option.isNone(mainWindow) || mainWindow.value.isDestroyed()) {
@@ -2084,6 +2073,10 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       target.on("did-create-window", handlePreviewPopupCreated);
     };
     const handlePreviewPopupCreated = (child: BrowserWindow): void => {
+      child.webContents.setIgnoreMenuShortcuts(true);
+      child.webContents.on("before-input-event", (_event, input) => {
+        syncMenuShortcuts(child.webContents, input);
+      });
       attachPreviewWindowOpenHandler(child.webContents);
       // Touch ID / the system passkey sheet attach to the focused window.
       if (!child.isDestroyed()) {
@@ -2105,7 +2098,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         wc.off("dom-ready", restoreRecordingCursor);
         wc.off("did-fail-load", failed as never);
         wc.off("audio-state-changed", audioStateChanged);
-        wc.off("did-create-window", windowCreated);
         wc.off("before-input-event", beforeInput);
         wc.off("did-create-window", handlePreviewPopupCreated);
         wc.ipc.off(HUMAN_INPUT_CHANNEL, humanInput);

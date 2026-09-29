@@ -1774,7 +1774,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                         </button>
                       ) : null}
                       {showSnoozeButton ? (
-                        <SnoozePopoverButton
+                        <SnoozeMenuButton
                           open={snoozeMenuOpen}
                           onOpenChange={setSnoozeMenuOpen}
                           onSnooze={handleSnoozePreset}
@@ -4569,7 +4569,9 @@ export default function Sidebar() {
               projectFilter: threadProjectGroup
                 ? {
                     label: threadProjectGroup.displayName,
-                    isActive: projectScopeKey === threadProjectGroup.projectKey,
+                    isActive:
+                      projectScopeKeys.length === 1 &&
+                      projectScopeKeys[0] === threadProjectGroup.projectKey,
                   }
                 : null,
               isPinned,
@@ -4606,11 +4608,10 @@ export default function Sidebar() {
             // This item is the only scope control here, so picking the
             // already-scoped project again is the way back to all projects.
             if (threadProjectGroup) {
-              setProjectScopeKey(
-                projectScopeKey === threadProjectGroup.projectKey
-                  ? null
-                  : threadProjectGroup.projectKey,
-              );
+              const onlyThisProject =
+                projectScopeKeys.length === 1 &&
+                projectScopeKeys[0] === threadProjectGroup.projectKey;
+              setProjectScopeKeys(onlyThisProject ? [] : [threadProjectGroup.projectKey]);
             }
             return;
           case "project-settings":
@@ -4794,10 +4795,10 @@ export default function Sidebar() {
       handleMultiSelectContextMenu,
       markThreadUnread,
       openProjectSettings,
-      projectScopeKey,
+      projectScopeKeys,
       projectByKey,
       serverConfigs,
-      setProjectScopeKey,
+      setProjectScopeKeys,
       setThreadAutoSettle,
       startThreadRename,
       updateThreadMetadata,
