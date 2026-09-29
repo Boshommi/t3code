@@ -1,13 +1,73 @@
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
+import { createContext, useContext, useMemo, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";
 
 const TooltipProvider = TooltipPrimitive.Provider;
 
-const Tooltip = TooltipPrimitive.Root;
+// Base UI tooltips only open on mouse hover or keyboard focus, which leaves
+// touch users without them. A tap on a trigger that has no action of its own
+// (a status icon, a timestamp, truncated text) toggles the tooltip instead.
+// Buttons and links keep their tap for their action.
+const TooltipTapContext = createContext<{
+  open: boolean;
+  setOpen: (open: boolean) => void;
+} | null>(null);
 
-function TooltipTrigger(props: TooltipPrimitive.Trigger.Props) {
-  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
+const TAP_ACTION_SELECTOR =
+  "button, a[href], input, select, textarea, [role=button], [role=link], [role=menuitem], [role=tab], [role=checkbox], [role=switch]";
+
+function Tooltip<Payload>({
+  open: openProp,
+  defaultOpen = false,
+  onOpenChange,
+  ...props
+}: TooltipPrimitive.Root.Props<Payload>) {
+  const [openState, setOpenState] = useState(defaultOpen);
+  const open = openProp ?? openState;
+  // Callers that control `open` own it, so tap-to-open stays out of their way.
+  const tap = useMemo(
+    () => (openProp === undefined ? { open: openState, setOpen: setOpenState } : null),
+    [openProp, openState],
+  );
+  return (
+    <TooltipTapContext.Provider value={tap}>
+      <TooltipPrimitive.Root
+        {...props}
+        open={open}
+        onOpenChange={(next, eventDetails) => {
+          setOpenState(next);
+          onOpenChange?.(next, eventDetails);
+        }}
+      />
+    </TooltipTapContext.Provider>
+  );
+}
+
+function TooltipTrigger<Payload>(props: TooltipPrimitive.Trigger.Props<Payload>) {
+  const tap = useContext(TooltipTapContext);
+  // Base UI closes an open tooltip on pointerdown, so the toggle has to read the
+  // state from before that press.
+  const pressRef = useRef<{ touch: boolean; wasOpen: boolean } | null>(null);
+  if (!tap) return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
+  return (
+    <TooltipPrimitive.Trigger
+      data-slot="tooltip-trigger"
+      {...props}
+      onPointerDown={(event) => {
+        pressRef.current = { touch: event.pointerType === "touch", wasOpen: tap.open };
+        props.onPointerDown?.(event);
+      }}
+      onClick={(event) => {
+        props.onClick?.(event);
+        const press = pressRef.current;
+        pressRef.current = null;
+        if (!press?.touch || event.defaultPrevented) return;
+        if (event.currentTarget.matches(TAP_ACTION_SELECTOR)) return;
+        tap.setOpen(!press.wasOpen);
+      }}
+    />
+  );
 }
 
 function TooltipPopup({

@@ -810,7 +810,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
                       type="button"
                       aria-label="Discard draft"
                       onClick={handleDiscard}
-                      className="pointer-events-none inline-flex cursor-pointer items-center rounded-md bg-transparent px-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100"
+                      className="pointer-events-none inline-flex cursor-pointer items-center rounded-md bg-transparent px-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100 no-hover:pointer-events-auto no-hover:opacity-100"
                     >
                       <XIcon className="size-3" />
                     </button>
@@ -1453,6 +1453,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     props.sortable?.isDragging &&
       "bg-sidebar bg-linear-to-b from-sidebar-row-active to-sidebar-row-active text-sidebar-foreground opacity-100 shadow-lg",
   );
+  // Touch never hovers, so the open thread's row shows its hover actions in
+  // place of the resting label. Other rows reach them through the context menu.
+  const touchHideRestingClassName =
+    props.isActive && "no-hover:absolute no-hover:right-0 no-hover:opacity-0";
+  const touchShowActionsClassName =
+    props.isActive && "no-hover:pointer-events-auto no-hover:static no-hover:opacity-100";
   const activeMarker = props.isActive ? (
     <span
       aria-hidden
@@ -1731,6 +1737,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   "pointer-events-none transition-opacity",
                   hasHoverActions &&
                     "group-hover/sidebar-row:absolute group-hover/sidebar-row:right-0 group-hover/sidebar-row:opacity-0 group-has-[:focus-visible]/sidebar-row:absolute group-has-[:focus-visible]/sidebar-row:right-0 group-has-[:focus-visible]/sidebar-row:opacity-0",
+                  hasHoverActions && touchHideRestingClassName,
                   snoozeMenuOpen && "absolute right-0 opacity-0",
                 )}
               >
@@ -1740,6 +1747,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 <span
                   className={cn(
                     "pointer-events-none absolute inset-y-0 right-0 -mr-1 flex items-stretch opacity-0 transition-opacity has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:static has-[:focus-visible]:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:static group-hover/sidebar-row:opacity-100",
+                    touchShowActionsClassName,
                     snoozeMenuOpen && "pointer-events-auto static opacity-100",
                   )}
                 >
@@ -1805,6 +1813,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   }
 
   if (variant === "slim") {
+    const slimTouchActionClassName =
+      props.isActive &&
+      cn("no-hover:pointer-events-auto no-hover:opacity-100", isWoke && "no-hover:static");
     return (
       <li
         data-thread-item
@@ -1869,6 +1880,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   className={cn(
                     "inline-flex justify-end tabular-nums text-secondary-label transition-opacity",
                     !isWoke && "group-hover/sidebar-row:opacity-0",
+                    !isWoke && props.isActive && "no-hover:opacity-0",
                   )}
                 >
                   {variantAction === "unsnooze" && props.snoozeWakeLabelText !== null ? (
@@ -1913,6 +1925,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       className={cn(
                         "pointer-events-none absolute inset-y-0 right-0 -mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100",
                         isWoke && "group-hover/sidebar-row:static",
+                        slimTouchActionClassName,
                       )}
                     >
                       <AlarmClockOffIcon className="mb-px size-3" />
@@ -1929,6 +1942,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                           className={cn(
                             "pointer-events-none absolute inset-y-0 right-0 -mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100",
                             isWoke && "group-hover/sidebar-row:static",
+                            slimTouchActionClassName,
                           )}
                         />
                       }
@@ -1945,6 +1959,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     className={cn(
                       "pointer-events-none absolute inset-y-0 right-0 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-2 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100",
                       isWoke && "group-hover/sidebar-row:static",
+                      slimTouchActionClassName,
                     )}
                   >
                     <CheckIcon className="size-3" />
@@ -2030,6 +2045,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                         ? "pointer-events-auto"
                         : "pointer-events-none group-has-[:focus-visible]/sidebar-status-slot:absolute group-has-[:focus-visible]/sidebar-status-slot:right-0 group-has-[:focus-visible]/sidebar-status-slot:opacity-0 group-hover/sidebar-row:absolute group-hover/sidebar-row:right-0 group-hover/sidebar-row:opacity-0",
                       "flex items-center self-center justify-self-end tabular-nums text-secondary-label transition-opacity",
+                      !isWokeStatus && touchHideRestingClassName,
                       snoozeMenuOpen && "pointer-events-none absolute right-0 opacity-0",
                     )}
                   >
@@ -2098,6 +2114,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                         // once the pointer moves away (e.g. after a failed
                         // settle) instead of cross-fading back.
                         "pointer-events-none absolute inset-y-0 right-0 flex items-stretch opacity-0 transition-opacity has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:static has-[:focus-visible]:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:static group-hover/sidebar-row:opacity-100",
+                        touchShowActionsClassName,
                         snoozeMenuOpen && "pointer-events-auto static opacity-100",
                       )}
                     >

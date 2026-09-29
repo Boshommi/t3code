@@ -4,6 +4,9 @@
 @custom-variant light (&:not(.dark, .dark *));
 /* Window Controls Overlay: active when Electron exposes native titlebar control geometry. */
 @custom-variant wco (&:is(.wco, .wco *));
+/* Exact inverse of Tailwind's `hover:` gate. Pair it with every hover-only reveal so
+   touch devices, where `hover:` never fires, still show the control. */
+@custom-variant no-hover (@media (hover: none));
 
 /* On mobile, morph the expanded hero composer into the compact docked
    composer while it moves; the rest of the app remains visually stationary. */

@@ -6584,7 +6584,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               className={cn(
                                 "absolute right-1 top-1 flex",
                                 image.source?.kind === "snap-shot" &&
-                                  "opacity-0 transition-opacity pointer-coarse:opacity-100 group-hover/attachment:opacity-100 group-focus-within/attachment:opacity-100",
+                                  "opacity-0 transition-opacity no-hover:opacity-100 group-hover/attachment:opacity-100 group-focus-within/attachment:opacity-100",
                               )}
                             >
                               <Button

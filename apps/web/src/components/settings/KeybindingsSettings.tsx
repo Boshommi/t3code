@@ -1010,7 +1010,7 @@ function KeybindingHoverRowMenu(props: {
   onRemove: (row: KeybindingRow) => void;
 }) {
   return (
-    <span className="flex items-center opacity-0 transition-opacity group-focus-within/row:opacity-100 group-hover/row:opacity-100 has-data-popup-open:opacity-100 pointer-coarse:opacity-100">
+    <span className="flex items-center opacity-0 transition-opacity group-focus-within/row:opacity-100 group-hover/row:opacity-100 has-data-popup-open:opacity-100 no-hover:opacity-100">
       <KeybindingRowMenu {...props} />
     </span>
   );

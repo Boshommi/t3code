@@ -338,7 +338,7 @@ export function SidebarProjectGroup(props: {
                     aria-label={`Project color for ${props.displayName}`}
                     title="Project color"
                     className={cn(
-                      "size-6 shrink-0 opacity-0 group-hover/project-header:opacity-100 focus-visible:opacity-100",
+                      "size-6 shrink-0 opacity-0 group-hover/project-header:opacity-100 no-hover:opacity-100 focus-visible:opacity-100",
                       props.colorPickerOpen && "opacity-100",
                     )}
                   >
@@ -365,7 +365,7 @@ export function SidebarProjectGroup(props: {
               variant="ghost-muted"
               aria-label={`New thread in ${props.displayName}`}
               title="New thread"
-              className="size-6 shrink-0 opacity-0 group-hover/project-header:opacity-100 focus-visible:opacity-100"
+              className="size-6 shrink-0 opacity-0 group-hover/project-header:opacity-100 no-hover:opacity-100 focus-visible:opacity-100"
               onClick={() => props.onNewThread(projectKey)}
             >
               <SquarePenIcon className="size-3.5" />

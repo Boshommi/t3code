@@ -14,7 +14,7 @@ export function PullRequestEditButton({
   return (
     <span
       className={cn(
-        "flex shrink-0 opacity-0 transition-opacity pointer-coarse:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 focus-within:opacity-100 motion-reduce:transition-none",
+        "flex shrink-0 opacity-0 transition-opacity no-hover:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 focus-within:opacity-100 motion-reduce:transition-none",
         className,
       )}
     >

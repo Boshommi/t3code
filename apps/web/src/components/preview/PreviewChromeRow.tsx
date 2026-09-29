@@ -210,7 +210,7 @@ export function PreviewChromeRow({
           {onOpenInBrowser && !inputFocused ? (
             <InputGroupAddon align="inline-end">
               {/* Revealed on hover so a resting address bar reads as plain text. */}
-              <span className="pointer-events-none flex opacity-0 transition-opacity focus-within:pointer-events-auto focus-within:opacity-100 group-hover/address:pointer-events-auto group-hover/address:opacity-100">
+              <span className="pointer-events-none flex opacity-0 transition-opacity focus-within:pointer-events-auto focus-within:opacity-100 group-hover/address:pointer-events-auto group-hover/address:opacity-100 no-hover:pointer-events-auto no-hover:opacity-100">
                 <Tooltip>
                   <TooltipTrigger
                     render={
