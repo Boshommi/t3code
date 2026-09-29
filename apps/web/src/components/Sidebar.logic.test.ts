@@ -12,6 +12,7 @@ import {
   createThreadJumpHintVisibilityController,
   deleteSelectedThreadEntries,
   filterSidebarProjectScopeItems,
+  groupSidebarProjectScopeItems,
   getSidebarThreadIdsToPrewarm,
   resolveAdjacentThreadId,
   reduceSidebarProjectScopeMenuState,
@@ -927,6 +928,31 @@ describe("filterSidebarProjectScopeItems", () => {
   it("returns matching projects in source order and supports no-match results", () => {
     expect(filter("WORK")).toEqual([items[1]]);
     expect(filter("missing")).toEqual([]);
+  });
+});
+
+describe("groupSidebarProjectScopeItems", () => {
+  const local = { key: "local", label: "This device" };
+  const remote = { key: "remote", label: "Build box" };
+
+  it("keeps the unsectioned default row in its own head section", () => {
+    const all = { value: "all", section: null };
+    const a = { value: "a", section: local };
+    const b = { value: "b", section: remote };
+    const c = { value: "c", section: local };
+    expect(groupSidebarProjectScopeItems([all, a, b, c])).toEqual([
+      { value: "", section: null, items: [all] },
+      { value: "local", section: local, items: [a, c] },
+      { value: "remote", section: remote, items: [b] },
+    ]);
+  });
+
+  it("collapses to one unlabeled section when no item has a section", () => {
+    const items = [
+      { value: "all", section: null },
+      { value: "a", section: null },
+    ];
+    expect(groupSidebarProjectScopeItems(items)).toEqual([{ value: "", section: null, items }]);
   });
 });
 

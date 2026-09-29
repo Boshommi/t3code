@@ -168,6 +168,7 @@ import {
   buildBulkUnpinContextMenuItem,
   deleteSelectedThreadEntries,
   filterSidebarProjectScopeItems,
+  groupSidebarProjectScopeItems,
   formatWorkingDurationLabel,
   firstValidTimestampMs,
   hasUnseenCompletion,
@@ -234,7 +235,10 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Button, InlineButton } from "./ui/button";
 import {
   Combobox,
+  ComboboxCollection,
   ComboboxEmpty,
+  ComboboxGroup,
+  ComboboxGroupLabel,
   ComboboxSearchInput,
   ComboboxItem,
   ComboboxList,
@@ -2627,25 +2631,38 @@ export default function Sidebar() {
   const setProjectShelfExpanded = useUiStateStore((store) => store.setProjectShelfExpanded);
   const setProjectColor = useUiStateStore((store) => store.setProjectColor);
   const [colorPickerProjectKey, setColorPickerProjectKey] = useState<string | null>(null);
-  // {value, label} items let Base UI drive the combobox selection contract
-  // while the popup search filters the same collection.
-  const projectScopeItems = useMemo(
-    () => [
-      { value: "all", label: "All projects" },
-      ...projectGroups.map((project) => ({
-        value: project.projectKey,
-        label: project.displayName,
-      })),
-    ],
-    [projectGroups],
-  );
   // Same-named projects on two machines are only told apart by where they
-  // live, so rows on another machine carry its icon once the catalog spans
-  // more than one environment; a single-machine catalog stays as it was.
+  // live, so once the catalog spans more than one environment the picker
+  // splits into one section per environment.
   const showProjectEnvironments = useMemo(
     () => projectGroupsSpanEnvironments(projectGroups),
     [projectGroups],
   );
+  // {value, label} items let Base UI drive the combobox selection contract
+  // while the popup search filters the same collection. A project group that
+  // spans machines sits in its representative's environment (the primary one
+  // when it has a member there) and carries a badge for the others. The
+  // primary environment's section leads; the sort is stable, so each section
+  // keeps the sidebar's project order.
+  const projectScopeItems = useMemo(() => {
+    const projectItems = projectGroups.map((project) => ({
+      value: project.projectKey,
+      label: project.displayName,
+      section: showProjectEnvironments
+        ? {
+            key: project.environmentId,
+            environmentId: project.environmentId,
+            label: environmentLabelById.get(project.environmentId) ?? "Remote",
+          }
+        : null,
+    }));
+    if (showProjectEnvironments) {
+      const rank = (item: (typeof projectItems)[number]) =>
+        item.section?.environmentId === primaryEnvironmentId ? 0 : 1;
+      projectItems.sort((a, b) => rank(a) - rank(b));
+    }
+    return [{ value: "all", label: "All projects", section: null }, ...projectItems];
+  }, [environmentLabelById, primaryEnvironmentId, projectGroups, showProjectEnvironments]);
   const projectGroupByScopeKey = useMemo(
     () => new Map(projectGroups.map((project) => [project.projectKey, project] as const)),
     [projectGroups],
@@ -2668,14 +2685,20 @@ export default function Sidebar() {
   // row, not a searchable entry: it heads the list while the query is empty and
   // drops out while filtering, so it can't outrank a project match under
   // autoHighlight and no-hit queries reach the empty state.
-  const filteredProjectScopeItems = useMemo(
+  const projectScopeSections = useMemo(
+    () => groupSidebarProjectScopeItems(projectScopeItems),
+    [projectScopeItems],
+  );
+  const filteredProjectScopeSections = useMemo(
     () =>
-      filterSidebarProjectScopeItems({
-        items: projectScopeItems,
-        query: projectScopeMenuState.query,
-        matches: (item, query) =>
-          projectScopeFilter.contains(item, query, (candidate) => candidate.label),
-      }),
+      groupSidebarProjectScopeItems(
+        filterSidebarProjectScopeItems({
+          items: projectScopeItems,
+          query: projectScopeMenuState.query,
+          matches: (item, query) =>
+            projectScopeFilter.contains(item, query, (candidate) => candidate.label),
+        }),
+      ),
     [projectScopeFilter, projectScopeItems, projectScopeMenuState.query],
   );
   // Selected projects in list order, or null for all projects. A scope whose
@@ -5039,8 +5062,8 @@ export default function Sidebar() {
               projectScope={
                 <Combobox
                   multiple
-                  items={projectScopeItems}
-                  filteredItems={filteredProjectScopeItems}
+                  items={projectScopeSections}
+                  filteredItems={filteredProjectScopeSections}
                   autoHighlight
                   itemToStringLabel={(item) => item.label}
                   isItemEqualToValue={(a, b) => a.value === b.value}
@@ -5137,66 +5160,90 @@ export default function Sidebar() {
                     />
                     <ComboboxEmpty>No matching projects.</ComboboxEmpty>
                     <ComboboxList>
-                      {(item: (typeof projectScopeItems)[number]) => {
-                        const project = projectGroupByScopeKey.get(item.value) ?? null;
-                        const checked =
-                          item.value === "all"
-                            ? scopedProjectGroups === null
-                            : projectScopeKeys.includes(item.value);
-                        return (
-                          <ComboboxItem
-                            key={item.value}
-                            hideIndicator
-                            value={item}
-                            onContextMenu={(event) => {
-                              if (project) handleProjectSettings(event, project);
-                            }}
-                          >
-                            <span
-                              aria-hidden
-                              className={cn(
-                                "flex size-3.5 shrink-0 items-center justify-center rounded-[4px] border",
-                                checked
-                                  ? "border-primary bg-primary"
-                                  : "border-muted-foreground/40",
-                              )}
-                            >
-                              {checked ? (
-                                <CheckIcon className="size-2.5 text-primary-foreground" />
-                              ) : null}
-                            </span>
-                            {project ? (
-                              <ProjectFavicon project={project} className="size-4 shrink-0" />
-                            ) : (
-                              <FolderIcon className="size-4 shrink-0" />
-                            )}
-                            <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
-                            {project && showProjectEnvironments ? (
-                              <ProjectEnvironmentBadge
-                                group={project}
-                                primaryEnvironmentId={primaryEnvironmentId}
-                                machineByEnvironmentId={environmentMachineById}
+                      {(section: (typeof projectScopeSections)[number]) => (
+                        <ComboboxGroup key={section.value} items={section.items}>
+                          {section.section ? (
+                            <ComboboxGroupLabel className="flex items-center gap-1.5">
+                              <EnvironmentMachineIcon
+                                aria-hidden
+                                kind={
+                                  environmentMachineById.get(section.section.environmentId) ??
+                                  "server"
+                                }
+                                className="size-3.5"
                               />
-                            ) : null}
-                            {project ? (
-                              <Button
-                                size="icon-xs"
-                                variant="ghost-muted"
-                                tabIndex={-1}
-                                aria-hidden="true"
-                                title={`Project settings for ${project.displayName}`}
-                                className="ml-auto"
-                                onPointerDown={(event) => event.stopPropagation()}
-                                onClick={(event) => {
-                                  void handleProjectSettings(event, project);
-                                }}
-                              >
-                                <SettingsIcon className="size-3.5" />
-                              </Button>
-                            ) : null}
-                          </ComboboxItem>
-                        );
-                      }}
+                              <span className="min-w-0 truncate">{section.section.label}</span>
+                            </ComboboxGroupLabel>
+                          ) : null}
+                          <ComboboxCollection>
+                            {(item: (typeof projectScopeItems)[number]) => {
+                              const project = projectGroupByScopeKey.get(item.value) ?? null;
+                              const checked =
+                                item.value === "all"
+                                  ? scopedProjectGroups === null
+                                  : projectScopeKeys.includes(item.value);
+                              return (
+                                <ComboboxItem
+                                  key={item.value}
+                                  hideIndicator
+                                  value={item}
+                                  onContextMenu={(event) => {
+                                    if (project) handleProjectSettings(event, project);
+                                  }}
+                                >
+                                  <span
+                                    aria-hidden
+                                    className={cn(
+                                      "flex size-3.5 shrink-0 items-center justify-center rounded-[4px] border",
+                                      checked
+                                        ? "border-primary bg-primary"
+                                        : "border-muted-foreground/40",
+                                    )}
+                                  >
+                                    {checked ? (
+                                      <CheckIcon className="size-2.5 text-primary-foreground" />
+                                    ) : null}
+                                  </span>
+                                  {project ? (
+                                    <ProjectFavicon project={project} className="size-4 shrink-0" />
+                                  ) : (
+                                    <FolderIcon className="size-4 shrink-0" />
+                                  )}
+                                  <span className="min-w-0 flex-1 truncate text-sm">
+                                    {item.label}
+                                  </span>
+                                  {project &&
+                                  project.memberProjects.some(
+                                    (member) => member.environmentId !== project.environmentId,
+                                  ) ? (
+                                    <ProjectEnvironmentBadge
+                                      group={project}
+                                      primaryEnvironmentId={primaryEnvironmentId}
+                                      machineByEnvironmentId={environmentMachineById}
+                                    />
+                                  ) : null}
+                                  {project ? (
+                                    <Button
+                                      size="icon-xs"
+                                      variant="ghost-muted"
+                                      tabIndex={-1}
+                                      aria-hidden="true"
+                                      title={`Project settings for ${project.displayName}`}
+                                      className="ml-auto"
+                                      onPointerDown={(event) => event.stopPropagation()}
+                                      onClick={(event) => {
+                                        void handleProjectSettings(event, project);
+                                      }}
+                                    >
+                                      <SettingsIcon className="size-3.5" />
+                                    </Button>
+                                  ) : null}
+                                </ComboboxItem>
+                              );
+                            }}
+                          </ComboboxCollection>
+                        </ComboboxGroup>
+                      )}
                     </ComboboxList>
                   </ComboboxPopup>
                 </Combobox>

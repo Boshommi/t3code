@@ -250,6 +250,24 @@ function ComboboxListVirtualized({ className, ...props }: ComboboxPrimitive.List
   );
 }
 
+function ComboboxGroup({ className, ...props }: ComboboxPrimitive.Group.Props) {
+  return <ComboboxPrimitive.Group className={className} data-slot="combobox-group" {...props} />;
+}
+
+function ComboboxGroupLabel({ className, ...props }: ComboboxPrimitive.GroupLabel.Props) {
+  return (
+    <ComboboxPrimitive.GroupLabel
+      className={cn("px-2 py-1.5 font-medium text-muted-foreground text-xs", className)}
+      data-slot="combobox-group-label"
+      {...props}
+    />
+  );
+}
+
+function ComboboxCollection(props: ComboboxPrimitive.Collection.Props) {
+  return <ComboboxPrimitive.Collection {...props} />;
+}
+
 function ComboboxClear({ className, ...props }: ComboboxPrimitive.Clear.Props) {
   return <ComboboxPrimitive.Clear className={className} data-slot="combobox-clear" {...props} />;
 }
@@ -279,6 +297,9 @@ export {
   ComboboxEmpty,
   ComboboxList,
   ComboboxListVirtualized,
+  ComboboxGroup,
+  ComboboxGroupLabel,
+  ComboboxCollection,
   ComboboxClear,
   ComboboxStatus,
   useComboboxFilter,

@@ -926,6 +926,35 @@ export function filterSidebarProjectScopeItems<TItem extends { readonly value: s
   return input.items.filter((item) => item.value !== "all" && input.matches(item, query));
 }
 
+export interface SidebarProjectScopeSection<TItem extends SidebarProjectScopeSectioned> {
+  readonly value: string;
+  /** Null for the unlabeled head section ("All projects", or a single-environment catalog). */
+  readonly section: TItem["section"];
+  readonly items: readonly TItem[];
+}
+
+interface SidebarProjectScopeSectioned {
+  readonly section: { readonly key: string } | null;
+}
+
+/**
+ * Splits picker items into sections by `section.key`, in order of first
+ * appearance. Items without a section share one unlabeled section, so a
+ * catalog that doesn't need headers renders as a single flat group.
+ */
+export function groupSidebarProjectScopeItems<TItem extends SidebarProjectScopeSectioned>(
+  items: readonly TItem[],
+): SidebarProjectScopeSection<TItem>[] {
+  const sections: { value: string; section: TItem["section"]; items: TItem[] }[] = [];
+  for (const item of items) {
+    const value = item.section?.key ?? "";
+    const current = sections.find((candidate) => candidate.value === value);
+    if (current) current.items.push(item);
+    else sections.push({ value, section: item.section, items: [item] });
+  }
+  return sections;
+}
+
 export interface SidebarProjectScopeMenuState {
   readonly open: boolean;
   readonly query: string;
