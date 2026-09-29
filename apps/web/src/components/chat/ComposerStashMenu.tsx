@@ -5,9 +5,8 @@ import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitation
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { cn } from "~/lib/utils";
 import { type PromptStashSummary } from "@t3tools/contracts";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import { Button } from "../ui/button";
 import { ComposerBanner } from "./ComposerBanner";
-import { composerFloatingLayerProps } from "./composerEventScope";
 
 const SNIPPET_MAX_CHARS = 90;
 
@@ -60,7 +59,6 @@ export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
       const drawer = drawerRef.current;
       if (
         (drawer && event.composedPath().includes(drawer)) ||
-        (event.target instanceof Element && event.target.closest('[data-slot="menu-popup"]')) ||
         (event.target instanceof Element &&
           event.target.closest('[data-prompt-stash-badge="true"]'))
       ) {
@@ -74,10 +72,6 @@ export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      // The copy menu is portaled and handles its own keys.
-      if (event.target instanceof Element && event.target.closest('[data-slot="menu-popup"]')) {
-        return;
-      }
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
@@ -232,33 +226,26 @@ export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
           <ComposerBanner.Icon>
             <CopyIcon />
           </ComposerBanner.Icon>
-          <ComposerBanner.Content>
-            <Menu>
-              <MenuTrigger
-                className="min-w-0 flex-1 cursor-pointer truncate text-left text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label="Copy all saved prompts to another environment"
-                onPointerDown={(event) => event.preventDefault()}
-              >
-                Copy all to another environment…
-              </MenuTrigger>
-              <MenuPopup {...composerFloatingLayerProps} side="top" align="start">
-                {copyTargets.map((target) => (
-                  <MenuItem
-                    key={target.id}
-                    disabled={target.unavailableReason !== undefined}
-                    onClick={() => onCopyAll(target.id)}
-                  >
-                    {target.label}
-                    {target.unavailableReason ? (
-                      <span className="ms-auto ps-3 text-muted-foreground text-xs">
-                        {target.unavailableReason}
-                      </span>
-                    ) : null}
-                  </MenuItem>
-                ))}
-              </MenuPopup>
-            </Menu>
+          <ComposerBanner.Content className="text-muted-foreground">
+            Copy all to
           </ComposerBanner.Content>
+          <ComposerBanner.Actions>
+            {copyTargets.map((target) => (
+              <Button
+                key={target.id}
+                size="micro"
+                variant="outline"
+                disabled={target.unavailableReason !== undefined}
+                title={target.unavailableReason}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={() => onCopyAll(target.id)}
+              >
+                {target.unavailableReason
+                  ? `${target.label} (${target.unavailableReason})`
+                  : target.label}
+              </Button>
+            ))}
+          </ComposerBanner.Actions>
         </ComposerBanner.Row>
       ) : null}
     </ComposerBanner.Root>
