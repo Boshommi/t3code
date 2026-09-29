@@ -94,5 +94,31 @@ export function usePromptStash(environmentId: EnvironmentId) {
     [environmentId, supported, get, pendingLocalEntries, result],
   );
 
-  return { entries, stashEntry, takeEntry, getEntry };
+  /**
+   * Copies saved prompts to another environment. Uploaded files stay with the environment that
+   * owns their bytes, so prompts that carry them are skipped. Entry ids make a re-run a no-op.
+   */
+  const copyEntries = useCallback(
+    async (targetEnvironmentId: EnvironmentId) => {
+      let copied = 0;
+      let skipped = 0;
+      let failed = 0;
+      for (const summary of entries) {
+        if ((summary.files?.length ?? 0) > 0 || summary.pendingImageCount) {
+          skipped += 1;
+          continue;
+        }
+        const entry = await getEntry(summary.id);
+        const saved = entry
+          ? await save({ environmentId: targetEnvironmentId, input: { entry } })
+          : null;
+        if (saved?._tag === "Success") copied += 1;
+        else failed += 1;
+      }
+      return { copied, skipped, failed };
+    },
+    [entries, getEntry, save],
+  );
+
+  return { entries, stashEntry, takeEntry, getEntry, copyEntries };
 }

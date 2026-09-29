@@ -1,6 +1,7 @@
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";
-import { usePrimaryEnvironmentId } from "../../state/environments";
+import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
+import { useServerConfigs } from "../../state/entities";
 import { runtimeModeConfig, runtimeModeOptions } from "./runtimeModeConfig";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { AttachmentFilePreview } from "../files/AttachmentFilePreview";
@@ -4114,7 +4115,40 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     stashEntry: stashEntryToQueue,
     takeEntry: takeStashEntry,
     getEntry: getStashEntry,
+    copyEntries: copyStashEntries,
   } = usePromptStash(environmentId);
+  const { environments } = useEnvironments();
+  const serverConfigs = useServerConfigs();
+  const stashCopyTargets = useMemo(
+    () =>
+      environments
+        .filter(
+          (environment) =>
+            environment.environmentId !== environmentId &&
+            serverConfigs.get(environment.environmentId)?.environment.capabilities.promptStash ===
+              true,
+        )
+        .map((environment) => ({ id: environment.environmentId, label: environment.label })),
+    [environments, environmentId, serverConfigs],
+  );
+  const copyStashToEnvironment = useCallback(
+    async (targetId: string) => {
+      const target = stashCopyTargets.find((candidate) => candidate.id === targetId);
+      if (!target) return;
+      const { copied, skipped, failed } = await copyStashEntries(target.id);
+      const notes = [
+        skipped > 0 ? `${skipped} with uploaded files stayed here.` : null,
+        failed > 0 ? `${failed} could not be copied.` : null,
+      ].filter((note) => note !== null);
+      toastManager.add({
+        type: failed > 0 ? "warning" : "success",
+        title: `Copied ${copied} saved prompt${copied === 1 ? "" : "s"} to ${target.label}`,
+        ...(notes.length > 0 ? { description: notes.join(" ") } : {}),
+        data: { hideCopyButton: true },
+      });
+    },
+    [stashCopyTargets, copyStashEntries],
+  );
 
   useEffect(() => {
     return () => {
@@ -6424,6 +6458,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         modelPickerOpen: false,
                       },
                     })}
+                    copyTargets={stashCopyTargets}
+                    onCopyAll={(targetId) => void copyStashToEnvironment(targetId)}
                     onRestore={restoreStashEntry}
                     onDelete={deleteStashEntry}
                     onClose={() => setIsStashMenuOpen(false)}

@@ -138,6 +138,10 @@ you open a composer on a server; prompts with uploaded files migrate to the serv
 Migration keeps the local copy until the server confirms it is saved. Saving new prompts
 requires a connection to the server.
 
+Saved prompts belong to one environment. To use them on another, open the saved prompts
+menu and choose **Copy all to another environment…**. Prompts with uploaded files stay where
+they are, and copying again never creates duplicates.
+
 Stashes containing uploaded files must be restored in their original environment.
 Those files are retained for 24 hours. After an upload expires, restore the prompt
 and use **Attach again** or remove the missing file before sending.

@@ -1,11 +1,13 @@
-import { BookmarkIcon, FileIcon, FileTextIcon, ImageIcon } from "lucide-react";
+import { BookmarkIcon, CopyIcon, FileIcon, FileTextIcon, ImageIcon } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { cn } from "~/lib/utils";
 import { type PromptStashSummary } from "@t3tools/contracts";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { ComposerBanner } from "./ComposerBanner";
+import { composerFloatingLayerProps } from "./composerEventScope";
 
 const SNIPPET_MAX_CHARS = 90;
 
@@ -39,11 +41,15 @@ function stashEntrySnippet(entry: PromptStashSummary): string {
 export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
   entries: ReadonlyArray<PromptStashSummary>;
   stashShortcutLabel: string | null;
+  /** Other environments that can receive a copy of every saved prompt. */
+  copyTargets?: ReadonlyArray<{ id: string; label: string }>;
+  onCopyAll?: (targetId: string) => void;
   onRestore: (entry: PromptStashSummary) => void;
   onDelete: (entry: PromptStashSummary) => void;
   onClose: () => void;
 }) {
-  const { entries, stashShortcutLabel, onRestore, onDelete, onClose } = props;
+  const { entries, stashShortcutLabel, copyTargets, onCopyAll, onRestore, onDelete, onClose } =
+    props;
   const drawerRef = useRef<HTMLDivElement>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(entries[0]?.id ?? null);
 
@@ -54,6 +60,7 @@ export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
       const drawer = drawerRef.current;
       if (
         (drawer && event.composedPath().includes(drawer)) ||
+        (event.target instanceof Element && event.target.closest('[data-slot="menu-popup"]')) ||
         (event.target instanceof Element &&
           event.target.closest('[data-prompt-stash-badge="true"]'))
       ) {
@@ -67,6 +74,10 @@ export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      // The copy menu is portaled and handles its own keys.
+      if (event.target instanceof Element && event.target.closest('[data-slot="menu-popup"]')) {
+        return;
+      }
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
@@ -214,6 +225,31 @@ export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
               </ComposerBanner.Row>
             ))
           )}
+          {entries.length > 0 && copyTargets && copyTargets.length > 0 && onCopyAll ? (
+            <ComposerBanner.Row render={<li />}>
+              <ComposerBanner.Icon>
+                <CopyIcon />
+              </ComposerBanner.Icon>
+              <ComposerBanner.Content>
+                <Menu>
+                  <MenuTrigger
+                    className="min-w-0 flex-1 cursor-pointer truncate text-left text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-label="Copy all saved prompts to another environment"
+                    onPointerDown={(event) => event.preventDefault()}
+                  >
+                    Copy all to another environment…
+                  </MenuTrigger>
+                  <MenuPopup {...composerFloatingLayerProps} side="top" align="start">
+                    {copyTargets.map((target) => (
+                      <MenuItem key={target.id} onClick={() => onCopyAll(target.id)}>
+                        {target.label}
+                      </MenuItem>
+                    ))}
+                  </MenuPopup>
+                </Menu>
+              </ComposerBanner.Content>
+            </ComposerBanner.Row>
+          ) : null}
         </ComposerBanner.Children>
       </ComposerBanner.Scroll>
     </ComposerBanner.Root>
