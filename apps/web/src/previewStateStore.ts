@@ -72,8 +72,8 @@ export const previewStateAtom = Atom.family((threadKey: string) =>
   ),
 );
 
-// Only the Electron browser host needs a cross-thread view. Keep that index
-// separate so thread-local readers never subscribe to unrelated previews.
+// Browser hosting and session cleanup share this index. Thread-local readers
+// never subscribe to unrelated previews, and cleanup only tracks live tabs.
 interface ActivePreviewThreadIndex {
   readonly keys: ReadonlySet<string>;
 }
@@ -167,6 +167,10 @@ export function useThreadPreviewState(ref: ScopedThreadRef | null | undefined): 
 
 export function useActivePreviewSessions(): Record<string, ThreadPreviewState> {
   return useAtomValue(activePreviewSessionsAtom);
+}
+
+export function useActivePreviewThreadKeys(): ReadonlySet<string> {
+  return useAtomValue(activePreviewThreadKeysAtom).keys;
 }
 
 export function readThreadPreviewState(ref: ScopedThreadRef): ThreadPreviewState {
