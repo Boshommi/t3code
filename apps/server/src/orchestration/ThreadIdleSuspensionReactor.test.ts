@@ -89,11 +89,27 @@ describe("ThreadIdleSuspensionReactor", () => {
     Effect.gen(function* () {
       const closedTerminals = yield* Ref.make<ReadonlyArray<string>>([]);
       const closedPreviews = yield* Ref.make<ReadonlyArray<string>>([]);
+      const settledThreads = Array.from({ length: 300 }, (_, index) =>
+        makeThread(`settled-${index}`, {
+          settledOverride: "settled",
+          settledAt: IDLE_AT,
+          session: {
+            threadId: ThreadId.make(`settled-${index}`),
+            providerName: "codex",
+            runtimeMode: "full-access",
+            status: "stopped",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: IDLE_AT,
+          },
+        }),
+      );
 
       const snapshot: OrchestrationShellSnapshot = {
         snapshotSequence: 1,
         projects: [],
         threads: [
+          ...settledThreads,
           makeThread("idle-thread"),
           makeThread("coding-thread", {
             updatedAt: ACTIVE_AT,
@@ -137,7 +153,9 @@ describe("ThreadIdleSuspensionReactor", () => {
           Layer.succeed(PreviewManager.PreviewManager, {
             list: (input: { threadId: ThreadId }) =>
               Effect.succeed(
-                input.threadId === "idle-thread" || input.threadId === "coding-thread"
+                input.threadId === "idle-thread" ||
+                  input.threadId === "coding-thread" ||
+                  input.threadId.startsWith("settled-")
                   ? makePreviews(input.threadId)
                   : { sessions: [], serverEpoch: "epoch", revision: 1 },
               ),
@@ -154,7 +172,9 @@ describe("ThreadIdleSuspensionReactor", () => {
         const reactor = yield* ThreadIdleSuspensionReactor.ThreadIdleSuspensionReactor;
         yield* reactor.suspendOnce;
         expect(yield* Ref.get(closedTerminals)).toEqual(["idle-thread:term-1"]);
-        expect(yield* Ref.get(closedPreviews)).toEqual(["idle-thread"]);
+        expect((yield* Ref.get(closedPreviews)).toSorted()).toEqual(
+          ["idle-thread", ...settledThreads.map((thread) => thread.id)].toSorted(),
+        );
       }).pipe(Effect.provide(layer), Effect.scoped);
     }),
   );

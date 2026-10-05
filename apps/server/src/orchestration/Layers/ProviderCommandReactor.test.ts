@@ -56,6 +56,7 @@ import { ProviderAuthService } from "../../provider/Services/ProviderAuthService
 import { makeProviderRegistryLayer } from "../../provider/testUtils/providerRegistryMock.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import { TerminalManager } from "../../terminal/Manager.ts";
+import * as PreviewManager from "../../preview/Manager.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
@@ -121,6 +122,7 @@ describe("ProviderCommandReactor", () => {
     | OrchestrationEngineService
     | ProviderCommandReactor
     | ProjectionSnapshotQuery
+    | PreviewManager.PreviewManager
     | SqlClient.SqlClient,
     unknown
   > | null = null;
@@ -495,6 +497,7 @@ describe("ProviderCommandReactor", () => {
         }),
       ),
       Layer.provideMerge(Layer.mock(TerminalManager)({ closeIdle: closeIdleTerminals })),
+      Layer.provideMerge(PreviewManager.layer),
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
@@ -505,6 +508,7 @@ describe("ProviderCommandReactor", () => {
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
     const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery));
     const reactor = await runtime.runPromise(Effect.service(ProviderCommandReactor));
+    const previews = await runtime.runPromise(Effect.service(PreviewManager.PreviewManager));
     const runEffect = <A, E>(effect: Effect.Effect<A, E>) => runtime!.runPromise(effect);
 
     await Effect.runPromise(
@@ -602,6 +606,7 @@ describe("ProviderCommandReactor", () => {
 
     return {
       engine,
+      previews,
       snapshotQuery,
       readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
       readPendingTurnStarts: () =>
@@ -4557,6 +4562,10 @@ describe("ProviderCommandReactor", () => {
         }),
       );
       const now = "2026-01-01T00:00:00.000Z";
+      yield* harness.previews.open({
+        threadId: ThreadId.make("thread-1"),
+        url: "https://example.com/",
+      });
 
       yield* harness.engine.dispatch({
         type: "thread.session.set",
@@ -4594,30 +4603,52 @@ describe("ProviderCommandReactor", () => {
       expect(harness.closeIdleTerminals).toHaveBeenCalledWith({
         threadId: ThreadId.make("thread-1"),
       });
+      expect(
+        (yield* harness.previews.list({ threadId: ThreadId.make("thread-1") })).sessions,
+      ).toEqual([]);
     }),
   );
 
-  effectIt.effect("closes idle terminals when a thread without a session settles", () =>
-    Effect.gen(function* () {
-      const harness = yield* Effect.promise(() => createHarness());
-      const terminalsClosed = yield* Deferred.make<void>();
-      harness.closeIdleTerminals.mockImplementation(() =>
-        Deferred.succeed(terminalsClosed, undefined).pipe(Effect.asVoid),
-      );
+  effectIt.effect(
+    "closes previews and idle terminals when a thread without a session settles",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* Effect.promise(() => createHarness());
+        yield* harness.previews.open({
+          threadId: ThreadId.make("thread-1"),
+          url: "https://example.com/",
+        });
+        yield* harness.previews.open({
+          threadId: ThreadId.make("thread-1"),
+          url: "https://example.org/",
+        });
+        const otherPreview = yield* harness.previews.open({
+          threadId: ThreadId.make("other-thread"),
+        });
+        const terminalsClosed = yield* Deferred.make<void>();
+        harness.closeIdleTerminals.mockImplementation(() =>
+          Deferred.succeed(terminalsClosed, undefined).pipe(Effect.asVoid),
+        );
 
-      yield* harness.engine.dispatch({
-        type: "thread.settle",
-        commandId: CommandId.make("cmd-settle-without-session"),
-        threadId: ThreadId.make("thread-1"),
-      });
-      yield* Deferred.await(terminalsClosed);
-      yield* Effect.promise(() => harness.drain());
+        yield* harness.engine.dispatch({
+          type: "thread.settle",
+          commandId: CommandId.make("cmd-settle-without-session"),
+          threadId: ThreadId.make("thread-1"),
+        });
+        yield* Deferred.await(terminalsClosed);
+        yield* Effect.promise(() => harness.drain());
 
-      expect(harness.closeIdleTerminals).toHaveBeenCalledWith({
-        threadId: ThreadId.make("thread-1"),
-      });
-      expect(harness.stopSession).not.toHaveBeenCalled();
-    }),
+        expect(harness.closeIdleTerminals).toHaveBeenCalledWith({
+          threadId: ThreadId.make("thread-1"),
+        });
+        expect(harness.stopSession).not.toHaveBeenCalled();
+        expect(
+          (yield* harness.previews.list({ threadId: ThreadId.make("thread-1") })).sessions,
+        ).toEqual([]);
+        expect(
+          (yield* harness.previews.list({ threadId: ThreadId.make("other-thread") })).sessions,
+        ).toEqual([otherPreview]);
+      }),
   );
 
   effectIt.effect(

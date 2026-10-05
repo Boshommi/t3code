@@ -71,6 +71,7 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
+import * as PreviewManager from "../../preview/Manager.ts";
 const isProviderAdapterProcessError = Schema.is(ProviderAdapterProcessError);
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderAdapterValidationError = Schema.is(ProviderAdapterValidationError);
@@ -229,6 +230,7 @@ const make = Effect.gen(function* () {
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
   const terminalManager = yield* TerminalManager.TerminalManager;
+  const previewManager = yield* PreviewManager.PreviewManager;
   /** Environment settings with the thread's project overrides applied. */
   const projectSettingsForThread = Effect.fnUntraced(function* (threadId: ThreadId) {
     const settings = yield* serverSettingsService.getSettings;
@@ -1958,6 +1960,16 @@ const make = Effect.gen(function* () {
         if (Option.isNone(thread) || thread.value.settledOverride !== "settled") {
           return;
         }
+        yield* previewManager.close({ threadId: event.payload.threadId }).pipe(
+          Effect.catchCauseIf(
+            (cause) => !Cause.hasInterruptsOnly(cause),
+            (cause) =>
+              Effect.logWarning("failed to close settled thread previews", {
+                threadId: event.payload.threadId,
+                cause: Cause.pretty(cause),
+              }),
+          ),
+        );
         // Idle shells close so they stop holding the worktree. A terminal that
         // runs a command (a dev server, an editor) stays for the user to close.
         yield* terminalManager.closeIdle({ threadId: event.payload.threadId });
