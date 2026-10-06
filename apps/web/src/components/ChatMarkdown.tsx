@@ -54,6 +54,7 @@ import {
   type AssetResource,
   type EditorId,
   type EnvironmentId,
+  type ProjectReadFileResult,
   type ServerConfig,
   type ScopedThreadRef,
   type ServerProviderSkill,
@@ -1243,6 +1244,8 @@ interface MarkdownFileLinkProps {
   onOpenMedia?: (() => void) | undefined;
   onReveal?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
   revealLabel?: string | undefined;
+  /** Reads the file through the environment, so copying works from a remote server. */
+  onReadContents?: (() => Promise<ProjectReadFileResult>) | undefined;
 }
 
 const MARKDOWN_FILE_LINK_CLASS_NAME = "chat-markdown-file-link";
@@ -1981,6 +1984,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   onReveal,
   revealLabel,
   resolveCopyPaths,
+  onReadContents,
 }: MarkdownFileLinkProps) {
   const handleOpenInEditor = () => {
     if (!onOpen) {
@@ -2154,6 +2158,44 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
     );
   };
 
+  const handleCopyContents = () => {
+    if (!onReadContents) return;
+    const read = onReadContents();
+    const text = read.then((file) => file.contents);
+    // Hand the pending read to ClipboardItem so the write starts inside the user gesture.
+    const write =
+      typeof ClipboardItem !== "undefined" && typeof navigator.clipboard?.write === "function"
+        ? navigator.clipboard.write([
+            new ClipboardItem({
+              "text/plain": text.then((value) => new Blob([value], { type: "text/plain" })),
+            }),
+          ])
+        : text.then((value) => navigator.clipboard.writeText(value));
+    void Promise.all([read, write]).then(
+      ([file]) => {
+        toastManager.add(
+          file.truncated
+            ? stackedThreadToast({
+                type: "warning",
+                title: "Copied partial contents",
+                description: `Only the beginning of ${file.relativePath} was copied.`,
+              })
+            : { type: "success", title: "Contents copied", description: file.relativePath },
+        );
+      },
+      (error) => {
+        reportMarkdownActionFailure({ operation: "copy-file-contents", target: targetPath }, error);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to copy contents",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+      },
+    );
+  };
+
   const showFileContextMenu = async (position: { x: number; y: number }) => {
     const api = readLocalApi();
     if (!api) return;
@@ -2169,6 +2211,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
             : []),
           ...(onReveal && revealLabel ? ([{ id: "reveal", label: revealLabel }] as const) : []),
           ...copyItems.map(({ id, label }) => ({ id, label })),
+          ...(onReadContents ? ([{ id: "copy-contents", label: "Copy contents" }] as const) : []),
         ] as const,
         position,
       );
@@ -2197,6 +2240,10 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
             ),
           clicked === "copy-relative" ? "Relative path" : "Full path",
         );
+        return;
+      }
+      if (clicked === "copy-contents") {
+        handleCopyContents();
       }
     } catch (cause) {
       reportMarkdownActionFailure(
@@ -2320,7 +2367,8 @@ function areMarkdownFileLinkPropsEqual(
     previous.onOpenMedia === next.onOpenMedia &&
     previous.onReveal === next.onReveal &&
     previous.resolveCopyPaths === next.resolveCopyPaths &&
-    previous.revealLabel === next.revealLabel
+    previous.revealLabel === next.revealLabel &&
+    previous.onReadContents === next.onReadContents
   );
 }
 
@@ -2426,6 +2474,10 @@ function useChatMarkdownState({
   });
   const searchProjectEntries = useAtomQueryRunner(projectEnvironment.searchEntries, {
     reportFailure: false,
+  });
+  const readProjectFile = useAtomQueryRunner(projectEnvironment.readFile, {
+    reportFailure: false,
+    refresh: true,
   });
   const getFilesystemMetadata = useAtomQueryRunner(filesystemEnvironment.getMetadata, {
     reportFailure: false,
@@ -2799,6 +2851,18 @@ function useChatMarkdownState({
             : undefined
         }
         revealLabel={revealInFileManagerLabel}
+        onReadContents={
+          cwd && environmentId !== null
+            ? async () => {
+                const result = await readProjectFile({
+                  environmentId,
+                  input: { cwd, relativePath: (await resolveHostPath()).absolutePath },
+                });
+                if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+                return result.value;
+              }
+            : undefined
+        }
         onOpenInBrowser={
           threadRef &&
           canOperatePreview &&
