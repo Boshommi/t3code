@@ -30,6 +30,7 @@ import {
 import type {
   AssetResource,
   EnvironmentId,
+  ProjectReadFileResult,
   ScopedThreadRef,
   ServerProviderSkill,
   ThreadPullRequestKey,
@@ -1207,6 +1208,8 @@ interface MarkdownFileLinkProps {
   /** Platform-specific menu label ("Reveal in Finder", ...); required for the
       reveal item to show. */
   revealLabel?: string | undefined;
+  /** Reads the file through the environment, so copying works from a remote server. */
+  onReadContents?: (() => Promise<ProjectReadFileResult>) | undefined;
 }
 
 const MARKDOWN_FILE_LINK_CLASS_NAME = "chat-markdown-file-link";
@@ -1944,6 +1947,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   onOpenMedia,
   onReveal,
   revealLabel,
+  onReadContents,
 }: MarkdownFileLinkProps) {
   const handleOpenInEditor = useCallback(() => {
     if (!onOpen) {
@@ -2110,6 +2114,44 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
     [targetPath],
   );
 
+  const handleCopyContents = useCallback(() => {
+    if (!onReadContents) return;
+    const read = onReadContents();
+    const text = read.then((file) => file.contents);
+    // Hand the pending read to ClipboardItem so the write starts inside the user gesture.
+    const write =
+      typeof ClipboardItem !== "undefined" && navigator.clipboard?.write
+        ? navigator.clipboard.write([
+            new ClipboardItem({
+              "text/plain": text.then((value) => new Blob([value], { type: "text/plain" })),
+            }),
+          ])
+        : text.then((value) => writeTextToClipboard(value, "file contents"));
+    void Promise.all([read, write]).then(
+      ([file]) => {
+        toastManager.add(
+          file.truncated
+            ? stackedThreadToast({
+                type: "warning",
+                title: "Copied partial contents",
+                description: `Only the first 1 MB of ${displayPath} was copied.`,
+              })
+            : { type: "success", title: "Contents copied", description: displayPath },
+        );
+      },
+      (error) => {
+        reportMarkdownActionFailure({ operation: "copy-file-contents", target: targetPath }, error);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to copy contents",
+            description: error instanceof Error ? error.message : "An error occurred.",
+          }),
+        );
+      },
+    );
+  }, [displayPath, onReadContents, targetPath]);
+
   const showFileContextMenu = useCallback(
     async (position: { x: number; y: number }) => {
       const api = readLocalApi();
@@ -2126,6 +2168,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
             ...(onReveal && revealLabel ? ([{ id: "reveal", label: revealLabel }] as const) : []),
             { id: "copy-relative", label: "Copy relative path" },
             { id: "copy-full", label: "Copy full path" },
+            ...(onReadContents ? ([{ id: "copy-contents", label: "Copy contents" }] as const) : []),
           ] as const,
           position,
         );
@@ -2152,6 +2195,10 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         }
         if (clicked === "copy-full") {
           handleCopy(targetPath, "Full path");
+          return;
+        }
+        if (clicked === "copy-contents") {
+          handleCopyContents();
         }
       } catch (cause) {
         reportMarkdownActionFailure(
@@ -2163,12 +2210,14 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
     [
       displayPath,
       handleCopy,
+      handleCopyContents,
       handleOpenInBrowser,
       handleOpenInEditor,
       handleRevealInFileManager,
       onOpenInBrowser,
       onOpenMedia,
       onOpen,
+      onReadContents,
       onReveal,
       openInEditorMenuLabel,
       revealLabel,
@@ -2283,7 +2332,8 @@ function areMarkdownFileLinkPropsEqual(
     previous.onOpenInBrowser === next.onOpenInBrowser &&
     previous.onOpenMedia === next.onOpenMedia &&
     previous.onReveal === next.onReveal &&
-    previous.revealLabel === next.revealLabel
+    previous.revealLabel === next.revealLabel &&
+    previous.onReadContents === next.onReadContents
   );
 }
 
@@ -2321,6 +2371,10 @@ function useChatMarkdownState({
   });
   const searchProjectEntries = useAtomQueryRunner(projectEnvironment.searchEntries, {
     reportFailure: false,
+  });
+  const readProjectFile = useAtomQueryRunner(projectEnvironment.readFile, {
+    reportFailure: false,
+    refresh: true,
   });
   const openPreview = useAtomCommand(previewEnvironment.open, {
     reportFailure: false,
@@ -2611,6 +2665,24 @@ function useChatMarkdownState({
     },
     [cwd, findWorkspaceBasenameMatch, revealFileInFileManager],
   );
+  const readMarkdownFileContents = useCallback(
+    async (fileLinkMeta: MarkdownFileLinkMeta) => {
+      if (!cwd || environmentId === null) {
+        throw new Error("Reconnect to this environment and try again.");
+      }
+      const workspaceRelativePath = fileLinkMeta.workspaceRelativePath;
+      const match = workspaceRelativePath
+        ? await findWorkspaceBasenameMatch(workspaceRelativePath)
+        : null;
+      const result = await readProjectFile({
+        environmentId,
+        input: { cwd, relativePath: match ?? workspaceRelativePath ?? fileLinkMeta.filePath },
+      });
+      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+      return result.value;
+    },
+    [cwd, environmentId, findWorkspaceBasenameMatch, readProjectFile],
+  );
   const fileLinkChip = useCallback(
     (fileLinkMeta: MarkdownFileLinkMeta, copyMarkdown: string, mediaSource?: string) => {
       const parentSuffix = fileLinkParentSuffixByPath.get(
@@ -2662,6 +2734,9 @@ function useChatMarkdownState({
               : undefined
           }
           revealLabel={revealInFileManagerLabel}
+          onReadContents={
+            cwd && environmentId !== null ? () => readMarkdownFileContents(fileLinkMeta) : undefined
+          }
           onOpenInBrowser={
             threadRef &&
             isPreviewSupportedInRuntime() &&
@@ -2674,12 +2749,15 @@ function useChatMarkdownState({
     },
     [
       canUseShellActions,
+      cwd,
+      environmentId,
       fileLinkParentSuffixByPath,
       openFileInPanel,
       openInPreferredEditor,
       openMarkdownFileInPreview,
       openMarkdownMedia,
       preferredEditorMenuLabel,
+      readMarkdownFileContents,
       resolvedTheme,
       revealInFileManagerLabel,
       revealMarkdownFileInFileManager,
