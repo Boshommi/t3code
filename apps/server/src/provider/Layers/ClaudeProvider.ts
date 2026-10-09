@@ -48,6 +48,10 @@ import {
   formatClaudeVersionUpgradeMessage,
   resolveClaudeModelsForVersion,
 } from "../ClaudeModelCatalog.ts";
+import {
+  type DiscoveredClaudeModel,
+  resolveDiscoveredClaudeModels,
+} from "../ClaudeModelDiscovery.ts";
 
 const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
@@ -430,6 +434,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   scopedLimitNames?: Ref.Ref<ClaudeScopedLimitNames>,
   /** Banked resets for a subscription login, given the CLI version for the user agent. */
   resolveResetCredits?: (version: string) => Effect.Effect<ServerProviderResetCredits | undefined>,
+  resolveModels?: () => Effect.Effect<ReadonlyArray<DiscoveredClaudeModel> | undefined>,
 ): Effect.fn.Return<
   ServerProviderDraft,
   never,
@@ -527,16 +532,24 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
+  const capabilities = resolveCapabilities
+    ? yield* resolveCapabilities(claudeSettings).pipe(Effect.orElseSucceed(() => undefined))
+    : undefined;
+  const discoveredModels = resolveModels ? yield* resolveModels() : undefined;
+  const supportedManifestModels = resolveClaudeModelsForVersion(modelCatalog, parsedVersion);
+  const supportedSlugs = new Set(supportedManifestModels.map((model) => model.slug));
+  const incompatibleSlugs = new Set(
+    modelCatalog.models
+      .map((entry) => entry.model.slug)
+      .filter((slug) => !supportedSlugs.has(slug)),
+  );
   const models = providerModelsFromSettings(
-    resolveClaudeModelsForVersion(modelCatalog, parsedVersion),
+    resolveDiscoveredClaudeModels(discoveredModels, supportedManifestModels, incompatibleSlugs),
     claudeSettings.customModels,
     DEFAULT_CLAUDE_MODEL_CAPABILITIES,
   );
   const versionUpgradeMessage = formatClaudeVersionUpgradeMessage(modelCatalog, parsedVersion);
 
-  const capabilities = resolveCapabilities
-    ? yield* resolveCapabilities(claudeSettings).pipe(Effect.orElseSucceed(() => undefined))
-    : undefined;
   const skills = yield* discoverClaudeSkills(claudeSettings, cwd, resolvedEnvironment);
   const slashCommands = [COMPACT_SLASH_COMMAND, ...(capabilities?.slashCommands ?? [])];
   const dedupedSlashCommands = dedupeSlashCommands(slashCommands);

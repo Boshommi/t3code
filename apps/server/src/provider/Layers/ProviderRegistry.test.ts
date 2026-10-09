@@ -35,6 +35,7 @@ import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 
 import { checkCodexProviderStatus, type CodexAppServerProviderSnapshot } from "./CodexProvider.ts";
 import { checkClaudeProviderStatus } from "./ClaudeProvider.ts";
+import { SYNTHETIC_CLAUDE_MODEL_CATALOG } from "../ClaudeModelCatalog.testFixtures.ts";
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { AntigravityInstallation } from "../AntigravityInstallation.ts";
 import * as ModelManifest from "../ModelManifest.ts";
@@ -2675,6 +2676,44 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
     // ── checkClaudeProviderStatus tests ──────────────────────────
 
     describe("checkClaudeProviderStatus", () => {
+      it.effect(
+        "publishes discovered models while preserving custom models and failure fallback",
+        () =>
+          Effect.gen(function* () {
+            for (const discovered of [[{ id: "gateway-model" }], [], undefined]) {
+              const status = yield* checkClaudeProviderStatus(
+                { ...defaultClaudeSettings, customModels: ["manual-model"] },
+                claudeCapabilities(),
+                {},
+                undefined,
+                SYNTHETIC_CLAUDE_MODEL_CATALOG,
+                undefined,
+                undefined,
+                () => Effect.succeed(discovered),
+              );
+              assert.strictEqual(status.status, "ready");
+              assert.deepStrictEqual(
+                status.models.map((model) => model.slug),
+                [
+                  ...(discovered === undefined
+                    ? SYNTHETIC_CLAUDE_MODEL_CATALOG.models.map((entry) => entry.model.slug)
+                    : discovered.map((model) => model.id)),
+                  "manual-model",
+                ],
+              );
+              assert.strictEqual(status.models.at(-1)?.isCustom, true);
+            }
+          }).pipe(
+            Effect.provide(
+              mockSpawnerLayer((args) => {
+                if (args.join(" ") === "--version")
+                  return { stdout: "99.0.0\n", stderr: "", code: 0 };
+                throw new Error(`Unexpected args: ${args.join(" ")}`);
+              }),
+            ),
+          ),
+      );
+
       it.effect("returns ready when claude is installed and authenticated", () =>
         Effect.gen(function* () {
           const status = yield* checkClaudeProviderStatus(
