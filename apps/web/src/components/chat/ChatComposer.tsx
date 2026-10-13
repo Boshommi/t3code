@@ -3359,6 +3359,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       contextIds: string[],
     ) => {
       expandComposerForEditorChange();
+      if (nextPrompt !== promptRef.current) {
+        setIsStashMenuOpen(false);
+      }
       if (activePendingProgress?.activeQuestion && pendingUserInputs.length > 0) {
         if (activePendingProgress.activeQuestion.allowCustomAnswer === false) return;
         setComposerCursor(nextCursor);
@@ -4198,8 +4201,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         });
         return;
       }
-      setIsStashMenuOpen(false);
-
       // The server sweeps pending uploads after 24 hours, so ask before
       // reattaching. An expired upload restores as a needs-reattach row
       // instead of a reference the next send would fail to verify. Verify
@@ -5214,8 +5215,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [activeThreadId]);
 
   // Close the stash menu whenever the trigger-driven command menu opens so
-  // the two popovers never stack in the same layer, and when the user
-  // resumes typing (the menu is a transient picker, not a panel).
+  // the two popovers never stack in the same layer.
   useEffect(() => {
     if (composerMenuOpen) {
       setIsStashMenuOpen(false);
@@ -5223,7 +5223,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [composerMenuOpen]);
   useEffect(() => {
     setIsStashMenuOpen(false);
-  }, [prompt]);
+  }, [composerDraftTargetKey]);
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
