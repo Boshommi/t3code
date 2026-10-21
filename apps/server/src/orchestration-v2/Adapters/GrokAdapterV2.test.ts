@@ -7,6 +7,7 @@ import {
   RunId,
   type OrchestrationV2UserInputQuestion,
   type OrchestrationV2RuntimeRequest,
+  type OrchestrationV2ConversationMessage,
   ProviderInstanceId,
   ProviderSessionId,
   type RuntimeMode,
@@ -34,6 +35,7 @@ import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
 import * as ProjectStore from "../ProjectStore.ts";
 import { buildInitialGrokProviderSnapshot } from "@t3tools/provider-grok/testing";
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
+import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import * as ProviderInstanceRegistry from "../../provider/ProviderInstanceRegistry.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
@@ -588,6 +590,198 @@ describe("Grok native questions", () => {
         answers: { changes: ["Tests", "Docs"] },
       });
       yield* Deferred.await(terminal);
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
+  );
+});
+
+describe("Grok session images", () => {
+  const layerHost = TestProviderHost.layer().pipe(Layer.provide(NodeServices.layer));
+  const layerTest = Layer.mergeAll(
+    NodeServices.layer,
+    IdAllocator.layer,
+    McpProviderSessions.layer,
+    layerHost,
+  );
+
+  it.live("keeps an image Grok showed from its session folder with the thread", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const workspace = yield* fs.makeTempDirectoryScoped({ prefix: "grok-session-image-" });
+      const sessionFolder = path.join(
+        workspace,
+        ".grok",
+        "sessions",
+        encodeURIComponent(workspace),
+        "01a07e4e-b1fc-7173-afcc-8403670aa057",
+      );
+      yield* fs.makeDirectory(path.join(sessionFolder, "images"), { recursive: true });
+      yield* fs.writeFileString(path.join(sessionFolder, "images", "1.png"), "png-bytes");
+      const transcript: AcpReplayTranscript = {
+        provider: GROK_PROVIDER,
+        protocol: "acp.ndjson-jsonrpc",
+        version: "1",
+        scenario: "grok-session-image",
+        entries: [
+          {
+            type: "expect_outbound",
+            frame: { kind: "request", method: "initialize", params: "<any>" },
+          },
+          {
+            type: "emit_inbound",
+            frame: {
+              kind: "response",
+              method: "initialize",
+              result: {
+                protocolVersion: 1,
+                agentCapabilities: { loadSession: true },
+                authMethods: [{ id: "replay", name: "Replay" }],
+              },
+            },
+          },
+          {
+            type: "expect_outbound",
+            frame: { kind: "request", method: "session/new", params: "<any>" },
+          },
+          {
+            type: "emit_inbound",
+            frame: {
+              kind: "response",
+              method: "session/new",
+              result: { sessionId: "grok-session-image" },
+            },
+          },
+          {
+            type: "expect_outbound",
+            frame: { kind: "request", method: "session/prompt", params: "<any>" },
+          },
+          {
+            type: "emit_inbound",
+            frame: {
+              kind: "notification",
+              method: "session/update",
+              params: {
+                sessionId: "grok-session-image",
+                update: {
+                  sessionUpdate: "agent_message_chunk",
+                  content: {
+                    type: "text",
+                    text: `Here it is: ![chart](${path.join(sessionFolder, "images", "1.png")})`,
+                  },
+                },
+              },
+            },
+          },
+          {
+            type: "emit_inbound",
+            frame: {
+              kind: "response",
+              method: "session/prompt",
+              result: { stopReason: "end_turn" },
+            },
+          },
+        ],
+      };
+      const instanceId = ProviderInstanceId.make("grok-session-image");
+      const threadId = ThreadId.make("grok-session-image-thread");
+      const adapter = yield* makeGrokAdapterV2({
+        instanceId,
+        settings: LAUNCH_TEST_GROK_SETTINGS,
+        environment: {},
+        hostPlatform: "darwin",
+        selfInvocation: yield* resolveSelfInvocation(),
+        makeRuntime: makeAcpReplayRuntime({
+          transcript,
+          statusPath: path.join(workspace, "status.json"),
+          scriptPath: yield* path.fromFileUrl(
+            new URL("../../../scripts/acp-replay-agent.ts", import.meta.url),
+          ),
+          childProcessSpawner,
+          fileSystem: fs,
+          initializeMeta: GROK_ACP_INITIALIZE_META,
+        }),
+      });
+      const policy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        cwd: workspace,
+      });
+      const modelSelection = { instanceId, model: "grok-build" };
+      const runtime = yield* adapter.openSession({
+        threadId,
+        providerSessionId: ProviderSessionId.make("grok-session-image"),
+        modelSelection,
+        runtimePolicy: policy,
+      });
+      const providerThread = yield* runtime.ensureThread({
+        threadId,
+        modelSelection,
+        runtimePolicy: policy,
+      });
+      const completed = yield* Deferred.make<OrchestrationV2ConversationMessage>();
+      yield* runtime.events.pipe(
+        Stream.runForEach((event) =>
+          event.type === "message.updated" &&
+          event.message.role === "assistant" &&
+          !event.message.streaming
+            ? Deferred.succeed(completed, event.message)
+            : Effect.void,
+        ),
+        Effect.forkScoped,
+      );
+      const now = yield* DateTime.now;
+      yield* runtime.startTurn({
+        appThread: {
+          createdBy: "user",
+          creationSource: "web",
+          id: threadId,
+          projectId: ProjectId.make("grok-session-image-project"),
+          title: "Grok session image",
+          providerInstanceId: instanceId,
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: workspace,
+          activeProviderThreadId: providerThread.id,
+          lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+          forkedFrom: null,
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+          settledOverride: null,
+          settledAt: null,
+          lastVisitedAt: null,
+          deletedAt: null,
+        },
+        threadId,
+        runId: RunId.make("grok-session-image-run"),
+        runOrdinal: 1,
+        providerTurnOrdinal: 1,
+        attemptId: RunAttemptId.make("grok-session-image-attempt"),
+        rootNodeId: NodeId.make("grok-session-image-root"),
+        providerThread,
+        message: {
+          createdBy: "user",
+          creationSource: "web",
+          messageId: MessageId.make("grok-session-image-message"),
+          text: "Show me the chart.",
+          attachments: [],
+        },
+        modelSelection,
+        runtimePolicy: policy,
+      });
+
+      const message = yield* Deferred.await(completed);
+      const [attachment] = message.attachments;
+      assert.equal(message.attachments.length, 1);
+      const stored = path.join(
+        (yield* ProviderHost.ProviderHost).paths.attachmentsDir,
+        attachment!.id,
+      );
+      assert.equal(message.text, `Here it is: ![chart](<${stored}>)`);
+      assert.equal(yield* fs.readFileString(stored), "png-bytes");
     }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 });

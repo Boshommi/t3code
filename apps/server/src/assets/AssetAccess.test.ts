@@ -287,6 +287,37 @@ describe("AssetAccess", () => {
     }).pipe(Effect.provide(layerTest)),
   );
 
+  it.effect("serves a Grok session image whose markdown decoded the session folder", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const grokHome = yield* fs.makeTempDirectoryScoped({ prefix: "t3-grok-home-" });
+      const sessionId = "01a07e4e-b1fc-7173-afcc-8403670aa057";
+      const imageDirectory = path.join(
+        grokHome,
+        "sessions",
+        encodeURIComponent("/home/me/proj"),
+        sessionId,
+        "images",
+      );
+      yield* fs.makeDirectory(imageDirectory, { recursive: true });
+      const imagePath = path.join(imageDirectory, "1.jpg");
+      yield* fs.writeFileString(imagePath, "jpeg-bytes");
+      const result = yield* issueAssetUrl({
+        resource: {
+          _tag: "media-file",
+          threadId: ThreadId.make("thread-1"),
+          path: `${grokHome}/sessions/home/me/proj/${sessionId}/images/1.jpg`,
+        },
+      });
+      const suffix = result.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+      const separator = suffix.indexOf("/");
+      expect(
+        yield* resolveAsset(suffix.slice(0, separator), suffix.slice(separator + 1)),
+      ).toMatchObject({ kind: "file", path: yield* fs.realPath(imagePath) });
+    }).pipe(Effect.provide(layerTest)),
+  );
+
   it.effect("resolves relative media paths from the thread workspace, including outside it", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

@@ -197,6 +197,15 @@ export function safeDecodeURIComponent(value: string): string {
   }
 }
 
+/**
+ * Decodes a markdown filesystem destination but keeps `%2F`: Grok names a
+ * session folder after its cwd as one encoded segment (`%2Fhome%2Fproj`), and
+ * decoding it would point at nested folders that do not exist.
+ */
+export function decodeMarkdownFilesystemPath(value: string): string {
+  return value.replace(/(?:%(?!2F)[0-9A-F]{2})+/gi, safeDecodeURIComponent);
+}
+
 export function normalizeMarkdownLinkDestination(value: string): string {
   const trimmed = value.trim();
   return trimmed.startsWith("<") && trimmed.endsWith(">") ? trimmed.slice(1, -1) : trimmed;
@@ -278,7 +287,7 @@ export function parseMarkdownFileLink(href: string): FilePathPosition | null {
   const source =
     (normalized.toLowerCase().startsWith("file:") ? parseFileUrlHref(normalized) : null) ??
     splitMarkdownLinkSearchAndHash(normalized);
-  const path = stripSlashPrefixedWindowsDrive(safeDecodeURIComponent(source.path.trim()));
+  const path = stripSlashPrefixedWindowsDrive(decodeMarkdownFilesystemPath(source.path.trim()));
   const hash = safeDecodeURIComponent(source.hash.trim());
   if (path.length === 0 || hasExternalScheme(path)) return null;
 

@@ -471,6 +471,10 @@
       "types": "./src/threadSearch.ts",
       "import": "./src/threadSearch.ts"
     },
+    "./attachmentIds": {
+      "types": "./src/attachmentIds.ts",
+      "import": "./src/attachmentIds.ts"
+    },
     "./markdownLinks": {
       "types": "./src/markdownLinks.ts",
       "import": "./src/markdownLinks.ts"

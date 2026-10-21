@@ -61,6 +61,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
+import { encodedGrokSessionImagePath } from "@t3tools/provider-grok/server/sessionImages";
 import * as NativeAppIconResolver from "./NativeAppIconResolver.ts";
 import { extractIcnsPng } from "./icns.ts";
 import { openMediaFile, readMediaFileHeader, type OpenMediaFile } from "./MediaFile.ts";
@@ -353,11 +354,17 @@ const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMe
     readonly expiresAt: number;
   }) {
     const path = yield* Path.Path;
-    const canonicalFile = yield* resolveCanonicalFile(input.requestedPath).pipe(
-      Effect.mapError(
-        (cause) => new AssetWorkspaceAssetInspectionError({ resource: input.resource, cause }),
-      ),
-    );
+    const resolveFile = (filePath: string) =>
+      resolveCanonicalFile(filePath).pipe(
+        Effect.mapError(
+          (cause) => new AssetWorkspaceAssetInspectionError({ resource: input.resource, cause }),
+        ),
+      );
+    // A Grok session image whose `%2F`-encoded cwd folder was decoded into nested folders.
+    const grokSessionPath = encodedGrokSessionImagePath(input.requestedPath);
+    const canonicalFile =
+      (yield* resolveFile(input.requestedPath)) ??
+      (grokSessionPath === null ? null : yield* resolveFile(grokSessionPath));
     if (!canonicalFile) {
       return yield* new AssetWorkspaceAssetNotFoundError({
         resource: input.resource,

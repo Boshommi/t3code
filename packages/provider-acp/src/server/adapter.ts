@@ -371,6 +371,17 @@ export interface AcpAdapterV2Flavor {
    * fail before `session/prompt`.
    */
   readonly supportsImagePrompts?: boolean;
+  /**
+   * Final say over a completed assistant message's text and attachments, e.g.
+   * to keep images it shows from a provider-owned folder with the thread.
+   */
+  readonly completeAssistantMessage?: (input: {
+    readonly threadId: ThreadId;
+    readonly text: string;
+  }) => Effect.Effect<{
+    readonly text: string;
+    readonly attachments: ReadonlyArray<ChatAttachment>;
+  }>;
 }
 
 function acpSupportsImagePrompts(input: {
@@ -2375,6 +2386,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           if (kind !== "reasoning") {
             const messageId = providerMessageId(segment.nativeItemId);
             const messageNodeId = kind === "user" ? context.input.rootNodeId : nodeId;
+            const content =
+              completed && kind === "assistant" && flavor.completeAssistantMessage
+                ? yield* flavor.completeAssistantMessage({ threadId: context.input.threadId, text })
+                : { text, attachments: [] };
             const message: OrchestrationV2ConversationMessage = {
               createdBy: kind === "user" ? "user" : "agent",
               creationSource: "provider",
@@ -2383,8 +2398,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               runId: context.input.runId,
               nodeId: messageNodeId,
               role: kind,
-              text,
-              attachments: [],
+              text: content.text,
+              attachments: content.attachments,
               streaming: !completed,
               createdAt: segment.startedAt,
               updatedAt: now,
@@ -2439,7 +2454,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                       updatedAt: now,
                       type: "assistant_message",
                       messageId,
-                      text,
+                      text: content.text,
+                      ...(content.attachments.length === 0
+                        ? {}
+                        : { attachments: content.attachments }),
                       streaming: !completed,
                     },
                   },

@@ -1,8 +1,8 @@
 import { isWindowsAbsolutePath, stripSlashPrefixedWindowsDrive } from "@t3tools/shared/path";
 
 import {
+  decodeMarkdownFilesystemPath,
   normalizeMarkdownLinkDestination,
-  safeDecodeURIComponent,
   splitMarkdownLinkSearchAndHash,
 } from "@t3tools/shared/markdownLinks";
 import { parseFileUrlHref } from "@t3tools/shared/fileLinks";
@@ -50,12 +50,12 @@ export function classifyMarkdownImageSource(
       ? { _tag: "Blocked" }
       : {
           _tag: "WorkspaceFile",
-          path: stripSlashPrefixedWindowsDrive(safeDecodeURIComponent(target.path)),
+          path: stripSlashPrefixedWindowsDrive(decodeMarkdownFilesystemPath(target.path)),
         };
   }
 
   const path = stripSlashPrefixedWindowsDrive(
-    safeDecodeURIComponent(splitMarkdownLinkSearchAndHash(source).path),
+    decodeMarkdownFilesystemPath(splitMarkdownLinkSearchAndHash(source).path),
   );
   if (path.length === 0) return { _tag: "Blocked" };
   if (path.startsWith("/") || isWindowsAbsolutePath(path)) {

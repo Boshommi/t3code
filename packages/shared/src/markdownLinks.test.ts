@@ -36,6 +36,12 @@ describe("parseMarkdownFileLink", () => {
     ["C:%5Crepo%5Cimage.png", "C:\\repo\\image.png"],
     ["</D:/Programme/t3code/ChatMarkdown.tsx:1>", "D:/Programme/t3code/ChatMarkdown.tsx"],
     ["file://localhost/home/me/notes.md", "/home/me/notes.md"],
+    ["/tmp/caf%C3%A9%20one.png", "/tmp/café one.png"],
+    // Grok names session folders after their `%2F`-encoded cwd.
+    [
+      "/home/me/.grok/sessions/%2Fhome%2Fme%2Fproj/01a07e4e-b1fc-7173-afcc-8403670aa057/images/1.jpg",
+      "/home/me/.grok/sessions/%2Fhome%2Fme%2Fproj/01a07e4e-b1fc-7173-afcc-8403670aa057/images/1.jpg",
+    ],
   ])("recognizes %s as a file", (href, path) => {
     expect(parseMarkdownFileLink(href)?.path).toBe(path);
   });

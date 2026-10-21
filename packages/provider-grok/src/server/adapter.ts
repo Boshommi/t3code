@@ -55,6 +55,7 @@ import {
   XAiAskUserQuestionRequest,
   XAiExitPlanModeRequest,
 } from "./xaiAcpExtension.ts";
+import { persistGrokSessionImages } from "./sessionImages.ts";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import { acpPermissionDisposition } from "@t3tools/provider-acp/server/clientPolicy";
 import {
@@ -341,9 +342,15 @@ export function makeGrokAcpAdapterFlavor(
 export const makeGrokAdapterV2 = Effect.fn("makeGrokAdapterV2")(function* (
   options: GrokAdapterV2Options,
 ) {
+  const sessionImageServices =
+    yield* Effect.context<Effect.Services<ReturnType<typeof persistGrokSessionImages>>>();
   return yield* makeAcpAdapterV2({
     instanceId: options.instanceId,
-    flavor: makeGrokAcpAdapterFlavor(options, yield* HostProcess.HomeDirectory),
+    flavor: {
+      ...makeGrokAcpAdapterFlavor(options, yield* HostProcess.HomeDirectory),
+      completeAssistantMessage: (input) =>
+        persistGrokSessionImages(input).pipe(Effect.provideContext(sessionImageServices)),
+    },
     selfInvocation: options.selfInvocation,
     ...(options.nativeLogging === undefined ? {} : { nativeLogging: options.nativeLogging }),
     ...(options.continuationRequests === undefined
