@@ -96,6 +96,21 @@ export function resolveSidebarProjectScopeKey(input: {
   return group?.projectKey ?? (input.canClearMissingScope ? null : input.key);
 }
 
+/** Resolves each scoped key like `resolveSidebarProjectScopeKey`, dropping
+    cleared keys and duplicates that resolve to the same project. */
+export function resolveSidebarProjectScopeKeys(input: {
+  readonly groups: ReadonlyArray<SidebarProjectSnapshot>;
+  readonly keys: readonly string[];
+  readonly settings?: ProjectGroupingSettings;
+  readonly canClearMissingScope?: boolean;
+}): string[] {
+  const resolved = input.keys.flatMap((key) => {
+    const projectKey = resolveSidebarProjectScopeKey({ ...input, key });
+    return projectKey === null ? [] : [projectKey];
+  });
+  return [...new Set(resolved)];
+}
+
 export function buildPhysicalToLogicalProjectKeyMap(input: {
   projects: ReadonlyArray<Project>;
   settings: ProjectGroupingSettings;

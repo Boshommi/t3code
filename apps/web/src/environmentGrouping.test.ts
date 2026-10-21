@@ -6,6 +6,7 @@ import {
   buildSidebarProjectPickerEntries,
   buildSidebarProjectSnapshots,
   resolveSidebarProjectScopeKey,
+  resolveSidebarProjectScopeKeys,
   getSidebarProjectSettingsKey,
 } from "./sidebarProjectGrouping";
 import type { Project } from "./types";
@@ -103,6 +104,24 @@ describe("environment grouping", () => {
       ).toBe(groups[0]?.projectKey);
     },
   );
+
+  it("keeps unresolved scope keys until every project loaded, then drops them", () => {
+    const project = makeProject({ repositoryIdentity });
+    const groups = buildSidebarProjectSnapshots({
+      projects: [project],
+      settings: defaultGroupingSettings,
+      primaryEnvironmentId,
+      resolveEnvironmentLabel: () => null,
+    });
+    const key = groups[0]!.projectKey;
+    expect(resolveSidebarProjectScopeKeys({ groups, keys: [key, "gone", key] })).toEqual([
+      key,
+      "gone",
+    ]);
+    expect(
+      resolveSidebarProjectScopeKeys({ groups, keys: [key, "gone"], canClearMissingScope: true }),
+    ).toEqual([key]);
+  });
 
   it("prefers an existing ordinary repository scope over a scratch alias", () => {
     const scratch = makeProject({ isScratch: true, repositoryIdentity });

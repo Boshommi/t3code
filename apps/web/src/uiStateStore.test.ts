@@ -13,6 +13,7 @@ import {
   resolveProjectExpanded,
   setProjectColor,
   setProjectExpanded,
+  setSidebarProjectScopeKeys,
   type UiState,
 } from "./uiStateStore";
 
@@ -20,7 +21,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
   return {
     projectExpandedById: {},
     projectOrder: [],
-    sidebarProjectScopeKey: null,
+    sidebarProjectScopeKeys: [],
     sidebarGroupByProject: true,
     projectColorByKey: {},
     projectShelfExpandedByKey: {},
@@ -98,6 +99,16 @@ describe("uiStateStore pure functions", () => {
   });
 });
 
+describe("setSidebarProjectScopeKeys", () => {
+  it("stores a deduplicated scope and clears it back to all projects", () => {
+    const scoped = setSidebarProjectScopeKeys(makeUiState(), ["repo-a", "", "repo-b", "repo-a"]);
+
+    expect(scoped.sidebarProjectScopeKeys).toEqual(["repo-a", "repo-b"]);
+    expect(setSidebarProjectScopeKeys(scoped, ["repo-a", "repo-b"])).toBe(scoped);
+    expect(setSidebarProjectScopeKeys(scoped, []).sidebarProjectScopeKeys).toEqual([]);
+  });
+});
+
 describe("setProjectColor", () => {
   it("normalizes colors, clamps opacity, and clears back to no entry", () => {
     const colored = setProjectColor(makeUiState(), "project", { color: "#2563EB", opacity: 3 });
@@ -149,7 +160,7 @@ describe("parsePersistedState", () => {
         "environment:thread-1": "2026-02-25T12:35:00.000Z",
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
-      sidebarProjectScopeKey: null,
+      sidebarProjectScopeKeys: [],
       sidebarGroupByProject: true,
       projectColorByKey: {},
       projectShelfExpandedByKey: {},
@@ -257,7 +268,7 @@ describe("uiStateStore persistence", () => {
         "environment:thread-1": "2026-02-25T12:35:00.000Z",
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
-      sidebarProjectScopeKey: null,
+      sidebarProjectScopeKeys: [],
       sidebarGroupByProject: true,
       projectColorByKey: {},
       projectShelfExpandedByKey: {},
@@ -291,14 +302,21 @@ describe("uiStateStore persistence", () => {
   });
 
   it("restores the sidebar project scope across reloads", () => {
-    persistState(makeUiState({ sidebarProjectScopeKey: "github.com/pingdotgg/t3code" }));
+    persistState(makeUiState({ sidebarProjectScopeKeys: ["repo-a", "repo-b"] }));
 
     const persisted = JSON.parse(
       localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
     ) as PersistedUiState;
 
-    expect(parsePersistedState(persisted).sidebarProjectScopeKey).toBe(
-      "github.com/pingdotgg/t3code",
+    expect(parsePersistedState(persisted).sidebarProjectScopeKeys).toEqual(["repo-a", "repo-b"]);
+  });
+
+  it("migrates a single-project scope into the multi-project scope", () => {
+    expect(
+      parsePersistedState({ sidebarProjectScopeKey: "repo-a" }).sidebarProjectScopeKeys,
+    ).toEqual(["repo-a"]);
+    expect(parsePersistedState({ sidebarProjectScopeKey: null }).sidebarProjectScopeKeys).toEqual(
+      [],
     );
   });
 });

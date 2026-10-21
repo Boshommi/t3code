@@ -49,7 +49,14 @@ On web and desktop, the sidebar lists threads under a header for each project. C
 to collapse or expand that project, or use its pen button to start a thread there. Each project
 has its own **Snoozed** and **Settled** shelves, plus a **Working** shelf when that section is on.
 Right-click a project header to settle all of its active threads at once (pinned threads stay) or
-to open project settings.
+to open project settings. Hover a header to see the project's folders, live status, and thread
+counts.
+
+Projects follow **Settings → General → Project order**. With **Manual**, they keep the order you
+give them, and the project header menu offers **Move up** and **Move down**.
+
+To show only some projects, open the filter button in the sidebar header and check each project
+you want. Choose **All projects** to clear the filter.
 
 To tint a project, hover its header and choose the palette button, or right-click the header and
 choose **Set color…**. The sidebar shows the color and opacity while you adjust them. Colors are

@@ -26,7 +26,9 @@ export interface PersistedUiState {
   expandedProjectCwds?: string[];
   projectOrderCwds?: string[];
   defaultAdvertisedEndpointKey?: string | null;
+  /** Pre-multi-select single scope; read once to migrate. */
   sidebarProjectScopeKey?: string | null;
+  sidebarProjectScopeKeys?: string[];
   sidebarGroupByProject?: boolean;
   projectColorByKey?: Record<string, ProjectColor>;
   projectShelfExpandedByKey?: Record<string, boolean>;
@@ -38,7 +40,10 @@ export interface PersistedUiState {
 export interface UiProjectState {
   projectExpandedById: Record<string, boolean>;
   projectOrder: string[];
-  sidebarProjectScopeKey: string | null;
+  // Logical project keys the sidebar list is scoped to; empty means all
+  // projects. Lives here so routes that unmount the sidebar (Settings) cannot
+  // reset the filter.
+  sidebarProjectScopeKeys: string[];
   // Sidebar lists threads under a header per logical project instead of one
   // flat lifecycle list.
   sidebarGroupByProject: boolean;
@@ -74,7 +79,7 @@ export interface UiState
 const initialState: UiState = {
   projectExpandedById: {},
   projectOrder: [],
-  sidebarProjectScopeKey: null,
+  sidebarProjectScopeKeys: [],
   sidebarGroupByProject: true,
   projectColorByKey: {},
   projectShelfExpandedByKey: {},
@@ -190,7 +195,10 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
         ? sanitizePersistedThreadChangedFilesExpanded(parsed.threadChangedFilesExpandedById)
         : {},
     defaultAdvertisedEndpointKey: sanitizeOptionalKey(parsed.defaultAdvertisedEndpointKey),
-    sidebarProjectScopeKey: sanitizeOptionalKey(parsed.sidebarProjectScopeKey),
+    sidebarProjectScopeKeys:
+      parsed.sidebarProjectScopeKeys !== undefined
+        ? sanitizeStringArray(parsed.sidebarProjectScopeKeys)
+        : [sanitizeOptionalKey(parsed.sidebarProjectScopeKey)].filter((key) => key !== null),
     sidebarGroupByProject:
       typeof parsed.sidebarGroupByProject === "boolean"
         ? parsed.sidebarGroupByProject
@@ -270,7 +278,7 @@ export function persistState(state: UiState): void {
         projectOrder: state.projectOrder,
         threadLastVisitedAtById: state.threadLastVisitedAtById,
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
-        sidebarProjectScopeKey: state.sidebarProjectScopeKey,
+        sidebarProjectScopeKeys: state.sidebarProjectScopeKeys,
         sidebarGroupByProject: state.sidebarGroupByProject,
         projectColorByKey: state.projectColorByKey,
         projectShelfExpandedByKey: state.projectShelfExpandedByKey,
@@ -372,14 +380,21 @@ function setDefaultAdvertisedEndpointKey(state: UiState, key: string | null): Ui
   };
 }
 
-function setSidebarProjectScopeKey(state: UiState, projectKey: string | null): UiState {
-  const nextKey = sanitizeOptionalKey(projectKey);
-  if (state.sidebarProjectScopeKey === nextKey) {
+export function setSidebarProjectScopeKeys(
+  state: UiState,
+  projectKeys: readonly string[],
+): UiState {
+  const nextKeys = sanitizeStringArray(projectKeys);
+  const current = state.sidebarProjectScopeKeys;
+  if (
+    current.length === nextKeys.length &&
+    current.every((key, index) => key === nextKeys[index])
+  ) {
     return state;
   }
   return {
     ...state,
-    sidebarProjectScopeKey: nextKey,
+    sidebarProjectScopeKeys: nextKeys,
   };
 }
 
@@ -506,7 +521,7 @@ interface UiStateStore extends UiState {
   markThreadUnread: (threadId: string, latestTurnCompletedAt: string | null | undefined) => void;
   setThreadChangedFilesExpanded: (threadId: string, turnId: string, expanded: boolean) => void;
   setDefaultAdvertisedEndpointKey: (key: string | null) => void;
-  setSidebarProjectScopeKey: (projectKey: string | null) => void;
+  setSidebarProjectScopeKeys: (projectKeys: readonly string[]) => void;
   setSidebarGroupByProject: (enabled: boolean) => void;
   setProjectColor: (projectKey: string, color: ProjectColor | null) => void;
   setProjectShelfExpanded: (shelfKey: string, expanded: boolean) => void;
@@ -529,8 +544,8 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setThreadChangedFilesExpanded(state, threadId, turnId, expanded)),
   setDefaultAdvertisedEndpointKey: (key) =>
     set((state) => setDefaultAdvertisedEndpointKey(state, key)),
-  setSidebarProjectScopeKey: (projectKey) =>
-    set((state) => setSidebarProjectScopeKey(state, projectKey)),
+  setSidebarProjectScopeKeys: (projectKeys) =>
+    set((state) => setSidebarProjectScopeKeys(state, projectKeys)),
   setSidebarGroupByProject: (enabled) =>
     set((state) =>
       state.sidebarGroupByProject === enabled
