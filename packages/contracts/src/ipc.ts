@@ -33,8 +33,12 @@ export interface ContextMenuItem<T extends string = string> {
   children?: readonly ContextMenuItem<T>[];
 }
 
+/** Quit (Cmd/Ctrl+Q) and close-window (Cmd/Ctrl+W) confirmation hints share one overlay. */
 export type QuitShortcutHintEvent =
-  | { readonly state: "down"; readonly mode: Exclude<QuitConfirmationMode, "direct"> }
+  | {
+      readonly state: "down";
+      readonly mode: Exclude<QuitConfirmationMode, "direct"> | "close-window";
+    }
   | { readonly state: "up" };
 
 export interface ContextMenuItemSchemaType {

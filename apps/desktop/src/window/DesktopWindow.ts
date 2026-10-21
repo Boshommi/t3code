@@ -660,9 +660,10 @@ export const make = Effect.gen(function* () {
       }
     });
 
-    // Electron's windowMenu close role owns CmdOrCtrl+W. Holding the
+    // The menu's Close Window item owns CmdOrCtrl+W. Holding the
     // close-terminal shortcut can outlive the terminal that handled its first
-    // press, so reject repeats before they reach the native window accelerator.
+    // press, so reject repeats before they reach that accelerator, where they
+    // would count as the confirming second press.
     const quitShortcutHandler = makeQuitShortcutHandler({
       platform: environment.platform,
       getMode: () =>

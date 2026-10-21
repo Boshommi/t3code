@@ -7,11 +7,13 @@ import * as Schema from "effect/Schema";
 import type * as Electron from "electron";
 
 import { makeComponentLogger } from "../app/DesktopObservability.ts";
+import { QUIT_SHORTCUT_CHANNEL } from "../ipc/channels.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
+import { makeCloseWindowShortcutHandler } from "./CloseWindowConfirm.ts";
 
 export class DesktopApplicationMenuActionError extends Schema.TaggedError<DesktopApplicationMenuActionError>()(
   "DesktopApplicationMenuActionError",
@@ -40,6 +42,10 @@ type DesktopApplicationMenuRuntimeServices =
 const { logInfo: logUpdaterInfo } = makeComponentLogger("desktop-updater");
 
 const { logError: logMenuError } = makeComponentLogger("desktop-menu");
+
+function hasRenderer(window: Electron.BaseWindow): window is Electron.BrowserWindow {
+  return "webContents" in window;
+}
 
 const dispatchMenuAction = Effect.fn("desktop.menu.dispatchMenuAction")(function* (
   action: string,
@@ -119,6 +125,16 @@ export const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const context = yield* Effect.context<DesktopApplicationMenuRuntimeServices>();
   const runPromise = Effect.runPromiseWith(context);
+  const closeWindowShortcut = makeCloseWindowShortcutHandler<Electron.BaseWindow>({
+    notify: (window, hint) => {
+      if (!window.isDestroyed() && hasRenderer(window)) {
+        window.webContents.send(QUIT_SHORTCUT_CHANNEL, hint);
+      }
+    },
+    close: (window) => {
+      if (!window.isDestroyed()) window.close();
+    },
+  });
 
   const runMenuEffect = <E>(
     action: string,
@@ -160,6 +176,18 @@ export const make = Effect.gen(function* () {
     };
     const mainContentsClick = (command: DesktopWindow.MainWindowContentsCommand) => () => {
       runMenuEffect(command, runMainContentsCommand(command));
+    };
+    // Owns CmdOrCtrl+W in place of Electron's close role. The shortcut only
+    // gets here when the renderer had no terminal or panel tab left to close,
+    // so it asks for a second press; choosing the menu item closes at once.
+    const closeWindowItem: Electron.MenuItemConstructorOptions = {
+      label: "Close Window",
+      accelerator: "CmdOrCtrl+W",
+      click: (_item, window, event) => {
+        if (window === undefined || window.isDestroyed()) return;
+        if (event.triggeredByAccelerator === true) closeWindowShortcut(window);
+        else window.close();
+      },
     };
     const template: Electron.MenuItemConstructorOptions[] = [];
 
@@ -204,7 +232,7 @@ export const make = Effect.gen(function* () {
                 },
                 { type: "separator" as const },
               ]),
-          { role: environment.platform === "darwin" ? "close" : "quit" },
+          environment.platform === "darwin" ? closeWindowItem : { role: "quit" },
         ],
       },
       {
@@ -298,7 +326,13 @@ export const make = Effect.gen(function* () {
           { role: "togglefullscreen" },
         ],
       },
-      { role: "windowMenu" },
+      // Off macOS the default Window menu carries the close role.
+      environment.platform === "darwin"
+        ? { role: "windowMenu" }
+        : {
+            role: "windowMenu",
+            submenu: [{ role: "minimize" }, { role: "zoom" }, closeWindowItem],
+          },
       {
         role: "help",
         submenu: [

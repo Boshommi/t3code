@@ -242,7 +242,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       if (
         hint.state === "down" &&
         "mode" in hint &&
-        (hint.mode === "hold" || hint.mode === "double-click")
+        (hint.mode === "hold" || hint.mode === "double-click" || hint.mode === "close-window")
       ) {
         listener({ state: "down", mode: hint.mode });
       }

@@ -1,17 +1,21 @@
+import type { QuitShortcutHintEvent } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 
 import { isMacPlatform } from "../lib/utils";
 
 const HOLD_HINT_LINGER_MS = 1200;
 
+type HintMode = Extract<QuitShortcutHintEvent, { state: "down" }>["mode"];
+
+/** Shows the desktop's Cmd/Ctrl+Q quit and Cmd/Ctrl+W close-window confirmation hints. */
 export function QuitHoldOverlay() {
-  const [visibleMode, setVisibleMode] = useState<"hold" | "double-click" | null>(null);
+  const [visibleMode, setVisibleMode] = useState<HintMode | null>(null);
 
   useEffect(() => {
     const subscribe = window.desktopBridge?.onQuitShortcut;
     if (!subscribe) return;
     let hideTimer: number | undefined;
-    let pressedMode: "hold" | "double-click" = "hold";
+    let pressedMode: HintMode = "hold";
     const unsubscribe = subscribe((hint) => {
       window.clearTimeout(hideTimer);
       if (hint.state === "down") {
@@ -19,7 +23,7 @@ export function QuitHoldOverlay() {
         setVisibleMode(hint.mode);
         return;
       }
-      if (pressedMode === "double-click") {
+      if (pressedMode !== "hold") {
         setVisibleMode(null);
         return;
       }
@@ -32,11 +36,14 @@ export function QuitHoldOverlay() {
   }, []);
 
   if (!visibleMode) return null;
-  const shortcut = isMacPlatform(navigator.platform) ? "⌘Q" : "Ctrl+Q";
+  const mac = isMacPlatform(navigator.platform);
+  const quitShortcut = mac ? "⌘Q" : "Ctrl+Q";
   const message =
-    visibleMode === "hold"
-      ? `Hold ${shortcut} or press twice to quit`
-      : `Press ${shortcut} again to quit`;
+    visibleMode === "close-window"
+      ? `Press ${mac ? "⌘W" : "Ctrl+W"} again to close`
+      : visibleMode === "hold"
+        ? `Hold ${quitShortcut} or press twice to quit`
+        : `Press ${quitShortcut} again to quit`;
   return (
     <div
       role="status"

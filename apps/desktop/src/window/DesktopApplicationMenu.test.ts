@@ -129,7 +129,64 @@ const configureMenu = (
     ),
   );
 
+const flattenMenu = (
+  items: ReadonlyArray<Electron.MenuItemConstructorOptions>,
+): Electron.MenuItemConstructorOptions[] =>
+  items.flatMap((item) => [
+    item,
+    ...(Array.isArray(item.submenu) ? flattenMenu(item.submenu) : []),
+  ]);
+
+const makeFakeWindow = () => {
+  const hints: unknown[] = [];
+  let closeCount = 0;
+  const window = {
+    isDestroyed: () => false,
+    close: () => {
+      closeCount += 1;
+    },
+    webContents: { send: (_channel: string, hint: unknown) => hints.push(hint) },
+  } as unknown as Electron.BrowserWindow;
+  return { window, hints, closeCount: () => closeCount };
+};
+
 describe("DesktopApplicationMenu", () => {
+  it.effect("confirms a Cmd/Ctrl+W window close but closes at once from the menu", () =>
+    Effect.gen(function* () {
+      for (const platform of ["darwin", "linux"] as const) {
+        const applicationMenuTemplate =
+          yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+        yield* configureMenu(yield* Deferred.make<string>(), applicationMenuTemplate, {
+          platform,
+        });
+        const items = flattenMenu(yield* Deferred.await(applicationMenuTemplate));
+
+        // A native close role would close the window without asking.
+        assert.notInclude(
+          items.map((item) => item.role?.toLowerCase()),
+          "close",
+        );
+        const closeItems = items.filter((item) => item.accelerator === "CmdOrCtrl+W");
+        assert.lengthOf(closeItems, 1);
+        const click = closeItems[0]?.click;
+        if (typeof click !== "function") throw new Error("Expected Close Window to be clickable.");
+
+        const shortcut = { triggeredByAccelerator: true } as unknown as KeyboardEvent;
+        const viaShortcut = makeFakeWindow();
+        click({} as Electron.MenuItem, viaShortcut.window, shortcut);
+        assert.equal(viaShortcut.closeCount(), 0);
+        assert.deepEqual(viaShortcut.hints, [{ state: "down", mode: "close-window" }]);
+        click({} as Electron.MenuItem, viaShortcut.window, shortcut);
+        assert.equal(viaShortcut.closeCount(), 1);
+
+        const viaMenu = makeFakeWindow();
+        click({} as Electron.MenuItem, viaMenu.window, {} as KeyboardEvent);
+        assert.equal(viaMenu.closeCount(), 1);
+        assert.deepEqual(viaMenu.hints, []);
+      }
+    }),
+  );
+
   it.effect("leaves the accelerator to Chromium instead of injecting a paste", () =>
     Effect.gen(function* () {
       const selectedAction = yield* Deferred.make<string>();
