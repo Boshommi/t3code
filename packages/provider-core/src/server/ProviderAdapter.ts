@@ -383,6 +383,20 @@ export class ProviderAdapterProtocolError extends Schema.TaggedError<ProviderAda
   }
 }
 
+/** A side question (`/btw`) went unanswered; `detail` is shown to the user. */
+export class ProviderAdapterSideQuestionError extends Schema.TaggedError<ProviderAdapterSideQuestionError>()(
+  "ProviderAdapterSideQuestionError",
+  {
+    driver: ProviderDriverKind,
+    detail: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}
+
 export const ProviderAdapterV2Error = Schema.Union([
   ProviderAdapterCapabilitiesError,
   ProviderAdapterOpenSessionError,
@@ -399,6 +413,7 @@ export const ProviderAdapterV2Error = Schema.Union([
   ProviderAdapterRuntimeRequestResponseError,
   ProviderAdapterEventStreamError,
   ProviderAdapterProtocolError,
+  ProviderAdapterSideQuestionError,
 ]);
 export type ProviderAdapterV2Error = typeof ProviderAdapterV2Error.Type;
 
@@ -498,6 +513,19 @@ export interface ProviderAdapterV2ForkThreadInput {
   readonly ownerNodeId?: NodeId;
   readonly modelSelection?: ModelSelection;
   readonly runtimePolicy?: ProviderAdapterV2RuntimePolicy;
+}
+
+/**
+ * A read-only side question (`/btw`) about a provider thread. The answer must
+ * never enter the thread's conversation or disturb its running turn.
+ */
+export interface ProviderAdapterV2SideQuestionInput {
+  readonly providerThread: OrchestrationV2ProviderThread;
+  /** Stable per side thread; follow-ups with the same id may reuse provider state. */
+  readonly sideThreadId: string;
+  readonly question: string;
+  /** The side thread's earlier answered exchanges, oldest first. */
+  readonly history: ReadonlyArray<{ readonly question: string; readonly answer: string }>;
 }
 
 export interface ProviderAdapterV2EventSubscription {
@@ -635,6 +663,13 @@ export interface ProviderAdapterV2SessionRuntime {
    * calls stay plain tool rows.
    */
   readonly mcpApps?: ProviderAdapterV2McpApps;
+  /**
+   * Answers a side question from the live session's context. Absent when the
+   * provider cannot; its `supportsSideQuestions` presentation flag tells clients.
+   */
+  readonly askSideQuestion?: (
+    input: ProviderAdapterV2SideQuestionInput,
+  ) => Effect.Effect<string, ProviderAdapterV2Error>;
   readonly rollbackThread: (
     input: ProviderAdapterV2RollbackThreadInput,
   ) => Effect.Effect<ProviderAdapterV2ThreadSnapshot, ProviderAdapterV2Error>;

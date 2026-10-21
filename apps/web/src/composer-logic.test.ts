@@ -22,6 +22,7 @@ import {
   formatAssistantCitationForComposer,
   isCollapsedCursorAdjacentToInlineToken,
   isPathSuggestionCurrent,
+  parseSideQuestionCommand,
   replaceTextRange,
 } from "./composer-logic";
 import { carryDisplacedCustomAnswerIntoPrompt } from "./pendingUserInput";
@@ -549,5 +550,25 @@ describe("literal editor answer cursor state", () => {
       });
     }
     expect(composerStateAtPromptEnd("Use $my").trigger?.kind).toBe("skill");
+  });
+});
+
+describe("parseSideQuestionCommand", () => {
+  it("returns the question, keeping its line breaks", () => {
+    expect(parseSideQuestionCommand(" /btw why is this slow?\nand here? ")).toBe(
+      "why is this slow?\nand here?",
+    );
+    expect(parseSideQuestionCommand("/BTW\nsecond line")).toBe("second line");
+  });
+
+  it("returns an empty question for a bare /btw", () => {
+    expect(parseSideQuestionCommand("/btw")).toBe("");
+    expect(parseSideQuestionCommand("/btw   ")).toBe("");
+  });
+
+  it("ignores other commands and mid-message mentions", () => {
+    expect(parseSideQuestionCommand("/btwx question")).toBeNull();
+    expect(parseSideQuestionCommand("hey /btw question")).toBeNull();
+    expect(parseSideQuestionCommand("/plan")).toBeNull();
   });
 });

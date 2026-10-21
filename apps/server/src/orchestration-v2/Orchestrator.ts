@@ -144,6 +144,7 @@ import {
   ThreadForkServiceV2,
 } from "./ThreadForkService.ts";
 import { planThreadDeletion } from "./ThreadDeletion.ts";
+import { planSideThreadCommand, type SideThreadCommand } from "./SideThreads.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
 
@@ -488,6 +489,9 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.background-work.settle":
     case "thread.stop":
     case "provider.switch":
+    case "thread.side-question.ask":
+    case "thread.side-thread.delete":
+    case "thread.side-answer.complete":
       return command.threadId;
     case "delegated_task.request":
     case "delegated_task.wake-policy":
@@ -7555,6 +7559,33 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     },
   );
 
+  const dispatchSideThreadCommand = Effect.fn("orchestrationV2.dispatch.sideThread")(function* (
+    command: SideThreadCommand,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) {
+    const records = yield* projectionStore
+      .getThreadRecords(command.threadId, ["sideMessages"])
+      .pipe(
+        Effect.mapError(
+          (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+        ),
+      );
+    const plan = planSideThreadCommand({
+      command,
+      thread: records.thread,
+      sideMessages: records.sideMessages ?? [],
+      now: yield* DateTime.now,
+    });
+    if (plan.type === "reject") {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: plan.detail,
+      });
+    }
+    if (plan.type === "emit") yield* emit(events, command)<OrchestrationV2DomainEvent>(plan.event);
+  });
+
   const dispatchSecretRequestRecord = Effect.fn("orchestrationV2.dispatch.secretRequestRecord")(
     function* (
       command: Extract<OrchestrationV2InternalCommand, { readonly type: "secret_request.record" }>,
@@ -11542,6 +11573,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "secret_request.record":
         yield* dispatchSecretRequestRecord(command, events);
         break;
+      case "thread.side-question.ask":
+      case "thread.side-thread.delete":
+      case "thread.side-answer.complete":
+        yield* dispatchSideThreadCommand(command, events);
+        break;
       default:
         return yield* dispatchUnsupported(command);
     }
@@ -11629,7 +11665,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         planned.events.length > 0 ||
         command.type === "thread.background-work.settle" ||
         command.type === "thread.stop" ||
-        command.type === "subagent.stop"
+        command.type === "subagent.stop" ||
+        command.type === "thread.side-answer.complete"
           ? Effect.succeed(planned)
           : Effect.fail(
               new OrchestratorDispatchError({

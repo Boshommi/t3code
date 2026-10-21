@@ -1121,6 +1121,34 @@ export const OrchestrationV2ConversationMessage = Schema.Struct({
 });
 export type OrchestrationV2ConversationMessage = typeof OrchestrationV2ConversationMessage.Type;
 
+/**
+ * Side threads (`/btw`) are read-only questions about a thread that never enter
+ * its provider conversation or interrupt its run. A side thread is the side
+ * messages sharing one `sideThreadId`, the id of its first question. `error`
+ * carries a failed answer, so the side thread can be asked again.
+ */
+export const OrchestrationV2SideMessageRole = Schema.Literals(["user", "assistant", "error"]);
+export type OrchestrationV2SideMessageRole = typeof OrchestrationV2SideMessageRole.Type;
+
+export const SIDE_QUESTION_MAX_CHARS = 8_000;
+
+export const OrchestrationV2SideMessage = Schema.Struct({
+  id: MessageId,
+  threadId: ThreadId,
+  sideThreadId: MessageId,
+  role: OrchestrationV2SideMessageRole,
+  text: Schema.String,
+  /** The conversation message the side thread was started from, if any. */
+  anchorMessageId: Schema.NullOr(MessageId),
+  createdAt: Schema.DateTimeUtc,
+});
+export type OrchestrationV2SideMessage = typeof OrchestrationV2SideMessage.Type;
+
+export const OrchestrationV2SideThreadDeleted = Schema.Struct({
+  sideThreadId: MessageId,
+});
+export type OrchestrationV2SideThreadDeleted = typeof OrchestrationV2SideThreadDeleted.Type;
+
 export const OrchestrationV2PlanStep = Schema.Struct({
   id: TrimmedNonEmptyString,
   text: TrimmedNonEmptyString,
@@ -1742,6 +1770,16 @@ export const OrchestrationV2DomainEvent = Schema.Union([
     type: Schema.Literal("context-transfer.updated"),
     payload: OrchestrationV2ContextTransfer,
   }),
+  Schema.Struct({
+    ...OrchestrationV2EventBase.fields,
+    type: Schema.Literal("side-message.updated"),
+    payload: OrchestrationV2SideMessage,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2EventBase.fields,
+    type: Schema.Literal("side-thread.deleted"),
+    payload: OrchestrationV2SideThreadDeleted,
+  }),
 ]);
 export type OrchestrationV2DomainEvent = typeof OrchestrationV2DomainEvent.Type;
 
@@ -1762,6 +1800,8 @@ export const OrchestrationV2ThreadProjection = Schema.Struct({
   checkpoints: Schema.Array(OrchestrationV2Checkpoint),
   contextHandoffs: Schema.Array(OrchestrationV2ContextHandoff),
   contextTransfers: Schema.Array(OrchestrationV2ContextTransfer),
+  /** Every side message of the thread, oldest first; never windowed. Absent from older servers. */
+  sideMessages: Schema.optionalKey(Schema.Array(OrchestrationV2SideMessage)),
   visibleTurnItems: projectedTurnItemArray(
     OrchestrationV2ProjectedTurnItem,
     OrchestrationV2ProjectedTurnItem.mapFields((fields) => ({
@@ -2079,6 +2119,12 @@ export const OrchestrationV2ConversationMessageJson = OrchestrationV2Conversatio
 export type OrchestrationV2ConversationMessageJson =
   typeof OrchestrationV2ConversationMessageJson.Type;
 
+export const OrchestrationV2SideMessageJson = OrchestrationV2SideMessage.mapFields((fields) => ({
+  ...fields,
+  createdAt: Schema.DateTimeUtcFromString,
+}));
+export type OrchestrationV2SideMessageJson = typeof OrchestrationV2SideMessageJson.Type;
+
 export const OrchestrationV2CheckpointJson = OrchestrationV2Checkpoint.mapFields((fields) => ({
   ...fields,
   capturedAt: Schema.DateTimeUtcFromString,
@@ -2329,6 +2375,7 @@ export const OrchestrationV2ThreadProjectionJson = OrchestrationV2ThreadProjecti
     checkpoints: Schema.Array(OrchestrationV2CheckpointJson),
     contextHandoffs: Schema.Array(OrchestrationV2ContextHandoffJson),
     contextTransfers: Schema.Array(OrchestrationV2ContextTransferJson),
+    sideMessages: Schema.optionalKey(Schema.Array(OrchestrationV2SideMessageJson)),
     visibleTurnItems: projectedTurnItemArray(
       OrchestrationV2ProjectedTurnItemJson,
       OrchestrationV2ProjectedTurnItemJson.mapFields((fields) => ({
@@ -2552,6 +2599,16 @@ export const OrchestrationV2DomainEventJson = Schema.Union([
     ...OrchestrationV2JsonEventBaseFields,
     type: Schema.Literal("context-transfer.updated"),
     payload: OrchestrationV2ContextTransferJson,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2JsonEventBaseFields,
+    type: Schema.Literal("side-message.updated"),
+    payload: OrchestrationV2SideMessageJson,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2JsonEventBaseFields,
+    type: Schema.Literal("side-thread.deleted"),
+    payload: OrchestrationV2SideThreadDeleted,
   }),
 ]);
 export type OrchestrationV2DomainEventJson = typeof OrchestrationV2DomainEventJson.Type;
@@ -3006,6 +3063,22 @@ export const OrchestrationV2Command = Schema.Union([
     threadId: ThreadId,
     modelSelection: ModelSelection,
   }),
+  Schema.Struct({
+    type: Schema.Literal("thread.side-question.ask"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    /** Equal to `messageId` when the question starts a new side thread. */
+    sideThreadId: MessageId,
+    messageId: MessageId,
+    text: TrimmedNonEmptyString.check(Schema.isMaxLength(SIDE_QUESTION_MAX_CHARS)),
+    anchorMessageId: Schema.NullOr(MessageId),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.side-thread.delete"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    sideThreadId: MessageId,
+  }),
 ]);
 export type OrchestrationV2Command = typeof OrchestrationV2Command.Type;
 
@@ -3072,6 +3145,17 @@ const OrchestrationV2InternalCommand = Schema.Union([
     reason: Schema.String,
     placeholder: Schema.optional(Schema.String),
     secretStatus: OrchestrationV2SecretRequestStatus,
+  }),
+  /** The answer, or a short user-facing error, to side question `questionId`. */
+  Schema.Struct({
+    type: Schema.Literal("thread.side-answer.complete"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    sideThreadId: MessageId,
+    questionId: MessageId,
+    messageId: MessageId,
+    role: Schema.Literals(["assistant", "error"]),
+    text: TrimmedNonEmptyString,
   }),
 ]);
 export type OrchestrationV2InternalCommand = typeof OrchestrationV2InternalCommand.Type;

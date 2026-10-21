@@ -188,6 +188,38 @@ describe("applyOrchestrationV2ProjectionEvent", () => {
     expect(next?.updatedAt).toEqual(archivedAt);
   });
 
+  it("tracks side threads without marking the thread active", () => {
+    const later = DateTime.makeUnsafe("2026-06-20T02:00:00.000Z");
+    const question = {
+      id: MessageId.make("side-1"),
+      threadId,
+      sideThreadId: MessageId.make("side-1"),
+      role: "user" as const,
+      text: "Why?",
+      anchorMessageId: null,
+      createdAt: later,
+    };
+    const asked = applyOrchestrationV2ProjectionEvent(emptyProjection, {
+      id: "event-side-message" as OrchestrationV2DomainEvent["id"],
+      type: "side-message.updated",
+      threadId,
+      occurredAt: later,
+      payload: question,
+    });
+    expect(asked?.sideMessages).toEqual([question]);
+    expect(asked?.updatedAt).toEqual(now);
+
+    const deleted = applyOrchestrationV2ProjectionEvent(asked, {
+      id: "event-side-thread-deleted" as OrchestrationV2DomainEvent["id"],
+      type: "side-thread.deleted",
+      threadId,
+      occurredAt: later,
+      payload: { sideThreadId: question.sideThreadId },
+    });
+    expect(deleted?.sideMessages).toEqual([]);
+    expect(deleted?.updatedAt).toEqual(now);
+  });
+
   it("preserves visible row identity when run updates do not change membership", () => {
     const item = commandItem("item-stable");
     const visibleTurnItems = [

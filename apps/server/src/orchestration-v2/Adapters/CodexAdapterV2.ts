@@ -1,6 +1,7 @@
 import { revertCodexThread } from "../../provider/CodexThreadRevert.ts";
 import { historyResponseItems } from "@t3tools/provider-core/server/handoffBudget";
 import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
+import { makeCodexSideQuestions } from "./CodexSideQuestions.ts";
 import {
   mcpToolPresentation,
   type McpToolPresentation,
@@ -1734,7 +1735,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                     }),
                 ),
               );
-        const client = yield* clientFactory.open({
+        const appServer = yield* clientFactory.open({
           instanceId: adapterOptions.instanceId,
           threadId: input.threadId,
           providerSessionId: input.providerSessionId,
@@ -1742,6 +1743,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           settings: resolvedRuntime?.config ?? adapterOptions.settings,
           environment: resolvedRuntime?.environment ?? adapterOptions.environment,
         });
+        const sideQuestions = yield* makeCodexSideQuestions(appServer);
+        // Every handler below sees only the session's own threads, never side-question forks.
+        const client = sideQuestions.mainThreadClient;
         const additionalContextByThread = yield* Ref.make(
           new Map<
             string,
@@ -7310,6 +7314,25 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             ),
           ),
           mcpApps,
+          askSideQuestion: Effect.fn("CodexAdapterV2.askSideQuestion")(function* (sideInput) {
+            const nativeThreadId = yield* getNativeThreadId(sideInput.providerThread);
+            yield* ensureInitialized.pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProviderAdapter.ProviderAdapterSideQuestionError({
+                    driver: CODEX_PROVIDER,
+                    detail: "Codex is not ready to answer side questions.",
+                    cause,
+                  }),
+              ),
+            );
+            return yield* sideQuestions.askSideQuestion({
+              nativeThreadId,
+              sideThreadId: sideInput.sideThreadId,
+              question: sideInput.question,
+              history: sideInput.history,
+            });
+          }),
           readThreadSnapshot: Effect.fn("CodexAdapterV2.readThreadSnapshot")(
             function* (threadInput) {
               const threadId = yield* getNativeThreadId(threadInput.providerThread);

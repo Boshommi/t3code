@@ -33,6 +33,7 @@ import {
   FileDiff,
   Files,
   Globe2,
+  MessagesSquare,
   Plus,
   TerminalSquare,
 } from "lucide-react";
@@ -137,6 +138,8 @@ interface RightPanelTabsProps {
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
   onAddDevice: () => void;
+  /** Absent where side threads do not apply, such as the pull-request list panel. */
+  onAddSideThreads?: (() => void) | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -144,6 +147,7 @@ interface RightPanelTabsProps {
   pullRequestAvailable: boolean;
   pullRequestsAvailable: boolean;
   deviceAvailable: boolean;
+  sideThreadsAvailable?: boolean | undefined;
   pullRequestStatusSeeds?: Readonly<Record<string, PullRequestTabStatusSeed>>;
   children: ReactNode;
 }
@@ -170,6 +174,7 @@ const SURFACE_DISABLED_REASONS = {
   pullRequest: "This thread's branch has no pull request yet.",
   pullRequests: "No linked pull requests are available for this thread.",
   device: "Devices are only available from a thread.",
+  sideThreads: "Side threads are available for Claude and Codex threads.",
 } as const;
 
 // Closed keepMounted popups must stop blocking shortcuts once their exit transition ends.
@@ -194,6 +199,7 @@ const SURFACE_UNAVAILABLE_HINTS = {
   pullRequest: "No pull request on this branch yet.",
   pullRequests: "No linked pull requests available.",
   device: "Available from a thread.",
+  sideThreads: "Available for Claude and Codex threads.",
 } as const;
 
 type TabContextMenuAction =
@@ -206,6 +212,7 @@ type TabContextMenuAction =
   | "close-all";
 
 const TAB_SCROLL_EDGE_TOLERANCE = 1;
+const NOOP = () => {};
 const TAB_DRAG_MODIFIERS = [restrictToHorizontalAxis, restrictToFirstScrollableAncestor];
 
 function tabScrollViewport(root: HTMLDivElement | null): HTMLDivElement | null {
@@ -315,6 +322,7 @@ function RightPanelEmptyState(props: {
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
   onAddDevice: () => void;
+  onAddSideThreads: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -322,6 +330,7 @@ function RightPanelEmptyState(props: {
   pullRequestAvailable: boolean;
   pullRequestsAvailable: boolean;
   deviceAvailable: boolean;
+  sideThreadsAvailable: boolean;
 }) {
   const [highlight, setHighlight] = useState(-1);
 
@@ -373,6 +382,14 @@ function RightPanelEmptyState(props: {
       available: props.pullRequestsAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.pullRequests,
       onClick: props.onAddPullRequests,
+    },
+    {
+      label: "Side threads",
+      icon: MessagesSquare,
+      shortcut: "S",
+      available: props.sideThreadsAvailable,
+      disabledReason: SURFACE_UNAVAILABLE_HINTS.sideThreads,
+      onClick: props.onAddSideThreads,
     },
     {
       label: "Device",
@@ -565,6 +582,8 @@ function surfaceTitle(
       return `#${surface.number}`;
     case "pull-requests":
       return "Pull requests";
+    case "side-threads":
+      return "Side threads";
     case "device":
       return surface.title ?? surface.target?.name ?? "Device";
     case "preview": {
@@ -655,6 +674,8 @@ function SurfaceIcon({
       );
     case "pull-requests":
       return <PullRequestGlyph.link className="size-3 shrink-0" />;
+    case "side-threads":
+      return <MessagesSquare className="size-3 shrink-0" />;
     case "device":
       return surface.target?.platform === "ios" ? (
         <AppleIcon className="size-3 shrink-0" />
@@ -1027,6 +1048,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     });
   };
 
+  const sideThreadsAvailable =
+    props.sideThreadsAvailable === true && props.onAddSideThreads !== undefined;
   const addSurfaceActions = [
     {
       label: "Browser",
@@ -1075,6 +1098,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       available: props.pullRequestsAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.pullRequests,
       onClick: props.onAddPullRequests,
+    },
+    {
+      label: "Side threads",
+      icon: MessagesSquare,
+      shortcut: "S",
+      available: sideThreadsAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.sideThreads,
+      onClick: props.onAddSideThreads ?? NOOP,
     },
     {
       label: "Device",
@@ -1457,6 +1488,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddPullRequest={props.onAddPullRequest}
             onAddPullRequests={props.onAddPullRequests}
             onAddDevice={props.onAddDevice}
+            onAddSideThreads={props.onAddSideThreads ?? NOOP}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}
@@ -1464,6 +1496,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             pullRequestAvailable={props.pullRequestAvailable}
             pullRequestsAvailable={props.pullRequestsAvailable}
             deviceAvailable={props.deviceAvailable}
+            sideThreadsAvailable={sideThreadsAvailable}
           />
         ) : (
           props.children

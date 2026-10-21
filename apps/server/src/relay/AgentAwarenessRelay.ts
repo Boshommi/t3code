@@ -133,6 +133,9 @@ function shouldPublishAgentAwarenessEvent(
     case "context-handoff.updated":
     case "context-transfer.created":
     case "context-transfer.updated":
+    // Side questions never change what the agent is doing.
+    case "side-message.updated":
+    case "side-thread.deleted":
       return false;
   }
 }

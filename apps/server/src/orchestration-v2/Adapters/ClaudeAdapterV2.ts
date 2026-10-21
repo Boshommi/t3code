@@ -495,6 +495,14 @@ export interface ClaudeAgentSdkQuerySession {
   readonly backgroundTasks: (
     toolUseId: string,
   ) => Effect.Effect<boolean, ClaudeAgentSdkQueryRunnerError>;
+  /**
+   * The CLI's own `/btw`: answers from the live session's context without
+   * tools or transcript writes. `null` when the CLI produced no answer.
+   */
+  readonly askSideQuestion: (
+    question: string,
+    history: ReadonlyArray<{ readonly question: string; readonly response: string }>,
+  ) => Effect.Effect<string | null, ClaudeAgentSdkQueryRunnerError>;
   readonly interrupt: Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
   readonly close: Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
 }
@@ -595,6 +603,25 @@ function queryRunnerError(cause: unknown, method: string): ClaudeAgentSdkQueryRu
     : new ClaudeAgentSdkQueryRunnerError({ cause, method });
 }
 
+type ClaudeSideQuestionMethod = (
+  question: string,
+  options: {
+    readonly history: ReadonlyArray<{ readonly question: string; readonly response: string }>;
+    readonly signal: AbortSignal;
+  },
+) => Promise<{ readonly response: string } | null>;
+
+/**
+ * Real SDK queries implement `askSideQuestion` (the CLI's `/btw`), but the
+ * SDK's public types omit it, so it is read structurally.
+ */
+function claudeSideQuestionMethod(queryRuntime: ClaudeQuery): ClaudeSideQuestionMethod | undefined {
+  const method: unknown = Reflect.get(queryRuntime, "askSideQuestion");
+  return typeof method === "function"
+    ? (question, options) => Reflect.apply(method, queryRuntime, [question, options])
+    : undefined;
+}
+
 function closeClaudeQuery(queryRuntime: ClaudeQuery) {
   return Effect.try({
     try: () => queryRuntime.close(),
@@ -686,6 +713,14 @@ export type ClaudeAgentSdkProtocolLogEvent =
       readonly payload: {
         readonly type: "query.background_tasks";
         readonly toolUseId: string;
+      };
+    }
+  | {
+      readonly direction: "outgoing";
+      readonly stage: "decoded";
+      readonly payload: {
+        readonly type: "query.side_question";
+        readonly question: string;
       };
     }
   | {
@@ -1086,6 +1121,27 @@ export const layerQueryRunner: Layer.Layer<
                   direction: "outgoing",
                   stage: "decoded",
                   payload: { type: "query.background_tasks", toolUseId },
+                }),
+              ),
+            ),
+          askSideQuestion: (question, history) =>
+            logProtocolEvent({
+              direction: "outgoing",
+              stage: "decoded",
+              payload: { type: "query.side_question", question },
+            }).pipe(
+              Effect.andThen(
+                Effect.tryPromise({
+                  // Interrupting the effect aborts the control request.
+                  try: async (signal) => {
+                    const ask = claudeSideQuestionMethod(queryRuntime);
+                    if (ask === undefined) {
+                      throw new Error("This Claude Agent SDK build cannot answer side questions.");
+                    }
+                    const result = await ask(question, { history, signal });
+                    return result?.response ?? null;
+                  },
+                  catch: (cause) => queryRunnerError(cause, "askSideQuestion"),
                 }),
               ),
             ),
@@ -10074,6 +10130,49 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   }),
               ),
             );
+          }),
+          askSideQuestion: Effect.fn("ClaudeAdapterV2.askSideQuestion")(function* ({
+            providerThread,
+            question,
+            history,
+          }) {
+            const liveQuery = yield* Ref.get(queryContext);
+            if (
+              liveQuery === null ||
+              liveQuery.stopping ||
+              liveQuery.nativeThreadId !== providerThread.nativeThreadRef?.nativeId
+            ) {
+              return yield* new ProviderAdapter.ProviderAdapterSideQuestionError({
+                driver: CLAUDE_PROVIDER,
+                detail:
+                  "Claude is not running in this thread right now. Send a message, then ask again.",
+              });
+            }
+            const response = yield* liveQuery.query
+              .askSideQuestion(
+                question,
+                history.map((entry) => ({ question: entry.question, response: entry.answer })),
+              )
+              .pipe(
+                Effect.mapError(
+                  (error) =>
+                    new ProviderAdapter.ProviderAdapterSideQuestionError({
+                      driver: CLAUDE_PROVIDER,
+                      detail:
+                        error.cause instanceof Error && error.cause.message.trim().length > 0
+                          ? error.cause.message
+                          : "Claude could not answer the side question.",
+                      cause: error,
+                    }),
+                ),
+              );
+            if (response === null || response.trim().length === 0) {
+              return yield* new ProviderAdapter.ProviderAdapterSideQuestionError({
+                driver: CLAUDE_PROVIDER,
+                detail: "Claude returned an empty answer.",
+              });
+            }
+            return response;
           }),
           interruptTurn,
           stopSubagent: Effect.fn("ClaudeAdapterV2.stopSubagent")(function* (input) {

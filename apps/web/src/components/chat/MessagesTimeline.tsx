@@ -55,6 +55,7 @@ import {
   turnItemNeedsDetailFetch,
 } from "@t3tools/client-runtime/work-log/item-detail";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
+import type { SideThread } from "@t3tools/client-runtime/state/side-threads";
 import {
   subagentGroupSummary,
   summarizeSubagentStatuses,
@@ -135,6 +136,8 @@ import {
   GlobeIcon,
   type LucideIcon,
   MessageCircleIcon,
+  MessageSquareReplyIcon,
+  MessagesSquareIcon,
   MousePointerClickIcon,
   PaintbrushIcon,
   MinusIcon,
@@ -367,8 +370,20 @@ interface TimelineRowActivityState {
   backgroundWorktreeSetup: WorktreeSetupSnapshot | null;
 }
 
+/**
+ * Kept out of TimelineRowCtx so a new side message re-renders only the small
+ * per-message consumers below, not every row.
+ */
+export interface TimelineSideThreadsState {
+  byAnchor: ReadonlyMap<MessageId, ReadonlyArray<SideThread>>;
+  /** Null when the provider cannot answer; existing side threads stay readable. */
+  onReply: ((messageId: MessageId) => void) | null;
+  onOpen: (anchorMessageId: MessageId) => void;
+}
+
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
+const TimelineSideThreadsCtx = createContext<TimelineSideThreadsState | null>(null);
 
 interface WorkGroupViewState {
   scrollPositions: Map<string, WorkGroupScrollAnchor>;
@@ -530,6 +545,8 @@ interface MessagesTimelineProps {
   findQuery?: string;
   activeFindMatch?: ThreadFindMatch | null;
   findNavigationId?: number;
+  /** Side-thread actions and reply links on messages; null where unsupported. */
+  sideThreads?: TimelineSideThreadsState | null;
 }
 
 export function MessagesTimeline(props: MessagesTimelineProps) {
@@ -618,6 +635,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   topFadeEnabled = false,
   historyControls,
   loadEarlier = null,
+  sideThreads = null,
 }: MessagesTimelineProps) {
   const listIdentityKey = displayThreadKey ?? routeThreadKey;
   // The remembered position is a snapshot taken when the list identity changes;
@@ -1501,81 +1519,83 @@ const ConversationTimeline = memo(function ConversationTimeline({
   return (
     <MarkdownFindContext value={findActive}>
       <TimelineRowActivityCtx value={activityState}>
-        <TooltipScrollDismissArea
-          ref={setTimelineViewportElement}
-          className="relative h-full min-h-0"
-          data-assistant-citation-viewport="true"
-        >
-          {onCiteAssistantText && citationThreadRef ? (
-            <AssistantSelectionToolbar
-              viewport={timelineViewportElement}
-              threadRef={citationThreadRef}
-              onCite={onCiteAssistantText}
+        <TimelineSideThreadsCtx value={sideThreads}>
+          <TooltipScrollDismissArea
+            ref={setTimelineViewportElement}
+            className="relative h-full min-h-0"
+            data-assistant-citation-viewport="true"
+          >
+            {onCiteAssistantText && citationThreadRef ? (
+              <AssistantSelectionToolbar
+                viewport={timelineViewportElement}
+                threadRef={citationThreadRef}
+                onCite={onCiteAssistantText}
+              />
+            ) : null}
+            <LegendList<MessagesTimelineRow>
+              ref={setTimelineList}
+              data={rows}
+              extraData={listExtraData}
+              keyExtractor={keyExtractor}
+              getItemType={getItemType}
+              renderItem={renderItem}
+              estimatedItemSize={90}
+              initialScrollAtEnd={
+                !findActive && citationRequest === null && rememberedPosition?.atEnd !== false
+              }
+              // Legend needs a data refresh to mount new pins without a scroll event.
+              dataVersion={readyCitationRequest?.key ?? listIdentityKey}
+              {...(alwaysRender ? { alwaysRender } : {})}
+              onLoad={handleListLoad}
+              {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
+              contentInsetEndAdjustment={anchoredEndSpace ? contentInsetEndAdjustment : 0}
+              maintainScrollAtEnd={
+                citationPositioning ||
+                (restoringThreadPosition && rememberedPosition?.atEnd === false) ||
+                anchoredEndSpace ||
+                !liveFollowEnabled ||
+                fullscreenAppRowId !== null ||
+                disclosureToggleSettling
+                  ? false
+                  : isWorking && !prefersReducedMotion && settlingListIdentity === null
+                    ? TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH
+                    : TIMELINE_MAINTAIN_SCROLL_AT_END
+              }
+              maintainVisibleContentPosition={
+                findActive ||
+                citationPositioning ||
+                (restoringThreadPosition && rememberedPosition?.atEnd === false)
+                  ? false
+                  : maintainVisibleContentPosition
+              }
+              maintainScrollAtEndThreshold={1}
+              onScroll={handleScroll}
+              onItemSizeChanged={handleItemSizeChanged}
+              className={cn(
+                "messages-timeline-scroll scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
+                topFadeEnabled && "topbar-scroll-fade",
+              )}
+              ListHeaderComponent={listHeader}
+              ListFooterComponent={timelineListFooter}
             />
-          ) : null}
-          <LegendList<MessagesTimelineRow>
-            ref={setTimelineList}
-            data={rows}
-            extraData={listExtraData}
-            keyExtractor={keyExtractor}
-            getItemType={getItemType}
-            renderItem={renderItem}
-            estimatedItemSize={90}
-            initialScrollAtEnd={
-              !findActive && citationRequest === null && rememberedPosition?.atEnd !== false
-            }
-            // Legend needs a data refresh to mount new pins without a scroll event.
-            dataVersion={readyCitationRequest?.key ?? listIdentityKey}
-            {...(alwaysRender ? { alwaysRender } : {})}
-            onLoad={handleListLoad}
-            {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
-            contentInsetEndAdjustment={anchoredEndSpace ? contentInsetEndAdjustment : 0}
-            maintainScrollAtEnd={
-              citationPositioning ||
-              (restoringThreadPosition && rememberedPosition?.atEnd === false) ||
-              anchoredEndSpace ||
-              !liveFollowEnabled ||
-              fullscreenAppRowId !== null ||
-              disclosureToggleSettling
-                ? false
-                : isWorking && !prefersReducedMotion && settlingListIdentity === null
-                  ? TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH
-                  : TIMELINE_MAINTAIN_SCROLL_AT_END
-            }
-            maintainVisibleContentPosition={
-              findActive ||
-              citationPositioning ||
-              (restoringThreadPosition && rememberedPosition?.atEnd === false)
-                ? false
-                : maintainVisibleContentPosition
-            }
-            maintainScrollAtEndThreshold={1}
-            onScroll={handleScroll}
-            onItemSizeChanged={handleItemSizeChanged}
-            className={cn(
-              "messages-timeline-scroll scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
-              topFadeEnabled && "topbar-scroll-fade",
-            )}
-            ListHeaderComponent={listHeader}
-            ListFooterComponent={timelineListFooter}
-          />
-          <TimelineMinimap
-            items={minimapItems}
-            hasPersistentGutter={minimapHasPersistentGutter}
-            hitStripWidth={minimapHitStripWidth}
-            currentIndex={minimapCurrentIndex}
-            stripMap={minimapStripMap}
-            onWheel={forwardMinimapWheel}
-            onSelect={(item) => {
-              onManualNavigation();
-              void listRef.current?.scrollToIndex({
-                index: item.rowIndex,
-                animated: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-                viewOffset: 24,
-              });
-            }}
-          />
-        </TooltipScrollDismissArea>
+            <TimelineMinimap
+              items={minimapItems}
+              hasPersistentGutter={minimapHasPersistentGutter}
+              hitStripWidth={minimapHitStripWidth}
+              currentIndex={minimapCurrentIndex}
+              stripMap={minimapStripMap}
+              onWheel={forwardMinimapWheel}
+              onSelect={(item) => {
+                onManualNavigation();
+                void listRef.current?.scrollToIndex({
+                  index: item.rowIndex,
+                  animated: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+                  viewOffset: 24,
+                });
+              }}
+            />
+          </TooltipScrollDismissArea>
+        </TimelineSideThreadsCtx>
       </TimelineRowActivityCtx>
     </MarkdownFindContext>
   );
@@ -2475,6 +2495,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             </TooltipPopup>
           </Tooltip>
           <div className="flex items-center gap-0.5">
+            <ReplyInSideThreadButton messageId={row.message.id} />
             {typeof revertTurnCount === "number" && (
               <RevertUserMessageButton turnCount={revertTurnCount} messageId={row.message.id} />
             )}
@@ -2500,6 +2521,61 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           </div>
         </div>
       </div>
+      <SideThreadRepliesLink messageId={row.message.id} className="max-w-[80%] pe-1" />
+    </div>
+  );
+}
+
+/** Hover action that starts a side thread anchored to a message. */
+function ReplyInSideThreadButton({ messageId }: { messageId: MessageId }) {
+  const onReply = use(TimelineSideThreadsCtx)?.onReply;
+  if (!onReply) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            onClick={() => onReply(messageId)}
+            aria-label="Reply in side thread"
+          />
+        }
+      >
+        <MessageSquareReplyIcon className="size-3" />
+      </TooltipTrigger>
+      <TooltipPopup side="top">Reply in side thread</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+/** Slack-style link under a message that side threads were started from. */
+function SideThreadRepliesLink({
+  messageId,
+  className,
+}: {
+  messageId: MessageId;
+  className?: string;
+}) {
+  const sideThreads = use(TimelineSideThreadsCtx);
+  const threads = sideThreads?.byAnchor.get(messageId);
+  if (!sideThreads || !threads || threads.length === 0) return null;
+  const only = threads.length === 1 ? threads[0]! : null;
+  const label =
+    only === null
+      ? `${threads.length} side threads`
+      : only.waiting
+        ? "Side thread · Thinking…"
+        : only.replyCount === 1
+          ? "1 reply"
+          : `${only.replyCount} replies`;
+  return (
+    <div className={cn("flex text-xs", className)}>
+      <InlineButton tone="info" onClick={() => sideThreads.onOpen(messageId)}>
+        <MessagesSquareIcon className="size-3" />
+        {label}
+      </InlineButton>
     </div>
   );
 }
@@ -2706,6 +2782,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
             copyStreaming={row.assistantCopyStreaming}
           />
         ) : null}
+        <SideThreadRepliesLink messageId={row.message.id} className="mt-1" />
       </div>
     </>
   );
@@ -2816,6 +2893,7 @@ function AssistantMessageMeta({
       {projectedItem?.item.type === "assistant_message" ? (
         <AssistantForkButton projectedItem={projectedItem} />
       ) : null}
+      {!message.streaming && <ReplyInSideThreadButton messageId={message.id} />}
       {!message.streaming && (
         <Tooltip>
           <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>

@@ -28,6 +28,7 @@ import type {
   OrchestrationV2ProviderThread,
   OrchestrationV2ProviderTurn,
   OrchestrationV2Run,
+  OrchestrationV2SideMessage,
   OrchestrationV2Subagent,
   OrchestrationV2ThreadShellSnapshot,
   OrchestrationV2ShellThreadStatus,
@@ -55,6 +56,7 @@ import {
   OrchestrationV2RunAttemptJson as OrchestrationV2RunAttemptJsonSchema,
   OrchestrationV2RunJson as OrchestrationV2RunJsonSchema,
   OrchestrationV2RuntimeRequestJson as OrchestrationV2RuntimeRequestJsonSchema,
+  OrchestrationV2SideMessageJson as OrchestrationV2SideMessageJsonSchema,
   OrchestrationV2SubagentJson as OrchestrationV2SubagentJsonSchema,
   OrchestrationV2TurnItemJson as OrchestrationV2TurnItemJsonSchema,
   orchestrationV2RunWorkStartedAt,
@@ -393,6 +395,14 @@ export interface ProjectionStoreV2Shape {
   readonly getThreadAttachmentIds: (
     threadId: ThreadId,
   ) => Effect.Effect<ReadonlyArray<string>, ProjectionStoreV2Error>;
+  /**
+   * Side questions still waiting for an answer in live threads: the newest
+   * message of their side thread is the question itself.
+   */
+  readonly getUnansweredSideQuestions: () => Effect.Effect<
+    ReadonlyArray<OrchestrationV2SideMessage>,
+    ProjectionStoreV2Error
+  >;
   readonly getThreadHistoryPage: (
     threadId: ThreadId,
     cursor: string,
@@ -929,6 +939,19 @@ export function applyToProjection(
         ...base,
         contextTransfers: upsertById(base.contextTransfers, event.payload),
       };
+    // Side threads are not thread activity, so they leave updatedAt alone.
+    case "side-message.updated":
+      return {
+        ...projection,
+        sideMessages: upsertById(projection.sideMessages ?? [], event.payload),
+      };
+    case "side-thread.deleted":
+      return {
+        ...projection,
+        sideMessages: (projection.sideMessages ?? []).filter(
+          (message) => message.sideThreadId !== event.payload.sideThreadId,
+        ),
+      };
   }
 }
 
@@ -1218,6 +1241,9 @@ const decodeContextHandoffPayload = Schema.decodeUnknownEffect(
 );
 const decodeContextTransferPayload = Schema.decodeUnknownEffect(
   Schema.fromJsonString(OrchestrationV2ContextTransferJsonSchema),
+);
+const decodeSideMessagePayload = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(OrchestrationV2SideMessageJsonSchema),
 );
 
 const isProjectionStoreThreadNotFoundError = Schema.is(ProjectionStoreThreadNotFoundError);
@@ -2758,9 +2784,50 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             `;
               break;
             }
+            // The table predates V2 (migration 068) and may hold side messages
+            // whose only record is a V1 event. Rebuilds therefore never clear it.
+            case "side-message.updated":
+              yield* sql`
+              INSERT INTO projection_thread_side_messages (
+                message_id,
+                thread_id,
+                side_thread_id,
+                role,
+                text,
+                anchor_message_id,
+                created_at
+              )
+              VALUES (
+                ${event.payload.id},
+                ${event.payload.threadId},
+                ${event.payload.sideThreadId},
+                ${event.payload.role},
+                ${event.payload.text},
+                ${event.payload.anchorMessageId},
+                ${DateTime.formatIso(event.payload.createdAt)}
+              )
+              ON CONFLICT (message_id)
+              DO UPDATE SET
+                thread_id = excluded.thread_id,
+                side_thread_id = excluded.side_thread_id,
+                role = excluded.role,
+                text = excluded.text,
+                anchor_message_id = excluded.anchor_message_id,
+                created_at = excluded.created_at
+            `;
+              break;
+            case "side-thread.deleted":
+              yield* sql`
+              DELETE FROM projection_thread_side_messages
+              WHERE thread_id = ${event.threadId}
+                AND side_thread_id = ${event.payload.sideThreadId}
+            `;
+              break;
           }
 
           if (
+            event.type !== "side-message.updated" &&
+            event.type !== "side-thread.deleted" &&
             event.type !== "thread.created" &&
             event.type !== "thread.archived" &&
             event.type !== "thread.unarchived" &&
@@ -2981,6 +3048,23 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   ORDER BY ordinal ASC, turn_item_id ASC
                 )
               `;
+
+    // rowid follows insertion order, which breaks created_at ties.
+    const readSideMessages = (threadId: ThreadId) =>
+      sql<PayloadRow>`
+        SELECT json_object(
+          'id', message_id,
+          'threadId', thread_id,
+          'sideThreadId', side_thread_id,
+          'role', role,
+          'text', text,
+          'anchorMessageId', anchor_message_id,
+          'createdAt', created_at
+        ) AS payload_json
+        FROM projection_thread_side_messages
+        WHERE thread_id = ${threadId}
+        ORDER BY created_at ASC, rowid ASC
+      `.pipe(Effect.flatMap(decodeRows(decodeSideMessagePayload, threadId)));
 
     const readCanonicalProjection = Effect.fn("ProjectionStore.readCanonicalProjection")(
       function* (
@@ -3517,6 +3601,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           for (const row of rows) messageOrdinals.set(row.message_id, row.ordinal);
         }
         const orderedMessages = sortMessagesByTurnItemOrder(messages, turnItems, messageOrdinals);
+        // Small and never windowed: every snapshot carries all of them.
+        const sideMessages =
+          fields !== undefined && !fields.includes("sideMessages")
+            ? undefined
+            : yield* readSideMessages(threadId);
         const projection = {
           thread,
           runs,
@@ -3534,6 +3623,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           checkpoints,
           contextHandoffs,
           contextTransfers,
+          ...(sideMessages === undefined ? {} : { sideMessages }),
           visibleTurnItems: [],
           updatedAt: thread.updatedAt,
         } satisfies OrchestrationV2ThreadProjection;
@@ -4299,6 +4389,42 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
 
     const getThreadProjection: ProjectionStoreV2Shape["getThreadProjection"] = (threadId) =>
       readProjection(threadId, new Set());
+
+    const getUnansweredSideQuestions: ProjectionStoreV2Shape["getUnansweredSideQuestions"] =
+      Effect.fn("ProjectionStore.getUnansweredSideQuestions")(
+        function* () {
+          const rows = yield* sql<PayloadRow>`
+            SELECT
+              json_object(
+                'id', messages.message_id,
+                'threadId', messages.thread_id,
+                'sideThreadId', messages.side_thread_id,
+                'role', messages.role,
+                'text', messages.text,
+                'anchorMessageId', messages.anchor_message_id,
+                'createdAt', messages.created_at
+              ) AS payload_json
+            FROM projection_thread_side_messages AS messages
+            INNER JOIN orchestration_v2_projection_threads AS threads
+              ON threads.thread_id = messages.thread_id
+            WHERE messages.role = 'user'
+              AND threads.deleted_at IS NULL
+              AND NOT EXISTS (
+                SELECT 1
+                FROM projection_thread_side_messages AS later
+                WHERE later.thread_id = messages.thread_id
+                  AND later.side_thread_id = messages.side_thread_id
+                  AND (
+                    later.created_at > messages.created_at
+                    OR (later.created_at = messages.created_at AND later.rowid > messages.rowid)
+                  )
+              )
+            ORDER BY messages.created_at ASC, messages.rowid ASC
+          `;
+          return yield* Effect.forEach(rows, (row) => decodeSideMessagePayload(row.payload_json));
+        },
+        Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
+      );
 
     const getRuntimeRecoveryProjection: ProjectionStoreV2Shape["getRuntimeRecoveryProjection"] =
       Effect.fn("ProjectionStore.getRuntimeRecoveryProjection")(
@@ -6521,6 +6647,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       searchThread,
       searchThreadStream,
       getThreadAttachmentIds,
+      getUnansweredSideQuestions,
     } satisfies ProjectionStoreV2Shape;
   }),
 );
@@ -6824,6 +6951,19 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
             ]),
           ]),
         ),
+      getUnansweredSideQuestions: () =>
+        Ref.get(replayState).pipe(
+          Effect.map((state) =>
+            [...state.projections.values()].flatMap((projection) => {
+              if (projection.thread.deletedAt !== null) return [];
+              const newestBySideThread = new Map<string, OrchestrationV2SideMessage>();
+              for (const message of projection.sideMessages ?? []) {
+                newestBySideThread.set(message.sideThreadId, message);
+              }
+              return [...newestBySideThread.values()].filter((message) => message.role === "user");
+            }),
+          ),
+        ),
       getThreadRecords: Effect.fn("ProjectionStore.getThreadRecords")(
         function* (threadId, fields, filter) {
           const projection = (yield* Ref.get(replayState)).projections.get(threadId);
@@ -6855,6 +6995,7 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
               filter?.omitSettledLeafNodes === true
                 ? projection.nodes.filter((node) => !isSettledLeafNode(node, projection.runs))
                 : projection.nodes,
+            sideMessages: projection.sideMessages ?? [],
           };
           return Object.fromEntries([
             ["thread", projection.thread],

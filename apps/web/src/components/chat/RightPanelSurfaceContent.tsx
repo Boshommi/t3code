@@ -22,6 +22,7 @@ import { PullRequestDetailPanel } from "../pullRequest/PullRequestDetailPanel";
 import { PullRequestDetailGhost } from "../pullRequest/PullRequestGhosts";
 import { PullRequestsUnavailableState } from "../pullRequest/PullRequestsUnavailableState";
 import { ThreadPullRequestsPanel } from "../pullRequest/ThreadPullRequestsPanel";
+import { SideThreadsPanel, type SideThreadsPanelProps } from "../SideThreadsPanel";
 
 const PreviewPanel = lazy(() =>
   import("../preview/PreviewPanel").then((module) => ({ default: module.PreviewPanel })),
@@ -47,6 +48,8 @@ export interface RightPanelPullRequestProps {
   /** Back to the pull request list; absent when there is no list to go back to. */
   readonly onBack: (() => void) | undefined;
 }
+
+export type RightPanelSideThreadsProps = Omit<SideThreadsPanelProps, "threadKey" | "threadRef">;
 
 export interface RightPanelFileProps {
   readonly projectName: string | null;
@@ -77,6 +80,7 @@ export function RightPanelSurfaceContent(props: {
   readonly terminal: RightPanelTerminalProps;
   readonly pullRequest: RightPanelPullRequestProps;
   readonly files: RightPanelFileProps;
+  readonly sideThreads: RightPanelSideThreadsProps;
 }) {
   const { surface, threadRef, visible } = props;
   if (surface === null) return null;
@@ -167,6 +171,14 @@ export function RightPanelSurfaceContent(props: {
     }
     case "pull-requests":
       return <ThreadPullRequestsPanel threadRef={threadRef} />;
+    case "side-threads":
+      return (
+        <SideThreadsPanel
+          {...props.sideThreads}
+          threadKey={scopedThreadKey(threadRef)}
+          threadRef={threadRef}
+        />
+      );
     case "device":
       return (
         <Suspense fallback={null}>

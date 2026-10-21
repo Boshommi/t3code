@@ -355,5 +355,18 @@ export function applyOrchestrationV2ProjectionEvent(
     case "context-transfer.created":
     case "context-transfer.updated":
       return { ...base, contextTransfers: upsertEntity(base.contextTransfers, event.payload) };
+    // Side threads are not thread activity: asking one must not reorder threads.
+    case "side-message.updated":
+      return {
+        ...projection,
+        sideMessages: upsertEntity(projection.sideMessages ?? [], event.payload),
+      };
+    case "side-thread.deleted":
+      return {
+        ...projection,
+        sideMessages: (projection.sideMessages ?? []).filter(
+          (message) => message.sideThreadId !== event.payload.sideThreadId,
+        ),
+      };
   }
 }

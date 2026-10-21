@@ -666,6 +666,7 @@ describe("ClaudeAdapterV2 Auto-accept edits", () => {
                   applyFlagSettings: () => Effect.void,
                   setPermissionMode: () => Effect.void,
                   backgroundTasks: () => Effect.succeed(false),
+                  askSideQuestion: () => Effect.succeed(null),
                   stopTask: () => Effect.void,
                   interrupt: Effect.void,
                   close: Effect.void,
@@ -775,6 +776,7 @@ describe("ClaudeAdapterV2 append-system-prompt-file launch argument", () => {
               applyFlagSettings: () => Effect.void,
               setPermissionMode: () => Effect.void,
               backgroundTasks: () => Effect.succeed(false),
+              askSideQuestion: () => Effect.succeed(null),
               stopTask: () => Effect.void,
               interrupt: Effect.void,
               close: Effect.void,
@@ -952,6 +954,7 @@ const captureSdkExecutablePaths = Effect.fn("captureSdkExecutablePaths")(functio
             applyFlagSettings: () => Effect.void,
             setPermissionMode: () => Effect.void,
             backgroundTasks: () => Effect.succeed(false),
+            askSideQuestion: () => Effect.succeed(null),
             stopTask: () => Effect.void,
             interrupt: Effect.void,
             close: Effect.void,
@@ -1130,6 +1133,7 @@ describe("ClaudeAdapterV2 resume compaction", () => {
                   applyFlagSettings: () => Effect.void,
                   setPermissionMode: () => Effect.void,
                   backgroundTasks: () => Effect.succeed(false),
+                  askSideQuestion: () => Effect.succeed(null),
                   stopTask: () => Effect.void,
                   interrupt: Effect.void,
                   close: Effect.void,
@@ -1380,6 +1384,7 @@ describe("ClaudeAdapterV2 attachments", () => {
                   applyFlagSettings: () => Effect.void,
                   setPermissionMode: () => Effect.void,
                   backgroundTasks: () => Effect.succeed(false),
+                  askSideQuestion: () => Effect.succeed(null),
                   stopTask: () => Effect.void,
                   interrupt: Effect.void,
                   close: Effect.void,
@@ -1528,6 +1533,7 @@ describe("ClaudeAdapterV2 native fork", () => {
                   applyFlagSettings: () => Effect.void,
                   setPermissionMode: () => Effect.void,
                   backgroundTasks: () => Effect.succeed(false),
+                  askSideQuestion: () => Effect.succeed(null),
                   stopTask: () => Effect.void,
                   interrupt: Effect.void,
                   close: Effect.void,
@@ -1809,6 +1815,7 @@ describe("ClaudeAdapterV2 native session identity", () => {
                   applyFlagSettings: () => Effect.void,
                   setPermissionMode: () => Effect.void,
                   backgroundTasks: () => Effect.succeed(false),
+                  askSideQuestion: () => Effect.succeed(null),
                   stopTask: () => Effect.void,
                   interrupt: Effect.void,
                   close: Effect.void,
@@ -2081,6 +2088,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     readonly backgroundTasks?: (
       toolUseId: string,
     ) => Effect.Effect<boolean, ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerError>;
+    readonly askSideQuestion?: ClaudeAdapterV2.ClaudeAgentSdkQuerySession["askSideQuestion"];
     readonly environment?: NodeJS.ProcessEnv;
     readonly subagentLaunchToolUseId?: string;
     readonly nativeSessionId?: string;
@@ -2199,6 +2207,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                       Effect.andThen(() => options?.setPermissionMode?.(mode) ?? Effect.void),
                     ),
                   backgroundTasks: options?.backgroundTasks ?? (() => Effect.succeed(false)),
+                  askSideQuestion: options?.askSideQuestion ?? (() => Effect.succeed(null)),
                   stopTask: options?.stopTask ?? (() => Effect.void),
                   interrupt: Effect.void,
                   close: Queue.shutdown(processMessages),
@@ -2224,6 +2233,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                     permissionModeChanges.push(mode);
                   }).pipe(Effect.andThen(() => options?.setPermissionMode?.(mode) ?? Effect.void)),
                 backgroundTasks: options?.backgroundTasks ?? (() => Effect.succeed(false)),
+                askSideQuestion: options?.askSideQuestion ?? (() => Effect.succeed(null)),
                 stopTask: options?.stopTask ?? (() => Effect.void),
                 interrupt: options?.interrupt ?? Effect.void,
                 close: options?.close?.(sdkMessages) ?? Effect.void,
@@ -2772,6 +2782,59 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
           ),
         ),
+    );
+  });
+
+  describe("Side questions", () => {
+    it.effect("answers from the live query without prompting the conversation", () =>
+      Effect.gen(function* () {
+        const asked: Array<{
+          readonly question: string;
+          readonly history: ReadonlyArray<{ readonly question: string; readonly response: string }>;
+        }> = [];
+        const harness = yield* makeWakeHarnessWithOptions({
+          askSideQuestion: (question, history) =>
+            Effect.sync(() => {
+              asked.push({ question, history });
+              return "It reads the config.";
+            }),
+        });
+        const askSideQuestion = harness.runtime.askSideQuestion;
+        assert.isDefined(askSideQuestion);
+        const sideQuestion = {
+          providerThread: harness.providerThread,
+          sideThreadId: "side-thread-1",
+          question: "What does it read?",
+          history: [{ question: "Which file?", answer: "config.ts" }],
+        };
+
+        const beforeQuery = yield* askSideQuestion!(sideQuestion).pipe(Effect.flip);
+        assert.equal(beforeQuery._tag, "ProviderAdapterSideQuestionError");
+
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("attempt-claude-side-question"),
+            text: "Refactor the loader.",
+            attachments: [],
+            runtimePolicy: CLAUDE_TEST_RUNTIME_POLICY,
+          }),
+        );
+        assert.equal(yield* askSideQuestion!(sideQuestion), "It reads the config.");
+        assert.deepEqual(asked, [
+          {
+            question: "What does it read?",
+            history: [{ question: "Which file?", response: "config.ts" }],
+          },
+        ]);
+        assert.equal(harness.offeredMessages.length, 1);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
     );
   });
 
@@ -6441,6 +6504,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                   applyFlagSettings: () => Effect.void,
                   setPermissionMode: () => Effect.void,
                   backgroundTasks: () => Effect.succeed(false),
+                  askSideQuestion: () => Effect.succeed(null),
                   stopTask: () => Effect.void,
                   interrupt: Effect.void,
                   close: isFirstProcess
@@ -6634,6 +6698,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                     applyFlagSettings: () => Effect.void,
                     setPermissionMode: () => Effect.void,
                     backgroundTasks: () => Effect.succeed(false),
+                    askSideQuestion: () => Effect.succeed(null),
                     stopTask: () => Effect.void,
                     interrupt: Effect.void,
                     close: Queue.shutdown(queue),
@@ -10509,6 +10574,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                   applyFlagSettings: () => Effect.void,
                   setPermissionMode: () => Effect.void,
                   backgroundTasks: () => Effect.succeed(false),
+                  askSideQuestion: () => Effect.succeed(null),
                   stopTask: () => Effect.void,
                   interrupt: Effect.void,
                   close: Queue.shutdown(sdkMessages),
@@ -10678,6 +10744,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                     applyFlagSettings: () => Effect.void,
                     setPermissionMode: () => Effect.void,
                     backgroundTasks: () => Effect.succeed(false),
+                    askSideQuestion: () => Effect.succeed(null),
                     stopTask: () => Effect.void,
                     interrupt: Effect.void,
                     close: Queue.shutdown(sdkMessages),
@@ -10850,6 +10917,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                   applyFlagSettings: () => Effect.void,
                   setPermissionMode: () => Effect.void,
                   backgroundTasks: () => Effect.succeed(false),
+                  askSideQuestion: () => Effect.succeed(null),
                   stopTask: () => Effect.void,
                   interrupt: Effect.void,
                   close: Queue.shutdown(sdkMessages),
@@ -11021,6 +11089,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                   applyFlagSettings: () => Effect.void,
                   setPermissionMode: () => Effect.void,
                   backgroundTasks: () => Effect.succeed(false),
+                  askSideQuestion: () => Effect.succeed(null),
                   stopTask: () => Effect.void,
                   interrupt: Effect.void,
                   close: Effect.sync(() => {
@@ -11159,6 +11228,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                     applyFlagSettings: () => Effect.void,
                     setPermissionMode: () => Effect.void,
                     backgroundTasks: () => Effect.succeed(false),
+                    askSideQuestion: () => Effect.succeed(null),
                     stopTask: () => Effect.void,
                     interrupt: Effect.void,
                     close: Queue.shutdown(sdkMessages),

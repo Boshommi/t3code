@@ -1130,6 +1130,39 @@ export const watchThreadPullRequest = Effect.fn("EnvironmentCommands.watchThread
     });
   },
 );
+export interface AskThreadSideQuestionInput extends ThreadCommandInput {
+  /** Equal to `messageId` when the question starts a new side thread. */
+  readonly sideThreadId: MessageId;
+  readonly messageId: MessageId;
+  readonly text: string;
+  readonly anchorMessageId: MessageId | null;
+}
+export const askThreadSideQuestion = Effect.fn("EnvironmentCommands.askThreadSideQuestion")(
+  function* (input: AskThreadSideQuestionInput) {
+    return yield* dispatch({
+      type: "thread.side-question.ask",
+      commandId: yield* allocateCommandId(input),
+      threadId: input.threadId,
+      sideThreadId: input.sideThreadId,
+      messageId: input.messageId,
+      text: input.text,
+      anchorMessageId: input.anchorMessageId,
+    });
+  },
+);
+export interface DeleteThreadSideThreadInput extends ThreadCommandInput {
+  readonly sideThreadId: MessageId;
+}
+export const deleteThreadSideThread = Effect.fn("EnvironmentCommands.deleteThreadSideThread")(
+  function* (input: DeleteThreadSideThreadInput) {
+    return yield* dispatch({
+      type: "thread.side-thread.delete",
+      commandId: yield* allocateCommandId(input),
+      threadId: input.threadId,
+      sideThreadId: input.sideThreadId,
+    });
+  },
+);
 export const unlinkThreadPullRequest = Effect.fn("EnvironmentCommands.unlinkThreadPullRequest")(
   function* (input: UnlinkThreadPullRequestInput) {
     return yield* dispatch({

@@ -269,6 +269,22 @@ row above the composer shows the goal and its progress.
 - Stopping Claude ends the current turn, but the goal stays set. Claude checks it
   again at the end of your next message.
 
+## Side questions
+
+Send `/btw` followed by a question to ask about the conversation without
+interrupting the agent, even while it is working. The answer opens in a side
+thread in the right panel, where you can ask follow-ups. Side questions never
+become part of the conversation the agent sees. To start one about a specific
+message, hover it and choose **Reply in side thread**. Send `/btw` alone, or
+choose **Side threads** in the right panel, to see a thread's side threads.
+
+Side threads are read-only: Claude answers only from what the conversation
+already contains, and Codex can read files but cannot change them. Answers come
+from the agent's running session, so after the thread has been idle for a while
+or the server restarted, send a message before asking. Side threads are
+available for Claude and Codex on web and desktop, and are kept with the thread
+until you delete them.
+
 ## Context in your message
 
 Context you attach lands where your cursor is, as a chip inside your text: a terminal excerpt,
