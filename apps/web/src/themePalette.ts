@@ -7,6 +7,7 @@ import {
   EMBER_THEME,
   GROVE_THEME,
   IRIS_THEME,
+  LIQUID_GLASS_THEME,
   OCEAN_THEME,
   T3_CHAT_THEME,
   T3_CODE_LIGHT_THEME_COLORS,
@@ -20,7 +21,15 @@ import {
   type ThemeVariants,
 } from "@t3tools/shared/themePalettes";
 
-export { EMBER_THEME, GROVE_THEME, IRIS_THEME, OCEAN_THEME, T3_CHAT_THEME, THEME_COLOR_ROLES };
+export {
+  EMBER_THEME,
+  GROVE_THEME,
+  IRIS_THEME,
+  LIQUID_GLASS_THEME,
+  OCEAN_THEME,
+  T3_CHAT_THEME,
+  THEME_COLOR_ROLES,
+};
 export type { ThemeAppearance, ThemeColorRole, ThemeColors, ThemeDefinition, ThemeVariants };
 
 const T3_CHAT_THEME_ID = "t3-chat" as const;
@@ -1006,7 +1015,10 @@ export function updateThemeColorFamily(
   }
 }
 
-const BUILT_IN_THEME_DEFINITIONS: ReadonlyArray<ThemeDefinition> = BUILT_IN_THEMES;
+export const BUILT_IN_THEME_DEFINITIONS: ReadonlyArray<ThemeDefinition> = [
+  ...BUILT_IN_THEMES,
+  LIQUID_GLASS_THEME,
+];
 
 export function getThemeDefinition(theme: ThemePreference): ThemeDefinition | null {
   const themeId = themeIdFromPreference(theme);
@@ -1439,6 +1451,7 @@ export function applyThemeColorPreview(colors: ThemeColors, appearance: ThemeApp
   if (!root?.style) return;
 
   root.dataset.themeId = THEME_PREVIEW_ID;
+  delete root.dataset.material;
   root.classList.toggle("dark", appearance === "dark");
   for (const [role, value] of Object.entries(colors) as Array<[ThemeColorRole, string]>) {
     if (isThemeColor(value)) root.style.setProperty(APP_THEME_VARIABLES[role], value);
@@ -1454,6 +1467,9 @@ export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppe
 
   setThemePreviewAppearance(null);
   const palette = getThemeDefinition(theme);
+
+  if (palette?.material) root.dataset.material = palette.material;
+  else delete root.dataset.material;
 
   if (palette) {
     root.dataset.themeId = palette.id;

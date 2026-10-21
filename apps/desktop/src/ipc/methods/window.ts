@@ -38,6 +38,7 @@ import * as ElectronTheme from "../../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as Electron from "electron";
 import * as MacPermissions from "../../permissions/MacPermissions.ts";
+import * as DesktopWindow from "../../window/DesktopWindow.ts";
 import { safariPermissionCheck } from "../../preview/BrowserImport/SafariPermission.ts";
 import * as IpcChannels from "../channels.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
@@ -265,6 +266,16 @@ export const setTheme = DesktopIpc.makeIpcMethod({
   handler: Effect.fn("desktop.ipc.window.setTheme")(function* (theme) {
     const electronTheme = yield* ElectronTheme.ElectronTheme;
     yield* electronTheme.setSource(theme);
+  }),
+});
+
+export const setWindowMaterial = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.SET_WINDOW_MATERIAL_CHANNEL,
+  payload: Schema.NullOr(Schema.Literal("glass")),
+  result: Schema.Boolean,
+  handler: Effect.fn("desktop.ipc.window.setWindowMaterial")(function* (material) {
+    const desktopWindow = yield* DesktopWindow.DesktopWindow;
+    return yield* desktopWindow.setMaterial(material);
   }),
 });
 

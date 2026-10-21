@@ -21,6 +21,17 @@ Android uses **Material You Layout** by default unless you have turned it off in
 It changes shapes, spacing, and controls independently
 of the selected theme.
 
+## Liquid Glass
+
+On web and desktop, the **Liquid Glass** theme floats the sidebar as a rounded glass panel and gives
+menus, dialogs, toolbar controls, and the composer a shared glass material. On the macOS desktop
+app, the window also becomes see-through to your desktop. The window changes after you restart the
+app.
+
+**Glass opacity** sets how solid glass surfaces are. With Liquid Glass on macOS, it also sets how
+much of the desktop shows through the window. Reduce Transparency in your system settings keeps
+every surface solid.
+
 ## Composer context
 
 Git-backed projects show branch and worktree controls below the composer while you create a thread.

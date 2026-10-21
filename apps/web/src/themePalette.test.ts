@@ -3,6 +3,8 @@ import { converter } from "culori/fn";
 import { BUILT_IN_THEMES } from "@t3tools/shared/themePalettes";
 
 import {
+  applyThemeColorPreview,
+  applyThemePalette,
   getThemeColorsForMode,
   getThemeModes,
   getCustomThemes,
@@ -18,6 +20,7 @@ import {
   serializeThemeFile,
   T3_CHAT_THEME,
   GROVE_THEME,
+  LIQUID_GLASS_THEME,
   updateCustomTheme,
   updateThemeColorFamily,
   CUSTOM_THEMES_STORAGE_KEY,
@@ -605,5 +608,43 @@ describe("stored theme preferences", () => {
 
     vi.unstubAllGlobals();
     invalidateCustomThemes();
+  });
+});
+
+describe("glass material", () => {
+  it("keeps the glass material to the reviewed built-in", () => {
+    const theme = parseThemeFile({
+      version: THEME_FILE_VERSION,
+      name: "Glass copy",
+      appearance: "light",
+      colors: { accent: "#007aff" },
+      material: "glass",
+    });
+
+    expect(theme.material).toBeUndefined();
+    expect(JSON.parse(serializeThemeFile(theme))).not.toHaveProperty("material");
+  });
+
+  it("marks the document only while a glass theme is applied", () => {
+    const dataset: Record<string, string | undefined> = {};
+    vi.stubGlobal("document", {
+      documentElement: {
+        classList: { toggle: vi.fn() },
+        dataset,
+        style: { removeProperty: vi.fn(), setProperty: vi.fn() },
+      },
+    });
+
+    applyThemePalette(LIQUID_GLASS_THEME.id, "dark");
+    expect(dataset.material).toBe("glass");
+
+    applyThemeColorPreview(LIQUID_GLASS_THEME.colors, "light");
+    expect(dataset.material).toBeUndefined();
+
+    applyThemePalette(LIQUID_GLASS_THEME.id, "light");
+    applyThemePalette(GROVE_THEME.id, "light");
+    expect(dataset.material).toBeUndefined();
+
+    vi.unstubAllGlobals();
   });
 });

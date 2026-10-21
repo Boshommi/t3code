@@ -1108,6 +1108,11 @@ export interface DesktopBridge {
   pickProjectFavicon?: (initialPath?: string) => Promise<string | null>;
   pickThemeFiles?: () => Promise<readonly PickedThemeFile[] | null>;
   setTheme: (theme: DesktopTheme) => Promise<void>;
+  /**
+   * Resolves true when the window already shows glass; otherwise the choice
+   * applies on next launch. Optional: older desktop builds stay opaque.
+   */
+  setWindowMaterial?: (material: "glass" | null) => Promise<boolean>;
   showContextMenu: <T extends string>(
     items: readonly ContextMenuItem<T>[],
     position?: { x: number; y: number },

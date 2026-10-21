@@ -26,6 +26,9 @@ import { resolveDefaultDesktopUpdateChannel } from "../updates/updateChannels.ts
 import { isValidDistroName } from "../wsl/wslPathParsing.ts";
 
 export interface DesktopSettings {
+  // macOS only. Read when the main window is created: Chromium decides whether
+  // a window is translucent at creation, so a switch applies on next launch.
+  readonly glassWindow: boolean;
   readonly localEnvironmentEnabled: boolean;
   readonly linuxPasswordStore: LinuxPasswordStorePreference;
   readonly mainWindowBounds: DesktopWindowBounds | null;
@@ -65,6 +68,7 @@ export const DEFAULT_MAIN_WINDOW_SIZE = {
 } as const;
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
+  glassWindow: false,
   localEnvironmentEnabled: true,
   linuxPasswordStore: DEFAULT_LINUX_PASSWORD_STORE,
   mainWindowBounds: null,
@@ -87,6 +91,7 @@ const DesktopWindowBoundsDocument = Schema.Struct({
 });
 
 const DesktopSettingsDocument = Schema.Struct({
+  glassWindow: Schema.optionalKey(Schema.Boolean),
   localEnvironmentEnabled: Schema.optionalKey(Schema.Boolean),
   linuxPasswordStore: Schema.optionalKey(Schema.Unknown),
   mainWindowBounds: Schema.optionalKey(Schema.NullOr(DesktopWindowBoundsDocument)),
@@ -170,6 +175,9 @@ export class DesktopAppSettings extends Context.Service<
     readonly setWslOnly: (
       enabled: boolean,
     ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
+    readonly setGlassWindow: (
+      enabled: boolean,
+    ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
     readonly applyWslWindowsFallback: Effect.Effect<
       DesktopSettingsChange,
       DesktopSettingsWriteError
@@ -216,6 +224,7 @@ function normalizeDesktopSettingsDocument(
     (parsed.wslBackendEnabled === undefined && parsed.wslMode === "wsl");
 
   return {
+    glassWindow: parsed.glassWindow === true,
     localEnvironmentEnabled: parsed.localEnvironmentEnabled !== false,
     linuxPasswordStore: normalizeLinuxPasswordStorePreference(parsed.linuxPasswordStore),
     mainWindowBounds,
@@ -239,6 +248,10 @@ function toDesktopSettingsDocument(
   defaults: DesktopSettings,
 ): DesktopSettingsDocument {
   const document: Mutable<DesktopSettingsDocument> = {};
+
+  if (settings.glassWindow !== defaults.glassWindow) {
+    document.glassWindow = settings.glassWindow;
+  }
 
   if (settings.localEnvironmentEnabled !== defaults.localEnvironmentEnabled) {
     document.localEnvironmentEnabled = settings.localEnvironmentEnabled;
@@ -365,6 +378,10 @@ function setWslOnly(settings: DesktopSettings, enabled: boolean): DesktopSetting
         ...settings,
         wslOnly: enabled,
       };
+}
+
+function setGlassWindow(settings: DesktopSettings, enabled: boolean): DesktopSettings {
+  return settings.glassWindow === enabled ? settings : { ...settings, glassWindow: enabled };
 }
 
 function setLocalEnvironmentEnabled(settings: DesktopSettings, enabled: boolean): DesktopSettings {
@@ -561,6 +578,10 @@ export const make = Effect.gen(function* () {
       persist((settings) => setWslOnly(settings, enabled)).pipe(
         Effect.withSpan("desktop.settings.setWslOnly", { attributes: { enabled } }),
       ),
+    setGlassWindow: (enabled) =>
+      persist((settings) => setGlassWindow(settings, enabled)).pipe(
+        Effect.withSpan("desktop.settings.setGlassWindow", { attributes: { enabled } }),
+      ),
     setLocalEnvironmentEnabled: (enabled) =>
       persist((settings) => setLocalEnvironmentEnabled(settings, enabled)).pipe(
         Effect.withSpan("desktop.settings.setLocalEnvironmentEnabled", { attributes: { enabled } }),
@@ -606,6 +627,7 @@ export const layerTest = (initialSettings: DesktopSettings = DEFAULT_DESKTOP_SET
           update((settings) => setWslBackendEnabled(settings, enabled)),
         setWslDistro: (distro) => update((settings) => setWslDistro(settings, distro)),
         setWslOnly: (enabled) => update((settings) => setWslOnly(settings, enabled)),
+        setGlassWindow: (enabled) => update((settings) => setGlassWindow(settings, enabled)),
         setLocalEnvironmentEnabled: (enabled) =>
           update((settings) => setLocalEnvironmentEnabled(settings, enabled)),
         applyWslWindowsFallback: update(applyWslWindowsFallback),
