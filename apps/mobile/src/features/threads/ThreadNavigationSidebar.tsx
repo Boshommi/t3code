@@ -11,6 +11,7 @@ import {
   threadSearchMatchKey,
   type EnvironmentThreadSearchMatch,
 } from "@t3tools/client-runtime/state/thread-search";
+import type { ModelSelection } from "@t3tools/contracts";
 import { LegendList } from "@legendapp/list/react-native";
 import type { MenuAction } from "@react-native-menu/menu";
 import { useAtomValue } from "@effect/atom-react";
@@ -154,6 +155,7 @@ function ThreadNavigationSidebarPane(
     moveThread,
     renameThread,
     regenerateThreadTitle,
+    forkThreadTo,
   } = useThreadListActions();
   const pendingTasks = usePendingNewTasks();
   const queuedThreadKeys = useQueuedThreadKeys();
@@ -506,6 +508,11 @@ function ThreadNavigationSidebarPane(
     onSelectThread(thread);
     openSwipeableRef.current?.close();
   };
+  const handleForkThread = (thread: EnvironmentThreadShell, modelSelection: ModelSelection) => {
+    void forkThreadTo(thread, modelSelection).then((fork) => {
+      if (fork) handleSelectThread(fork);
+    });
+  };
   const handleOpenThreadPullRequests = (
     thread: EnvironmentThreadShell,
     pr: ThreadPrPresentation,
@@ -594,6 +601,7 @@ function ThreadNavigationSidebarPane(
         return (
           <ThreadListV2Row
             onNewThreadOnBranch={props.onNewThreadOnBranch}
+            onForkThread={handleForkThread}
             thread={thread}
             variant={item.item.variant}
             hasQueuedMessages={item.hasQueuedMessages}

@@ -133,6 +133,9 @@ export type OrchestrationV2ContextSourcePoint = typeof OrchestrationV2ContextSou
 
 export const OrchestrationV2ThreadForkSourcePoint = Schema.Union([
   Schema.Struct({ type: Schema.Literal("latest_stable") }),
+  // The newest run that has finished, checkpointed or not: what the thread
+  // currently shows, minus any run still in progress or queued.
+  Schema.Struct({ type: Schema.Literal("latest_finished") }),
   Schema.Struct({ type: Schema.Literal("run"), runId: RunId }),
   Schema.Struct({ type: Schema.Literal("checkpoint"), checkpointId: CheckpointId }),
 ]);
@@ -2934,6 +2937,10 @@ export const OrchestrationV2Command = Schema.Union([
     targetThreadId: ThreadId,
     sourcePoint: OrchestrationV2ThreadForkSourcePoint,
     title: Schema.optional(TrimmedNonEmptyString),
+    // The fork starts on this provider instance and model instead of the
+    // source's; its first run hands the copied history over. Servers without
+    // `threadForkToProvider` strip it, so clients gate on that capability.
+    modelSelection: Schema.optional(ModelSelection),
     createdAt: Schema.optional(Schema.DateTimeUtc),
   }),
   Schema.Struct({

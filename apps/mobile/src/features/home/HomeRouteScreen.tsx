@@ -97,6 +97,7 @@ export function HomeRouteScreen() {
     moveThread,
     renameThread,
     regenerateThreadTitle,
+    forkThreadTo,
     unsettleThread,
   } = useThreadListActions();
   const pendingTasks = usePendingNewTasks();
@@ -273,6 +274,11 @@ export function HomeRouteScreen() {
           onMoveThread={moveThread}
           onRenameThread={renameThread}
           onRegenerateThreadTitle={regenerateThreadTitle}
+          onForkThread={(thread, modelSelection) => {
+            void forkThreadTo(thread, modelSelection).then((fork) => {
+              if (fork) handleSelectThread(fork);
+            });
+          }}
           onEnvironmentChange={setSelectedEnvironmentId}
           onProjectChange={setSelectedProjectKey}
           onOpenSettings={() =>

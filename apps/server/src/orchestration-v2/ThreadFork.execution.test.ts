@@ -395,3 +395,281 @@ it.effect.each(forkCases)(
       assert.isNull(target.providerThreads[0]?.forkedFrom);
     }).pipe(Effect.provide(layer)),
 );
+
+const crossProviderAdapters = forkCases.map(({ driver, instanceId }) => ({
+  instanceId,
+  driver,
+  getCapabilities: () =>
+    Effect.succeed(driver === "codex" ? CodexProviderCapabilitiesV2 : ClaudeProviderCapabilitiesV2),
+  planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" as const }),
+  openSession: () => Effect.die("Execution is paused after dispatch for handoff inspection"),
+})) satisfies ReadonlyArray<ProviderAdapter.ProviderAdapterV2["Service"]>;
+const crossProviderLayer = ProviderReplayHarness.layerWithRegistry(
+  { name: "fork-cross-provider" },
+  ProviderAdapterRegistry.layerFromAdapters(crossProviderAdapters),
+  { runEffectWorker: false },
+);
+
+const seedCompletedCodexSource = (sourceThreadId: ThreadId, sourceRunId: RunId) =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const eventSink = yield* EventSink.EventSinkV2;
+    const now = yield* DateTime.now;
+    const { driver, instanceId, modelSelection } = forkCases[0]!;
+    const providerThreadId = ProviderThreadId.make(`${sourceThreadId}:native`);
+    const messageId = MessageId.make(`${sourceThreadId}:message`);
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make(`${sourceThreadId}:create`),
+      threadId: sourceThreadId,
+      projectId: ProjectId.make("fork-cross-provider-project"),
+      title: "Codex source",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: "feature/source",
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* eventSink.write({
+      events: [
+        {
+          id: EventId.make(`${sourceThreadId}:provider-thread`),
+          type: "provider-thread.updated",
+          threadId: sourceThreadId,
+          occurredAt: now,
+          payload: {
+            id: providerThreadId,
+            driver,
+            providerInstanceId: instanceId,
+            providerSessionId: null,
+            appThreadId: sourceThreadId,
+            ownerNodeId: null,
+            nativeThreadRef: { driver, nativeId: "native-codex-source", strength: "strong" },
+            nativeConversationHeadRef: null,
+            status: "idle",
+            firstRunOrdinal: 1,
+            lastRunOrdinal: 1,
+            handoffIds: [],
+            forkedFrom: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        },
+        {
+          id: EventId.make(`${sourceThreadId}:run`),
+          type: "run.created",
+          threadId: sourceThreadId,
+          runId: sourceRunId,
+          occurredAt: now,
+          payload: {
+            id: sourceRunId,
+            threadId: sourceThreadId,
+            ordinal: 1,
+            providerInstanceId: instanceId,
+            modelSelection,
+            providerThreadId,
+            userMessageId: messageId,
+            rootNodeId: null,
+            activeAttemptId: null,
+            status: "completed",
+            queuePosition: null,
+            requestedAt: now,
+            startedAt: now,
+            completedAt: now,
+            checkpointId: null,
+            contextHandoffId: null,
+          },
+        },
+        {
+          id: EventId.make(`${sourceThreadId}:item`),
+          type: "turn-item.updated",
+          threadId: sourceThreadId,
+          runId: sourceRunId,
+          occurredAt: now,
+          payload: {
+            id: TurnItemId.make(`${sourceThreadId}:item`),
+            threadId: sourceThreadId,
+            runId: sourceRunId,
+            nodeId: null,
+            providerThreadId,
+            providerTurnId: null,
+            nativeItemRef: null,
+            parentItemId: null,
+            ordinal: 1,
+            status: "completed",
+            title: null,
+            startedAt: now,
+            completedAt: now,
+            updatedAt: now,
+            type: "user_message",
+            createdBy: "user",
+            creationSource: "web",
+            inputIntent: "turn_start",
+            messageId,
+            text: "CODEX_SOURCE_MARKER",
+            attachments: [],
+          },
+        },
+      ],
+    });
+  });
+
+it.effect("a fork to another provider starts there and hands over the source history", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const sourceThreadId = ThreadId.make("fork-cross-provider-source");
+    const targetThreadId = ThreadId.make("fork-cross-provider-target");
+    const sourceRunId = RunId.make("fork-cross-provider-source-run");
+    const claude = forkCases[1]!;
+    const claudeSelection = { instanceId: claude.instanceId, model: "claude-test-model" };
+    yield* seedCompletedCodexSource(sourceThreadId, sourceRunId);
+    // A later run still in progress stays out of the fork.
+    const eventSink = yield* EventSink.EventSinkV2;
+    const now = yield* DateTime.now;
+    const runningRunId = RunId.make("fork-cross-provider-running-run");
+    const runningMessageId = MessageId.make("fork-cross-provider-running-message");
+    yield* eventSink.write({
+      events: [
+        {
+          id: EventId.make("fork-cross-provider-running-run"),
+          type: "run.created",
+          threadId: sourceThreadId,
+          runId: runningRunId,
+          occurredAt: now,
+          payload: {
+            id: runningRunId,
+            threadId: sourceThreadId,
+            ordinal: 2,
+            providerInstanceId: forkCases[0]!.instanceId,
+            modelSelection: forkCases[0]!.modelSelection,
+            providerThreadId: ProviderThreadId.make(`${sourceThreadId}:native`),
+            userMessageId: runningMessageId,
+            rootNodeId: null,
+            activeAttemptId: null,
+            status: "running",
+            queuePosition: null,
+            requestedAt: now,
+            startedAt: now,
+            completedAt: null,
+            checkpointId: null,
+            contextHandoffId: null,
+          },
+        },
+        {
+          id: EventId.make("fork-cross-provider-running-item"),
+          type: "turn-item.updated",
+          threadId: sourceThreadId,
+          runId: runningRunId,
+          occurredAt: now,
+          payload: {
+            id: TurnItemId.make("fork-cross-provider-running-item"),
+            threadId: sourceThreadId,
+            runId: runningRunId,
+            nodeId: null,
+            providerThreadId: ProviderThreadId.make(`${sourceThreadId}:native`),
+            providerTurnId: null,
+            nativeItemRef: null,
+            parentItemId: null,
+            ordinal: 2,
+            status: "completed",
+            title: null,
+            startedAt: now,
+            completedAt: now,
+            updatedAt: now,
+            type: "user_message",
+            createdBy: "user",
+            creationSource: "web",
+            inputIntent: "turn_start",
+            messageId: runningMessageId,
+            text: "IN_PROGRESS_MARKER",
+            attachments: [],
+          },
+        },
+      ],
+    });
+
+    yield* orchestrator.dispatch({
+      type: "thread.fork",
+      commandId: CommandId.make("fork-cross-provider"),
+      sourceThreadId,
+      targetThreadId,
+      sourcePoint: { type: "latest_finished" },
+      modelSelection: claudeSelection,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const fork = yield* orchestrator.getThreadShell(targetThreadId);
+    assert.equal(fork?.providerInstanceId, claude.instanceId);
+    assert.deepEqual(fork?.modelSelection, claudeSelection);
+    assert.equal(fork?.branch, "feature/source");
+    const source = yield* orchestrator.getThreadShell(sourceThreadId);
+    assert.deepEqual(source?.modelSelection, forkCases[0]!.modelSelection);
+
+    // The first message carries no selection, so it runs on the fork's own provider.
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("continue-cross-provider-fork"),
+      threadId: targetThreadId,
+      messageId: MessageId.make("continue-cross-provider-fork"),
+      text: "Continue on Claude",
+      attachments: [],
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const target = yield* orchestrator.getThreadProjection(targetThreadId);
+    assert.equal(target.runs[0]?.providerInstanceId, claude.instanceId);
+    assert.equal(target.contextTransfers[0]?.resolution?.strategy, "portable_context");
+    assert.isUndefined(target.contextTransfers[0]?.sourceTokenUsage);
+    const handoff = target.contextHandoffs[0];
+    assert.isDefined(handoff);
+    assert.equal(
+      target.providerThreads.find((thread) => thread.id === handoff.toProviderThreadId)
+        ?.providerInstanceId,
+      claude.instanceId,
+    );
+    const history = handoff.history?.messages.map((message) => message.text).join("\n") ?? "";
+    assert.include(`${handoff.summaryText}\n${history}`, "CODEX_SOURCE_MARKER");
+    assert.notInclude(`${handoff.summaryText}\n${history}`, "IN_PROGRESS_MARKER");
+  }).pipe(Effect.provide(crossProviderLayer)),
+);
+
+it.effect("a fork to an unavailable provider is refused without creating a thread", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const sourceThreadId = ThreadId.make("fork-missing-provider-source");
+    const targetThreadId = ThreadId.make("fork-missing-provider-target");
+    const sourceRunId = RunId.make("fork-missing-provider-source-run");
+    yield* seedCompletedCodexSource(sourceThreadId, sourceRunId);
+
+    const refused = yield* orchestrator
+      .dispatch({
+        type: "thread.fork",
+        commandId: CommandId.make("fork-missing-provider"),
+        sourceThreadId,
+        targetThreadId,
+        sourcePoint: { type: "latest_finished" },
+        modelSelection: { instanceId: ProviderInstanceId.make("removed"), model: "gone" },
+        createdBy: "user",
+        creationSource: "web",
+      })
+      .pipe(Effect.flip);
+    assert.equal(refused._tag, "OrchestratorDispatchError");
+    assert.isNull(yield* orchestrator.getThreadShell(targetThreadId));
+
+    // Without a selection the same fork stays on the source's provider.
+    yield* orchestrator.dispatch({
+      type: "thread.fork",
+      commandId: CommandId.make("fork-source-provider"),
+      sourceThreadId,
+      targetThreadId,
+      sourcePoint: { type: "latest_finished" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const fork = yield* orchestrator.getThreadShell(targetThreadId);
+    assert.deepEqual(fork?.modelSelection, forkCases[0]!.modelSelection);
+  }).pipe(Effect.provide(crossProviderLayer)),
+);

@@ -28,6 +28,7 @@ import {
   type InterruptThreadTurnInput,
   type MarkThreadUnreadInput,
   type ForkThreadFromRunInput,
+  type ForkThreadToInput,
   type MergeThreadBackInput,
   type PromoteQueuedRunInput,
   type ReorderQueuedRunInput,
@@ -61,6 +62,7 @@ import {
   editQueuedRun,
   interruptThreadTurn,
   forkThreadFromRun,
+  forkThreadTo,
   markThreadUnread,
   mergeThreadBack,
   promoteQueuedRun,
@@ -109,6 +111,7 @@ export type {
   InterruptThreadTurnInput,
   MarkThreadUnreadInput,
   ForkThreadFromRunInput,
+  ForkThreadToInput,
   MergeThreadBackInput,
   PromoteQueuedRunInput,
   ReorderQueuedRunInput,
@@ -338,6 +341,15 @@ export function createThreadEnvironmentAtoms<R, E>(
     forkFromRun: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:fork-from-run",
       execute: (input: ForkThreadFromRunInput) => forkThreadFromRun(input),
+      scheduler,
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId, input }) => JSON.stringify([environmentId, input.sourceThreadId]),
+      },
+    }),
+    forkTo: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:fork-to",
+      execute: (input: ForkThreadToInput) => forkThreadTo(input),
       scheduler,
       concurrency: {
         mode: "serial",

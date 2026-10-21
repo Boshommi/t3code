@@ -727,6 +727,12 @@ function runForSourcePoint(
   switch (sourcePoint.type) {
     case "latest_stable":
       return latestStableRun(projection);
+    case "latest_finished":
+      return (
+        projection.runs
+          .filter((run) => isForkableSourceRunStatus(run.status))
+          .toSorted((left, right) => right.ordinal - left.ordinal)[0] ?? null
+      );
     case "run":
       return projection.runs.find((run) => run.id === sourcePoint.runId) ?? null;
     case "checkpoint": {
@@ -3871,6 +3877,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: forkableSourceRunStatusError(sourceRun),
       });
     }
+    if (command.modelSelection !== undefined) {
+      // The fork has no provider state yet, so the switch policy only has to
+      // accept the target as a new session that takes over the copied history.
+      yield* providerSwitchService
+        .plan({
+          projection: {
+            thread: sourceProjection.thread,
+            providerSessions: [],
+            providerThreads: [],
+          },
+          targetModelSelection: command.modelSelection,
+        })
+        .pipe(mapDispatchError(command));
+    }
     const sourceProviderThread = providerThreadForRun(sourceProjection, sourceRun);
     const now = command.createdAt ?? (yield* DateTime.now);
     const emitEvent = emit(events, command);
@@ -3891,6 +3911,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         transferId,
         targetThreadId: command.targetThreadId,
         ...(command.title === undefined ? {} : { title: command.title }),
+        ...(command.modelSelection === undefined
+          ? {}
+          : { targetModelSelection: command.modelSelection }),
         createdBy: command.createdBy,
         creationSource: command.creationSource,
         createdAt: now,

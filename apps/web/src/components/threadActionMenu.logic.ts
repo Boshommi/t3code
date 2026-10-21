@@ -1,8 +1,14 @@
 import type { ContextMenuItem } from "@t3tools/contracts";
+import {
+  threadForkTargetMenuId,
+  type ThreadForkTarget,
+} from "@t3tools/client-runtime/state/thread-fork-targets";
 import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
 
 export type ThreadActionMenuId =
   | "new-thread-on-branch"
+  | "fork"
+  | `fork:${string}`
   | "filter-by-project"
   | "project-settings"
   | "pin"
@@ -66,6 +72,8 @@ export function buildDraftActionMenuItems(options: {
 export interface ThreadActionMenuState {
   readonly canOperate: boolean;
   readonly branch: string | null;
+  /** Where "Fork to" can copy the conversation. Empty hides the item. */
+  readonly forkTargets: ReadonlyArray<ThreadForkTarget>;
   readonly projectFilter: {
     readonly label: string;
     readonly isActive: boolean;
@@ -111,6 +119,19 @@ export function buildThreadActionMenuItems(
             id: "new-thread-on-branch" as const,
             label: `New thread on ${state.branch}`,
             icon: "message-square-plus",
+          },
+        ]
+      : []),
+    ...(state.forkTargets.length > 0
+      ? [
+          {
+            id: "fork" as const,
+            label: "Fork to",
+            icon: "git-fork",
+            children: state.forkTargets.map((target) => ({
+              id: threadForkTargetMenuId(target),
+              label: target.label,
+            })),
           },
         ]
       : []),

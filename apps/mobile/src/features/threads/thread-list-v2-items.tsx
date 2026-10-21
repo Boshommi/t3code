@@ -25,7 +25,12 @@ import {
   formatWorkingDurationLabel,
   resolveThreadWorkingStartedAt,
 } from "@t3tools/client-runtime/state/models";
-import { AuthOrchestrationOperateScope, type EnvironmentMachineKind } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  type EnvironmentMachineKind,
+  type ModelSelection,
+} from "@t3tools/contracts";
+import { threadForkTargetMenuId } from "@t3tools/client-runtime/state/thread-fork-targets";
 import { canSnooze, resolveSnoozePresets } from "@t3tools/client-runtime/state/thread-settled";
 import type { MenuAction } from "@react-native-menu/menu";
 import { memo, useCallback, useEffect, useMemo, useState, type ComponentProps } from "react";
@@ -52,6 +57,7 @@ import { useThreadPr } from "../../state/use-thread-pr";
 import { useSwipeRowDormant } from "../home/swipe-row-activation";
 import { ThreadSwipeable } from "../home/thread-swipe-actions";
 import { buildThreadTitleRegenerationMenuItems } from "./thread-title-regeneration-menu";
+import { readThreadForkTargets } from "./threadForkTargets";
 import {
   THREAD_LIST_V2_SETTLED_PAGE_COUNT,
   resolveThreadListV2SnoozeGateExpiryMs,
@@ -512,6 +518,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   ) => void;
   readonly onDeleteThread: (thread: EnvironmentThreadShell) => void;
   readonly onNewThreadOnBranch: (thread: EnvironmentThreadShell) => void;
+  /** Absent hides "Fork to". */
+  readonly onForkThread?: (thread: EnvironmentThreadShell, modelSelection: ModelSelection) => void;
   readonly onRenameThread: (thread: EnvironmentThreadShell) => void;
   readonly onRegenerateThreadTitle: (thread: EnvironmentThreadShell) => void;
   readonly onSettleThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
@@ -551,6 +559,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     onRenameThread,
     onRegenerateThreadTitle,
     onNewThreadOnBranch,
+    onForkThread,
     onSettleThread,
     onSnoozeThread,
     onUnsnoozeThread,
@@ -763,6 +772,32 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     ],
     [props.titleRegenerationSupported, thread.titleRegeneration],
   );
+  // Filtering by the row's provider list keeps the menu in step with it without
+  // subscribing rows to provider status pushes; the model is resolved again on press.
+  const listProviders = props.providers;
+  const forkMenuItems = useMemo<MenuAction[]>(() => {
+    const targets =
+      onForkThread && listProviders
+        ? readThreadForkTargets(thread).filter((target) =>
+            listProviders.some(
+              (provider) => provider.instanceId === target.modelSelection.instanceId,
+            ),
+          )
+        : [];
+    return targets.length === 0
+      ? []
+      : [
+          {
+            id: "fork",
+            title: "Fork to",
+            image: "arrow.triangle.branch",
+            subactions: targets.map((target) => ({
+              id: threadForkTargetMenuId(target),
+              title: target.label,
+            })),
+          } satisfies MenuAction,
+        ];
+  }, [listProviders, onForkThread, thread]);
   const snoozableCardMenuActions = useMemo<MenuAction[]>(
     () => [
       { id: "settle", title: "Settle", image: "checkmark" },
@@ -826,6 +861,14 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const handleMenuAction = useCallback(
     ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) => {
       if (nativeEvent.event === "new-thread-on-branch") onNewThreadOnBranch(thread);
+      if (nativeEvent.event.startsWith("fork:")) {
+        const target = readThreadForkTargets(thread).find(
+          (candidate) => threadForkTargetMenuId(candidate) === nativeEvent.event,
+        );
+        if (target) onForkThread?.(thread, target.modelSelection);
+        else Dialog.alert("Could not fork thread", "That provider is no longer available.");
+        return;
+      }
       if (nativeEvent.event === "settle") handleSettle();
       if (nativeEvent.event === "unsettle") handleUnsettle();
       if (nativeEvent.event === "unsnooze") handleUnsnooze();
@@ -863,6 +906,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     },
     [
       onNewThreadOnBranch,
+      onForkThread,
       thread,
       handleArchive,
       handleDelete,
@@ -1350,6 +1394,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                     },
                   ]
                 : []),
+              ...forkMenuItems,
               { id: "copy-thread-id", title: "Copy thread ID", image: "doc.on.doc" },
               ...(snoozedRow
                 ? snoozedMenuActions

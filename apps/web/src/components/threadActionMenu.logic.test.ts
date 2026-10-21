@@ -1,3 +1,4 @@
+import { ProviderInstanceId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { buildThreadActionMenuItems, type ThreadActionMenuState } from "./threadActionMenu.logic";
@@ -5,6 +6,7 @@ import { buildThreadActionMenuItems, type ThreadActionMenuState } from "./thread
 const baseState: ThreadActionMenuState = {
   canOperate: true,
   branch: null,
+  forkTargets: [],
   projectFilter: null,
   isPinned: false,
   isSettled: false,
@@ -70,5 +72,19 @@ describe("buildThreadActionMenuItems", () => {
       (item) => item.id === "archive",
     );
     expect(archiveItem?.disabled).toBe(true);
+  });
+
+  it("lists fork targets under Fork to, and hides it when there are none", () => {
+    const forkTargets = [
+      {
+        label: "Claude",
+        modelSelection: { instanceId: ProviderInstanceId.make("claudeAgent"), model: "opus" },
+      },
+    ];
+    const fork = (state: Partial<ThreadActionMenuState>) =>
+      buildThreadActionMenuItems({ ...baseState, ...state }).find((item) => item.id === "fork");
+    expect(fork({ forkTargets })?.children).toEqual([{ id: "fork:claudeAgent", label: "Claude" }]);
+    expect(fork({ forkTargets, canOperate: false })?.children?.[0]?.disabled).toBe(true);
+    expect(fork({})).toBeUndefined();
   });
 });

@@ -42,6 +42,7 @@ vi.mock("react-native", () => ({
       state.alerts.push({ title, buttons }),
   },
 }));
+vi.mock("../../lib/uuid", () => ({ uuidv4: () => "fork-thread" }));
 vi.mock("expo-haptics", () => ({
   impactAsync: async () => {},
   ImpactFeedbackStyle: { Light: "light" },
@@ -128,6 +129,7 @@ vi.mock("../../state/threads", () => ({
       "unpin",
       "reorderPin",
       "updateMetadata",
+      "forkTo",
     ].map((action) => [
       action,
       async (request: {
@@ -216,6 +218,19 @@ describe("thread list operation permissions", () => {
       "2099-01-01T00:00:00.000Z",
     );
 
+    expect(state.requests).toEqual([]);
+  });
+
+  it("forkThreadTo rejects a retained callback after its environment loses permission", async () => {
+    const actions = useThreadListActions();
+    state.scopes.get(primaryEnvironmentId)!.clear();
+
+    const fork = await actions.forkThreadTo(makeThread(), {
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: "opus",
+    });
+
+    expect(fork).toBeNull();
     expect(state.requests).toEqual([]);
   });
 

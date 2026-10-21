@@ -211,6 +211,10 @@
       "types": "./src/state/providerInstanceDisplay.ts",
       "default": "./src/state/providerInstanceDisplay.ts"
     },
+    "./state/thread-fork-targets": {
+      "types": "./src/state/threadForkTargets.ts",
+      "default": "./src/state/threadForkTargets.ts"
+    },
     "./state/pull-requests": {
       "types": "./src/state/pullRequests.ts",
       "default": "./src/state/pullRequests.ts"

@@ -196,6 +196,16 @@ and copying a thread reference. A copied reference uses the thread's pull reques
 link when available, otherwise its thread ID. See [keybindings](./keybindings.md)
 for custom configuration.
 
+## Fork to another provider
+
+To continue a conversation with a different provider or model and keep the
+original, choose **Fork to** from the thread's menu (right-click it in the
+sidebar, use the chat header menu, or long-press it on mobile), then pick a
+provider. The fork is a new thread on the same branch and workspace. Your first
+message there hands over the finished conversation; a turn still running stays
+out. See [Context in portable handoffs](./portable-handoffs.md) for what carries
+over.
+
 ## Inspect agent work
 
 **Limited** means the provider stopped on a usage or rate limit. The conversation

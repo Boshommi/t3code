@@ -142,6 +142,8 @@ import {
   useThreadSelectionStore,
 } from "../threadSelectionStore";
 import { useAcknowledgeThreadWoke, useThreadActions } from "../hooks/useThreadActions";
+import { readThreadForkTargets, useForkThreadTo } from "../hooks/useForkThreadTo";
+import { threadForkTargetMenuId } from "@t3tools/client-runtime/state/thread-fork-targets";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
 import { useTerminalFocus } from "../hooks/useTerminalFocus";
@@ -2743,6 +2745,7 @@ export default function Sidebar() {
     archiveThread,
     deleteThread,
   } = useThreadActions();
+  const forkThreadTo = useForkThreadTo();
   const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
@@ -4238,6 +4241,7 @@ export default function Sidebar() {
                 projectRef.projectId === thread.projectId,
             ),
           ) ?? null;
+        const forkTargets = readThreadForkTargets(threadRef);
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
             buildThreadActionMenuItems({
@@ -4246,6 +4250,7 @@ export default function Sidebar() {
                 AuthOrchestrationOperateScope,
               ),
               branch: thread.branch ?? null,
+              forkTargets,
               projectFilter: threadProjectGroup
                 ? {
                     label: threadProjectGroup.displayName,
@@ -4279,6 +4284,13 @@ export default function Sidebar() {
               ? await requestCustomSnooze()
               : snoozePresets.find((candidate) => `snooze:${candidate.id}` === clicked.value);
           if (preset) attemptSnooze(threadRef, preset);
+          return;
+        }
+        if (clicked.value.startsWith("fork:")) {
+          const target = forkTargets.find(
+            (candidate) => threadForkTargetMenuId(candidate) === clicked.value,
+          );
+          if (target) await forkThreadTo(threadRef, target.modelSelection);
           return;
         }
         switch (clicked.value) {

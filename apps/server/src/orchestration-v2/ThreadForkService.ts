@@ -1,5 +1,6 @@
 import {
   ContextTransferId,
+  ModelSelection,
   OrchestrationV2Actor,
   OrchestrationV2AppThread,
   OrchestrationV2ContextSourcePoint,
@@ -60,6 +61,8 @@ export interface ThreadForkServiceV2Shape {
     readonly transferId: ContextTransferId;
     readonly targetThreadId: ThreadId;
     readonly title?: string;
+    /** Starts the fork on another provider instance or model; defaults to the source's. */
+    readonly targetModelSelection?: ModelSelection;
     readonly createdBy: OrchestrationV2Actor;
     readonly creationSource: OrchestrationV2CreationSource;
     readonly createdAt: DateTime.Utc;
@@ -82,8 +85,12 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
           cause: forkableSourceRunStatusError(input.sourceRun),
         });
       }
+      const modelSelection =
+        input.targetModelSelection ?? input.sourceProjection.thread.modelSelection;
       const targetThread: OrchestrationV2AppThread = {
         ...input.sourceProjection.thread,
+        providerInstanceId: modelSelection.instanceId,
+        modelSelection,
         // PR context follows the conversation; watching remains the source thread's responsibility.
         pullRequests: input.sourceProjection.thread.pullRequests?.map(
           ({ watch: _watch, ...link }) => link,
@@ -124,6 +131,7 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
         // Only native forks retain this context; portable handoffs rebuild it.
         sourceTokenUsage:
           (input.sourceRun.status === "completed" || input.sourceRun.status === "waiting") &&
+          modelSelection.instanceId === input.sourceRun.providerInstanceId &&
           input.sourceProviderThread?.nativeThreadRef?.strength === "strong"
             ? input.sourceTokenUsage
             : undefined,

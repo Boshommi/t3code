@@ -3,7 +3,8 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell
 import * as ThreadUndo from "@t3tools/client-runtime/state/thread-undo";
 import { showThreadUndoNotice } from "./thread-undo-notice";
 import { canSnooze, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
-import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { AuthOrchestrationOperateScope, type ModelSelection, ThreadId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Haptics from "expo-haptics";
 import { useRef } from "react";
@@ -11,6 +12,8 @@ import { useRef } from "react";
 import { withThreadDismissal } from "./thread-dismissal";
 import * as Dialog from "../../components/ui/Dialog";
 import { scopedThreadKey } from "../../lib/scopedEntities";
+import { uuidv4 } from "../../lib/uuid";
+import { waitForThreadShellReady } from "../threads/threadForkNavigation";
 import { refreshArchivedThreadsForEnvironment } from "../archive/useArchivedThreadSnapshots";
 import { pinOrderKeyBetween } from "@t3tools/client-runtime/state/thread-sort";
 import { appAtomRegistry } from "../../state/atom-registry";
@@ -243,8 +246,14 @@ export function useThreadListActions(): {
   ) => Promise<boolean>;
   readonly renameThread: (thread: EnvironmentThreadShell) => void;
   readonly regenerateThreadTitle: (thread: EnvironmentThreadShell) => Promise<boolean>;
+  /** Forks the conversation onto `modelSelection`; resolves with the fork once it reaches this client. */
+  readonly forkThreadTo: (
+    thread: EnvironmentThreadShell,
+    modelSelection: ModelSelection,
+  ) => Promise<EnvironmentThreadShell | null>;
 } {
   const executeAction = useThreadActionExecutor();
+  const forkToMutation = useAtomCommand(threadEnvironment.forkTo, { reportFailure: false });
   const snoozeMutation = useAtomCommand(threadEnvironment.snooze, { reportFailure: false });
   const unsnoozeMutation = useAtomCommand(threadEnvironment.unsnooze, { reportFailure: false });
   const pinMutation = useAtomCommand(threadEnvironment.pin, { reportFailure: false });
@@ -563,6 +572,39 @@ export function useThreadListActions(): {
     titleRegenerationInFlightThreadKeys.current.delete(key);
     return succeeded;
   };
+  const forkThreadTo = async (thread: EnvironmentThreadShell, modelSelection: ModelSelection) => {
+    if (!checkThreadOperationPermission(thread, "Could not fork thread")) return null;
+    selectionHaptic();
+    const forkRef = scopeThreadRef(thread.environmentId, ThreadId.make(uuidv4()));
+    const result = await forkToMutation({
+      environmentId: thread.environmentId,
+      input: {
+        sourceThreadId: thread.id,
+        targetThreadId: forkRef.threadId,
+        modelSelection,
+        creationSource: "mobile",
+      },
+    });
+    if (result._tag === "Failure") {
+      const error = Cause.squash(result.cause);
+      Dialog.alert(
+        "Could not fork thread",
+        error instanceof Error && error.message.trim().length > 0
+          ? error.message
+          : "The thread could not be forked.",
+      );
+      return null;
+    }
+    const shellAtom = environmentThreadShells.threadShellAtom(forkRef);
+    if (!(await waitForThreadShellReady({ read: () => appAtomRegistry.get(shellAtom) !== null }))) {
+      Dialog.alert(
+        "Fork created",
+        "Its thread data did not reach this client. Reconnect and try opening it from the thread list.",
+      );
+      return null;
+    }
+    return appAtomRegistry.get(shellAtom);
+  };
   const renameThread = (thread: EnvironmentThreadShell) => {
     const commit = (title: string) => {
       const resolution = resolveThreadTitleRename({ title, originalTitle: thread.title });
@@ -772,6 +814,7 @@ export function useThreadListActions(): {
     moveThread,
     renameThread,
     regenerateThreadTitle,
+    forkThreadTo,
   };
 }
 
