@@ -1995,11 +1995,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     }
   };
 
+  // Surface is reserved for hover and multi-select; a slim marker identifies
+  // the open thread, so it never reads as part of a selection.
   const rowSurfaceClassName = cn(
     "group/sidebar-row relative w-full cursor-pointer overflow-hidden rounded-md text-left outline-none select-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
     variantAction === "unsettle" && "[&:not(:hover):not(:focus-within)_*]:text-secondary-label/70",
     props.isActive
-      ? "bg-sidebar-row-active text-sidebar-foreground"
+      ? "bg-transparent text-sidebar-foreground hover:bg-sidebar-row-hover"
       : isSelected || props.sweepAction !== null
         ? "bg-sidebar-row-selected text-sidebar-foreground"
         : hasUnsentDraft
@@ -2011,10 +2013,17 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       status === "working" &&
       "opacity-70 transition-opacity hover:opacity-100 focus-within:opacity-100 motion-reduce:transition-none",
     isFileDragOver && "ring-1 ring-inset ring-primary/70",
+    // The file drop tint must not clobber selected rows or the open thread.
     isFileDragOver && !props.isActive && !isSelected && "bg-sidebar-row-hover",
     props.sortable?.isDragging &&
       "bg-sidebar bg-linear-to-b from-sidebar-row-active to-sidebar-row-active text-sidebar-foreground opacity-100 shadow-lg",
   );
+  const activeMarker = props.isActive ? (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute top-1/2 left-0 h-5 w-1 -translate-y-1/2 rounded-r-full bg-success"
+    />
+  ) : null;
   const sortable = props.sortable;
   const sortableRootProps = sortable
     ? {
@@ -2273,6 +2282,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             }
           >
             {accessibleTitle}
+            {activeMarker}
             {leading}
             {title}
             {isRegeneratingTitle ? (
@@ -2405,6 +2415,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             }
           >
             {accessibleTitle}
+            {activeMarker}
             <span
               className={cn(
                 "flex shrink-0 items-center transition-opacity",
@@ -2564,6 +2575,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           }
         >
           {accessibleTitle}
+          {activeMarker}
           <div className="relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)">
             <div className="flex h-5 min-w-0 items-center gap-1.5">
               {draftIndicator}
