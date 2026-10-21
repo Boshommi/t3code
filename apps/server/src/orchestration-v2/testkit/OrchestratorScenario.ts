@@ -177,6 +177,7 @@ function commandThreadIds(command: OrchestrationV2Command): ReadonlyArray<Thread
     case "provider.switch":
     case "thread.side-question.ask":
     case "thread.side-thread.delete":
+    case "thread.shell-command.run":
       return [command.threadId];
     case "delegated_task.request":
     case "delegated_task.wake-policy":

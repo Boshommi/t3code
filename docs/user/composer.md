@@ -269,6 +269,16 @@ row above the composer shows the goal and its progress.
 - Stopping Claude ends the current turn, but the goal stays set. Claude checks it
   again at the end of your next message.
 
+## Run a shell command
+
+On web and desktop, start a message with `!` to run a command instead of sending it
+to the agent, for example `!git status`. It runs once in the thread's working
+directory using your login shell, and the command and its output appear in the
+conversation. The agent does not see the result unless you mention it in a later
+message. Commands stop after two minutes and keep the first 64 KiB of output. They
+work while the agent is working, but need a started thread, and they need terminal
+access when you are connected to a remote environment.
+
 ## Side questions
 
 Send `/btw` followed by a question to ask about the conversation without

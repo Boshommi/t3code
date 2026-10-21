@@ -1132,6 +1132,9 @@ export type OrchestrationV2SideMessageRole = typeof OrchestrationV2SideMessageRo
 
 export const SIDE_QUESTION_MAX_CHARS = 8_000;
 
+/** Longest `!command` the composer can run in a thread's directory. */
+export const THREAD_SHELL_COMMAND_MAX_CHARS = 8_192;
+
 export const OrchestrationV2SideMessage = Schema.Struct({
   id: MessageId,
   threadId: ThreadId,
@@ -3078,6 +3081,17 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     sideThreadId: MessageId,
+  }),
+  /**
+   * A `!command` from the composer: runs once in the thread's directory and
+   * lands as a run-less command_execution item. It never reaches the agent.
+   * Needs terminal-operate scope as well as orchestration-operate.
+   */
+  Schema.Struct({
+    type: Schema.Literal("thread.shell-command.run"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    command: TrimmedNonEmptyString.check(Schema.isMaxLength(THREAD_SHELL_COMMAND_MAX_CHARS)),
   }),
 ]);
 export type OrchestrationV2Command = typeof OrchestrationV2Command.Type;

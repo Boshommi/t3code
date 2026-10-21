@@ -1163,6 +1163,19 @@ export const deleteThreadSideThread = Effect.fn("EnvironmentCommands.deleteThrea
     });
   },
 );
+export interface RunThreadShellCommandInput extends ThreadCommandInput {
+  readonly command: string;
+}
+export const runThreadShellCommand = Effect.fn("EnvironmentCommands.runThreadShellCommand")(
+  function* (input: RunThreadShellCommandInput) {
+    return yield* dispatch({
+      type: "thread.shell-command.run",
+      commandId: yield* allocateCommandId(input),
+      threadId: input.threadId,
+      command: input.command,
+    });
+  },
+);
 export const unlinkThreadPullRequest = Effect.fn("EnvironmentCommands.unlinkThreadPullRequest")(
   function* (input: UnlinkThreadPullRequestInput) {
     return yield* dispatch({

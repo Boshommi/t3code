@@ -1,3 +1,4 @@
+import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { GitPreparePullRequestThreadInput, GitRunStackedActionInput } from "./git.ts";
 import {
@@ -6,6 +7,7 @@ import {
   AuthPreviewOperateScope,
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
+  AuthTerminalOperateScope,
   type AuthEnvironmentScope,
 } from "./auth.ts";
 import { ORCHESTRATION_V2_WS_METHODS } from "./orchestrationV2.ts";
@@ -59,6 +61,13 @@ export function clientRpcRequiredScopes(
   method: string,
   input: unknown,
 ): readonly AuthEnvironmentScope[] {
+  // A `!command` runs a shell in the thread's directory, so it needs terminal access too.
+  if (
+    method === ORCHESTRATION_V2_WS_METHODS.dispatchCommand &&
+    Predicate.isObject(input) &&
+    input.type === "thread.shell-command.run"
+  )
+    return [AuthOrchestrationOperateScope, AuthTerminalOperateScope];
   if (method === WS_METHODS.gitPreparePullRequestThread && input !== undefined) {
     const payload = decodePrepareThread(input);
     if (payload.mode === "worktree" && payload.threadId !== undefined)

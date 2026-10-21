@@ -22,6 +22,7 @@ import {
   formatAssistantCitationForComposer,
   isCollapsedCursorAdjacentToInlineToken,
   isPathSuggestionCurrent,
+  parseShellCommand,
   parseSideQuestionCommand,
   replaceTextRange,
 } from "./composer-logic";
@@ -570,5 +571,20 @@ describe("parseSideQuestionCommand", () => {
     expect(parseSideQuestionCommand("/btwx question")).toBeNull();
     expect(parseSideQuestionCommand("hey /btw question")).toBeNull();
     expect(parseSideQuestionCommand("/plan")).toBeNull();
+  });
+});
+
+describe("parseShellCommand", () => {
+  it("returns the command after a leading !, keeping its line breaks", () => {
+    expect(parseShellCommand("!ls -la")).toBe("ls -la");
+    expect(parseShellCommand("  ! git status \n")).toBe("git status");
+    expect(parseShellCommand("!echo a\necho b")).toBe("echo a\necho b");
+  });
+
+  it("ignores a bare ! and text that does not start with one", () => {
+    expect(parseShellCommand("!")).toBeNull();
+    expect(parseShellCommand("!   ")).toBeNull();
+    expect(parseShellCommand("run !ls")).toBeNull();
+    expect(parseShellCommand("/btw !ls")).toBeNull();
   });
 });

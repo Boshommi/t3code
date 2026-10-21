@@ -366,6 +366,16 @@ export function parseSideQuestionCommand(text: string): string | null {
   return match ? (match[1] ?? "").trim() : null;
 }
 
+/**
+ * The command of a `!command` message, which runs in the thread's directory
+ * instead of going to the agent. Null when the text is not one, including a
+ * bare `!`.
+ */
+export function parseShellCommand(text: string): string | null {
+  const match = /^!([\s\S]*\S)/.exec(text.trim());
+  return match?.[1]?.trim() || null;
+}
+
 export function replaceTextRange(
   text: string,
   rangeStart: number,

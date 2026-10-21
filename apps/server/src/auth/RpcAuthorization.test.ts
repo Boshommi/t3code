@@ -2,6 +2,9 @@ import {
   AuthEnvironmentMaintainScope,
   AuthDiagnosticsReadScope,
   AuthFilesystemReadScope,
+  CommandId,
+  MessageId,
+  ORCHESTRATION_V2_WS_METHODS,
   AuthProvidersManageScope,
   AuthSettingsWriteScope,
   DEFAULT_SERVER_SETTINGS,
@@ -232,6 +235,51 @@ it.effect("requires task permission before attaching a prepared worktree to a th
       }).pipe(Effect.flip),
     ).toMatchObject({ requiredPermission: AuthOrchestrationOperateScope });
     expect(handled).toBe(false);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("requires terminal permission to run a shell command in a thread", () =>
+  Effect.gen(function* () {
+    const group = WsRpcGroup.omit(
+      ...[...WsRpcGroup.requests.keys()].filter(
+        (
+          tag,
+        ): tag is Exclude<
+          keyof typeof RPC_REQUIRED_SCOPES,
+          typeof ORCHESTRATION_V2_WS_METHODS.dispatchCommand
+        > => tag !== ORCHESTRATION_V2_WS_METHODS.dispatchCommand,
+      ),
+    );
+    const handled: Array<string> = [];
+    const client = yield* RpcTest.makeClient(group).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          group.toLayerHandler(ORCHESTRATION_V2_WS_METHODS.dispatchCommand, (command) =>
+            Effect.sync(() => {
+              handled.push(command.type);
+              return { sequence: 1 };
+            }),
+          ),
+          RpcAuthorization.layer([AuthOrchestrationOperateScope]),
+        ),
+      ),
+    );
+    const threadId = ThreadId.make("thread");
+    expect(
+      yield* client[ORCHESTRATION_V2_WS_METHODS.dispatchCommand]({
+        type: "thread.shell-command.run",
+        commandId: CommandId.make("command:shell"),
+        threadId,
+        command: "ls",
+      }).pipe(Effect.flip),
+    ).toMatchObject({ requiredPermission: AuthTerminalOperateScope });
+    yield* client[ORCHESTRATION_V2_WS_METHODS.dispatchCommand]({
+      type: "thread.side-thread.delete",
+      commandId: CommandId.make("command:side"),
+      threadId,
+      sideThreadId: MessageId.make("side"),
+    });
+    expect(handled).toEqual(["thread.side-thread.delete"]);
   }).pipe(Effect.scoped),
 );
 

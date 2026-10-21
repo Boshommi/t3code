@@ -83,6 +83,7 @@ import {
   resolveProjectProviderInstanceEnabled,
   RuntimeMode,
   SIDE_QUESTION_MAX_CHARS,
+  THREAD_SHELL_COMMAND_MAX_CHARS,
 } from "@t3tools/contracts";
 import { type EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
 import { deriveThreadTitleSeed } from "@t3tools/client-runtime/operations";
@@ -185,6 +186,7 @@ import {
   type ComposerSubmissionIntent,
   collapseExpandedComposerCursor,
   composerRequiresModifier,
+  parseShellCommand,
   parseSideQuestionCommand,
   parseStandaloneComposerSlashCommand,
 } from "../composer-logic";
@@ -2542,6 +2544,9 @@ export default function ChatView(props: ChatViewProps) {
     reportFailure: false,
   });
   const deleteThreadSideThread = useOrchestrationCommand(threadEnvironment.deleteSideThread, {
+    reportFailure: false,
+  });
+  const runThreadShellCommand = useOrchestrationCommand(threadEnvironment.runShellCommand, {
     reportFailure: false,
   });
   const askSideQuestionStable = useStableCallback(async (input: SideQuestionInput) => {
@@ -6381,6 +6386,59 @@ export default function ChatView(props: ChatViewProps) {
         if (currentRouteThreadKeyRef.current === routeThreadKey && promptRef.current === "") {
           promptRef.current = sidePrompt;
           setComposerDraftPrompt(composerDraftTarget, sidePrompt);
+        }
+      }
+      return;
+    }
+
+    // `!command` runs in the thread's directory and shows up in the transcript. Like
+    // `/btw`, it never reaches the agent, so it works while a turn is running.
+    const shellCommand =
+      !directAnnotation && !queuedRunEdit.isEditing && !composerHasNonPromptContent
+        ? parseShellCommand(promptRef.current)
+        : null;
+    if (shellCommand !== null) {
+      if (shellCommand.length > THREAD_SHELL_COMMAND_MAX_CHARS) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: "Command too long",
+            description: `Keep commands under ${THREAD_SHELL_COMMAND_MAX_CHARS.toLocaleString()} characters.`,
+          }),
+        );
+        return;
+      }
+      if (!isServerThread || !activeThreadRef) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "info",
+            title: "Send a message first",
+            description: "Commands run in a thread. Start this one, then try again.",
+          }),
+        );
+        return;
+      }
+      const shellPrompt = promptRef.current;
+      promptRef.current = "";
+      setComposerDraftPrompt(composerDraftTarget, "");
+      composerRef.current?.resetCursorState();
+      const result = await runThreadShellCommand({
+        environmentId: activeThreadRef.environmentId,
+        input: { threadId: activeThreadRef.threadId, command: shellCommand },
+      });
+      if (result._tag !== "Success" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not run the command",
+            description: error instanceof Error ? error.message : "Try again in a moment.",
+          }),
+        );
+        // Give the command back unless the user already started a new draft.
+        if (currentRouteThreadKeyRef.current === routeThreadKey && promptRef.current === "") {
+          promptRef.current = shellPrompt;
+          setComposerDraftPrompt(composerDraftTarget, shellPrompt);
         }
       }
       return;

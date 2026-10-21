@@ -145,6 +145,12 @@ import {
 } from "./ThreadForkService.ts";
 import { planThreadDeletion } from "./ThreadDeletion.ts";
 import { planSideThreadCommand, type SideThreadCommand } from "./SideThreads.ts";
+import {
+  runningShellCommandTurnItem,
+  shellCommandRunOrdinal,
+  shellCommandTurnItemId,
+} from "./ShellCommands.ts";
+import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
 
@@ -492,6 +498,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.side-question.ask":
     case "thread.side-thread.delete":
     case "thread.side-answer.complete":
+    case "thread.shell-command.run":
       return command.threadId;
     case "delegated_task.request":
     case "delegated_task.wake-policy":
@@ -915,6 +922,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const projects = yield* ProjectStore.ProjectStoreV2;
   const projectionStore = yield* ProjectionStoreV2;
   const effectOutbox = yield* EffectOutbox.EffectOutboxV2;
+  const turnItemPositions = yield* TurnItemPositionStore.TurnItemPositionStoreV2;
   const nextTurnItemOrdinal = (
     projection: Pick<OrchestrationV2ThreadProjection, "thread"> &
       Partial<Pick<OrchestrationV2ThreadProjection, "turnItems">>,
@@ -7586,6 +7594,46 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     if (plan.type === "emit") yield* emit(events, command)<OrchestrationV2DomainEvent>(plan.event);
   });
 
+  const dispatchShellCommandRun = Effect.fn("orchestrationV2.dispatch.shellCommandRun")(function* (
+    command: Extract<OrchestrationV2Command, { readonly type: "thread.shell-command.run" }>,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) {
+    const { thread, runs } = yield* projectionStore
+      .getThreadRecords(command.threadId, ["runs"])
+      .pipe(
+        Effect.mapError(
+          (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+        ),
+      );
+    if (thread.deletedAt !== null) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: `Thread ${thread.id} is deleted.`,
+      });
+    }
+    const id = shellCommandTurnItemId(command.commandId);
+    const runOrdinal = shellCommandRunOrdinal(runs);
+    const ordinal = yield* turnItemPositions
+      .allocate({
+        threadId: thread.id,
+        turnItemId: id,
+        runId: null,
+        ...(runOrdinal === undefined ? {} : { runOrdinal }),
+      })
+      .pipe(mapDispatchError(command));
+    const now = yield* DateTime.now;
+    yield* emit(
+      events,
+      command,
+    )<OrchestrationV2DomainEvent>({
+      type: "turn-item.updated",
+      threadId: thread.id,
+      occurredAt: now,
+      payload: runningShellCommandTurnItem({ thread, id, ordinal, command: command.command, now }),
+    });
+  });
+
   const dispatchSecretRequestRecord = Effect.fn("orchestrationV2.dispatch.secretRequestRecord")(
     function* (
       command: Extract<OrchestrationV2InternalCommand, { readonly type: "secret_request.record" }>,
@@ -11578,6 +11626,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.side-answer.complete":
         yield* dispatchSideThreadCommand(command, events);
         break;
+      case "thread.shell-command.run":
+        yield* dispatchShellCommandRun(command, events);
+        break;
       default:
         return yield* dispatchUnsupported(command);
     }
@@ -12193,6 +12244,7 @@ export const layer: Layer.Layer<
   | RuntimePolicyV2
   | ServerSettings.ServerSettingsService
   | ThreadForkServiceV2
+  | TurnItemPositionStore.TurnItemPositionStoreV2
 > = Layer.effect(OrchestratorV2, makeOrchestrator()).pipe(
   Layer.provide(ThreadCommandExecutor.layer),
 );

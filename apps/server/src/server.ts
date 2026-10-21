@@ -7,6 +7,7 @@ import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReact
 import * as PullRequestWatchReactor from "./orchestration-v2/PullRequestWatchReactor.ts";
 import * as DelegatedTaskQuestionReactor from "./orchestration-v2/DelegatedTaskQuestionReactor.ts";
 import * as SideQuestionReactor from "./orchestration-v2/SideQuestionReactor.ts";
+import * as ShellCommandReactor from "./orchestration-v2/ShellCommandReactor.ts";
 // Effect wraps this raw Node HTTP server after its startup and write-error guards attach.
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeHttp from "node:http";
@@ -615,6 +616,17 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   ).pipe(
     Layer.provide(SideQuestionReactor.layer),
     Layer.provide(Layer.merge(RuntimeLayer.layerEventSink, ProjectionStoreV2.layer)),
+  ),
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const service = yield* ShellCommandReactor.ShellCommandReactor;
+      yield* service.start();
+    }),
+  ).pipe(
+    Layer.provide(ShellCommandReactor.layer),
+    Layer.provide(
+      Layer.mergeAll(RuntimeLayer.layerEventSink, ProjectionStoreV2.layer, ProcessRunner.layer),
+    ),
   ),
   ProviderUsageLimitsIngestion.layer,
   layerProviderInstallationRefresh,
