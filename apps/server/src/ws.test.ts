@@ -93,6 +93,7 @@ import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as ServerConfigModule from "./config.ts";
 import * as Keybindings from "./keybindings.ts";
+import * as PromptStash from "./promptStash.ts";
 import * as ServerSettings from "./serverSettings.ts";
 
 import * as EventStore from "./orchestration-v2/EventStore.ts";
@@ -323,6 +324,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(ProjectService.ProjectService)({}),
   Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({}),
   Layer.mock(ProjectStore.ProjectStoreV2)({}),
+  Layer.mock(PromptStash.PromptStash)({}),
   Layer.mock(ProviderAuthService.ProviderAuthService)({}),
   Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({}),
   Layer.mock(ProviderLatestVersions.ProviderLatestVersions)({}),

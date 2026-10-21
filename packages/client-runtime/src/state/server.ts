@@ -1113,6 +1113,22 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:scheduled-tasks:live",
       tag: WS_METHODS.scheduledTasksSubscribe,
     }),
+    promptStash: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:prompt-stash",
+      tag: WS_METHODS.promptStashSubscribe,
+    }),
+    getPromptStashEntry: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:prompt-stash-get",
+      tag: WS_METHODS.promptStashGet,
+    }),
+    savePromptStashEntry: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:prompt-stash-save",
+      tag: WS_METHODS.promptStashSave,
+    }),
+    deletePromptStashEntry: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:prompt-stash-delete",
+      tag: WS_METHODS.promptStashDelete,
+    }),
     // A cold transcript scan is measured in seconds, so keep the result around
     // long enough that switching windows or re-rendering does not rescan.
     usageSummary: createEnvironmentRpcQueryAtomFamily(runtime, {

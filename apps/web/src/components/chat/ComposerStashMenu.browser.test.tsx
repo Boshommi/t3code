@@ -13,7 +13,7 @@ function Composer({ dialog = false }: { dialog?: boolean }) {
       id,
       createdAt: "2026-10-01T00:00:00.000Z",
       prompt: `${id} prompt`,
-      attachments: [],
+      imageCount: 0,
       droppedImageNames: [],
     })),
   );

@@ -1,51 +1,46 @@
-import { ComposerContextRecord, ForwardCompatibleArray } from "@t3tools/contracts";
+import { type EnvironmentId, PromptStashEntry } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { create } from "zustand";
 
-import {
-  PersistedComposerFileAttachment,
-  PersistedComposerImageAttachment,
-} from "./composerDraftStore";
+import { PersistedComposerImageAttachment } from "./composerDraftStore";
 import { createMemoryStorage, type StateStorage } from "./lib/storage";
+
+export type { PromptStashEntry };
 
 export const PROMPT_STASH_STORAGE_KEY = "t3code:prompt-stash:v2";
 const LEGACY_PROMPT_STASH_STORAGE_KEY = "t3code:prompt-stash:v1";
 const PROMPT_STASH_STORAGE_VERSION = 2;
+const MIGRATION_TARGETS_STORAGE_KEY = "t3code:prompt-stash:migration-targets:v1";
 
 export const MAX_STASH_ENTRIES = 20;
 /**
  * Budget for an entry's serialized attachment payload. localStorage is a
  * ~5MB origin-wide quota shared with the composer draft store, so oversized
  * images are dropped (tracked in `droppedImageNames`) rather than persisted.
+ * Server-stored prompts keep the same budget.
  */
 export const MAX_STASH_ENTRY_ATTACHMENT_CHARS = 2_700_000;
 
-const StashEntrySchema = Schema.Struct({
-  id: Schema.String,
-  createdAt: Schema.String,
-  prompt: Schema.String,
-  attachments: Schema.Array(PersistedComposerImageAttachment),
-  files: Schema.optionalKey(Schema.Array(PersistedComposerFileAttachment)),
-  droppedImageNames: Schema.Array(Schema.String),
-  unreadableImageNames: Schema.optionalKey(Schema.Array(Schema.String)),
-  pendingImageCount: Schema.optionalKey(Schema.Number),
-  records: Schema.optionalKey(ForwardCompatibleArray(ComposerContextRecord)),
-});
-export type PromptStashEntry = typeof StashEntrySchema.Type;
-
+/**
+ * Saved prompts live on the server when it supports them. This browser store
+ * keeps prompts for servers that do not, and prompts saved before the server
+ * did, until they migrate.
+ */
 const PersistedPromptStashState = Schema.Struct({
-  entries: Schema.Array(StashEntrySchema),
+  entries: Schema.Array(PromptStashEntry),
 });
 type PersistedPromptStashState = typeof PersistedPromptStashState.Type;
 
 const decodePersistedPromptStashState = Schema.decodeUnknownSync(PersistedPromptStashState);
+const decodeMigrationTargets = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.String)),
+);
 
 /**
- * `pendingImageCount` only has meaning within the session that wrote it: the
- * encode loop that would clear it does not survive a reload. Any entry that
- * comes back from storage still pending was orphaned by a closed tab or a
+ * Older builds wrote entries before their images finished encoding. Any entry
+ * that comes back from storage still pending was orphaned by a closed tab or a
  * crash mid-encode, so the count is settled here — otherwise the entry would
- * be stuck showing "saving…" and refuse to restore forever.
+ * be stuck showing missing images it can never receive.
  */
 function clearOrphanedPendingImages(
   entries: ReadonlyArray<PromptStashEntry>,
@@ -118,7 +113,7 @@ function persistEntries(entries: ReadonlyArray<PromptStashEntry>): {
       PROMPT_STASH_STORAGE_KEY,
       JSON.stringify({
         version: PROMPT_STASH_STORAGE_VERSION,
-        state: { entries },
+        state: { entries } satisfies PersistedPromptStashState,
       }),
     );
     return { written: true, durable: storageIsDurable };
@@ -158,19 +153,6 @@ interface PromptStashStoreState {
    * reload would resurrect the entry.
    */
   takeEntry: (entryId: string) => { entry: PromptStashEntry | null; durable: boolean };
-  /**
-   * Returns attached=false when the entry is gone (deleted while
-   * encoding was still running) so the caller can tell the user their images
-   * did not make it.
-   */
-  finalizeEntryImages: (
-    entryId: string,
-    images: {
-      attachments: ReadonlyArray<PersistedComposerImageAttachment>;
-      droppedImageNames: ReadonlyArray<string>;
-      unreadableImageNames: ReadonlyArray<string>;
-    },
-  ) => { attached: boolean; durable: boolean };
 }
 
 export const usePromptStashStore = create<PromptStashStoreState>()((set, get) => ({
@@ -197,23 +179,6 @@ export const usePromptStashStore = create<PromptStashStoreState>()((set, get) =>
     set(() => ({ entries: nextEntries }));
     return { entry, durable };
   },
-  finalizeEntryImages: (entryId, images) => {
-    const entries = get().entries;
-    const index = entries.findIndex((candidate) => candidate.id === entryId);
-    const existing = index === -1 ? undefined : entries[index];
-    if (!existing) return { attached: false, durable: true };
-    const nextEntries = [...entries];
-    nextEntries[index] = {
-      ...existing,
-      attachments: images.attachments,
-      droppedImageNames: images.droppedImageNames,
-      unreadableImageNames: images.unreadableImageNames,
-      pendingImageCount: 0,
-    };
-    const { durable } = persistEntries(nextEntries);
-    set(() => ({ entries: nextEntries }));
-    return { attached: true, durable };
-  },
 }));
 
 {
@@ -228,5 +193,78 @@ export const usePromptStashStore = create<PromptStashStoreState>()((set, get) =>
 
 export function writePromptStashStorageForTest(raw: string): void {
   baseStashStorage.setItem(PROMPT_STASH_STORAGE_KEY, raw);
+  baseStashStorage.removeItem(MIGRATION_TARGETS_STORAGE_KEY);
   usePromptStashStore.setState({ entries: readPersistedEntries() ?? [] });
+}
+
+function readMigrationTargets(): Record<string, string> {
+  try {
+    const raw = baseStashStorage.getItem(MIGRATION_TARGETS_STORAGE_KEY);
+    return typeof raw === "string" && raw.length > 0 ? decodeMigrationTargets(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeMigrationTargets(targets: Record<string, string>): void {
+  baseStashStorage.setItem(MIGRATION_TARGETS_STORAGE_KEY, JSON.stringify(targets));
+}
+
+/**
+ * The server a local entry belongs to: the one a migration already sent it to,
+ * else the one that owns its uploaded files, else whichever server asks first.
+ */
+function migrationTarget(
+  entry: PromptStashEntry,
+  targets: Record<string, string>,
+  environmentId: EnvironmentId,
+): string {
+  return targets[entry.id] ?? entry.files?.[0]?.environmentId ?? environmentId;
+}
+
+/** Local entries stay visible in their target environment until its server confirms the import. */
+export function localPromptStashEntriesForEnvironment(
+  entries: ReadonlyArray<PromptStashEntry>,
+  environmentId: EnvironmentId,
+): ReadonlyArray<PromptStashEntry> {
+  if (entries.length === 0) return entries;
+  const targets = readMigrationTargets();
+  return entries.filter(
+    (entry) => migrationTarget(entry, targets, environmentId) === environmentId,
+  );
+}
+
+const migrationsInFlight = new Set<string>();
+
+/**
+ * Imports local entries into `environmentId`'s server, one acknowledgement at a
+ * time. The local copy is removed only after the server confirms it. Each entry
+ * is pinned to its first server before sending, so an interrupted import resumes
+ * there instead of copying the prompt to a second environment.
+ */
+export async function migrateLocalPromptStash(
+  environmentId: EnvironmentId,
+  save: (entry: PromptStashEntry) => Promise<boolean>,
+): Promise<void> {
+  for (const entry of usePromptStashStore.getState().entries) {
+    if (migrationsInFlight.has(entry.id)) continue;
+    // Uploads from several environments cannot all be restored from one server.
+    const fileEnvironmentId = entry.files?.[0]?.environmentId;
+    if (entry.files?.some((file) => file.environmentId !== fileEnvironmentId)) continue;
+    const targets = readMigrationTargets();
+    if (migrationTarget(entry, targets, environmentId) !== environmentId) continue;
+    migrationsInFlight.add(entry.id);
+    try {
+      writeMigrationTargets({ ...targets, [entry.id]: environmentId });
+      if (!(await save(entry))) continue;
+      if (usePromptStashStore.getState().takeEntry(entry.id).durable) {
+        const { [entry.id]: _migrated, ...remaining } = readMigrationTargets();
+        writeMigrationTargets(remaining);
+      }
+    } catch {
+      // Keep the local copy. The next connection or list update retries.
+    } finally {
+      migrationsInFlight.delete(entry.id);
+    }
+  }
 }

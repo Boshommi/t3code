@@ -141,6 +141,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
    */
   agentActivityPublishing: Schema.optionalKey(Schema.Boolean),
   projectCloneTracking: Schema.optionalKey(Schema.Boolean),
+  /** Server stores saved prompts. Older servers lack it; clients keep them in the browser. */
+  promptStash: Schema.optionalKey(Schema.Boolean),
   /** Server answers projects.listIgnoredFiles. */
   ignoredFileListing: Schema.optionalKey(Schema.Boolean),
   environmentIcon: Schema.optionalKey(Schema.Boolean),

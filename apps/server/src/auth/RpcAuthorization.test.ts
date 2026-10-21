@@ -371,3 +371,57 @@ it.effect("denies manual cleanup before the handler without settings permission"
     expect(handled).toBe(false);
   }).pipe(Effect.scoped),
 );
+
+it.effect("lets read-only clients list saved prompts but not change them", () =>
+  Effect.gen(function* () {
+    const methods = [
+      WS_METHODS.promptStashSubscribe,
+      WS_METHODS.promptStashGet,
+      WS_METHODS.promptStashSave,
+      WS_METHODS.promptStashDelete,
+    ] as const;
+    const group = WsRpcGroup.omit(
+      ...[...WsRpcGroup.requests.keys()].filter(
+        (tag): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, (typeof methods)[number]> =>
+          !(methods as ReadonlyArray<string>).includes(tag),
+      ),
+    );
+    let mutations = 0;
+    const client = yield* RpcTest.makeClient(group).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          group.toLayerHandler(WS_METHODS.promptStashSubscribe, () => Stream.make([])),
+          group.toLayerHandler(WS_METHODS.promptStashGet, () => Effect.succeed(null)),
+          group.toLayerHandler(WS_METHODS.promptStashSave, () =>
+            Effect.sync(() => void mutations++),
+          ),
+          group.toLayerHandler(WS_METHODS.promptStashDelete, () =>
+            Effect.sync(() => void mutations++),
+          ),
+          RpcAuthorization.layer([AuthOrchestrationReadScope]),
+        ),
+      ),
+    );
+    expect(yield* client[WS_METHODS.promptStashSubscribe]({}).pipe(Stream.runCollect)).toEqual([
+      [],
+    ]);
+    expect(yield* client[WS_METHODS.promptStashGet]({ id: "saved" })).toBeNull();
+    const entry = {
+      id: "saved",
+      createdAt: "2026-10-21T00:00:00.000Z",
+      prompt: "Resume this later",
+      attachments: [],
+      droppedImageNames: [],
+    };
+    for (const denied of [
+      client[WS_METHODS.promptStashSave]({ entry }),
+      client[WS_METHODS.promptStashDelete]({ id: "saved" }),
+    ]) {
+      expect(yield* Effect.flip(denied)).toMatchObject({
+        _tag: "EnvironmentAuthorizationError",
+        requiredPermission: AuthOrchestrationOperateScope,
+      });
+    }
+    expect(mutations).toBe(0);
+  }).pipe(Effect.scoped),
+);

@@ -1,24 +1,31 @@
-import { BookmarkIcon, FileIcon, FileTextIcon } from "lucide-react";
+import { BookmarkIcon, CopyIcon, FileIcon, FileTextIcon, ImageIcon } from "lucide-react";
 import { memo, useEffect, useRef, useState, type RefObject } from "react";
+import type { EnvironmentId, PromptStashSummary } from "@t3tools/contracts";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 
 import { RelativeTime } from "../RelativeTime";
 import { cn } from "~/lib/utils";
-import { type PromptStashEntry } from "../../promptStashStore";
+import { useEnvironments } from "~/state/environments";
+import { Button } from "../ui/button";
 import { ComposerBanner } from "./ComposerBanner";
 
 const SNIPPET_MAX_CHARS = 90;
 
-function missingImageCount(entry: PromptStashEntry): number {
+export interface StashCopyTarget {
+  readonly id: EnvironmentId;
+  readonly label: string;
+}
+
+function missingImageCount(entry: PromptStashSummary): number {
   return entry.droppedImageNames.length + (entry.unreadableImageNames?.length ?? 0);
 }
 
-function stashEntrySnippet(entry: PromptStashEntry): string {
+function stashEntrySnippet(entry: PromptStashSummary): string {
   const trimmed = assistantCitationsToPlainText(entry.prompt).trim().replace(/\s+/g, " ");
   if (trimmed.length > 0) {
     return trimmed.length > SNIPPET_MAX_CHARS ? `${trimmed.slice(0, SNIPPET_MAX_CHARS)}…` : trimmed;
   }
-  const imageCount = entry.attachments.length + entry.droppedImageNames.length;
+  const imageCount = entry.imageCount + entry.droppedImageNames.length;
   const fileCount = entry.files?.length ?? 0;
   const attachmentCount = imageCount + fileCount;
   if (attachmentCount === 0) {
@@ -33,14 +40,26 @@ function stashEntrySnippet(entry: PromptStashEntry): string {
  * menu is open.
  */
 export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
-  entries: ReadonlyArray<PromptStashEntry>;
+  entries: ReadonlyArray<PromptStashSummary>;
   stashShortcutLabel: string | null;
   composerFormRef: RefObject<HTMLFormElement | null>;
-  onRestore: (entry: PromptStashEntry) => void;
-  onDelete: (entry: PromptStashEntry) => void;
+  /** The environment these prompts are saved on. Omit to hide copying to other environments. */
+  environmentId?: EnvironmentId;
+  onRestore: (entry: PromptStashSummary) => void;
+  onDelete: (entry: PromptStashSummary) => void;
+  onCopyAll?: (target: StashCopyTarget) => void;
   onClose: () => void;
 }) {
-  const { entries, stashShortcutLabel, composerFormRef, onRestore, onDelete, onClose } = props;
+  const {
+    entries,
+    stashShortcutLabel,
+    composerFormRef,
+    environmentId,
+    onRestore,
+    onDelete,
+    onCopyAll,
+    onClose,
+  } = props;
   const drawerRef = useRef<HTMLDivElement>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(entries[0]?.id ?? null);
 
@@ -182,28 +201,16 @@ export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
                   </button>
                 </ComposerBanner.Content>
                 <ComposerBanner.Actions>
-                  {entry.pendingImageCount ? (
-                    <span className="shrink-0 text-muted-foreground">
-                      saving {entry.pendingImageCount} image
-                      {entry.pendingImageCount === 1 ? "" : "s"}…
-                    </span>
-                  ) : missingImageCount(entry) > 0 ? (
+                  {missingImageCount(entry) > 0 ? (
                     <span className="shrink-0 text-warning-foreground">
                       {missingImageCount(entry)} image
                       {missingImageCount(entry) === 1 ? "" : "s"} dropped
                     </span>
                   ) : null}
-                  {entry.attachments.length > 0 ? (
-                    <span className="flex shrink-0 items-center -space-x-1.5">
-                      {entry.attachments.slice(0, 3).map((attachment) => (
-                        <img
-                          key={attachment.id}
-                          src={attachment.dataUrl}
-                          alt=""
-                          aria-hidden="true"
-                          className="size-4 rounded border border-border/70 object-cover"
-                        />
-                      ))}
+                  {entry.imageCount > 0 ? (
+                    <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
+                      <ImageIcon className="size-3" aria-hidden />
+                      {entry.imageCount}
                     </span>
                   ) : null}
                   {(entry.files?.length ?? 0) > 0 ? (
@@ -230,6 +237,62 @@ export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
           )}
         </ComposerBanner.Children>
       </ComposerBanner.Scroll>
+      {entries.length > 0 && environmentId && onCopyAll ? (
+        <StashCopyFooter environmentId={environmentId} onCopyAll={onCopyAll} />
+      ) : null}
     </ComposerBanner.Root>
   );
 });
+
+/**
+ * Pinned below the list so it stays reachable. Environments that cannot take
+ * copies stay listed, disabled, with the reason.
+ */
+function StashCopyFooter(props: {
+  environmentId: EnvironmentId;
+  onCopyAll: (target: StashCopyTarget) => void;
+}) {
+  const { environments } = useEnvironments();
+  const targets = environments.filter(
+    (environment) => environment.environmentId !== props.environmentId,
+  );
+  if (targets.length === 0) return null;
+  return (
+    <ComposerBanner.Row>
+      <ComposerBanner.Icon>
+        <CopyIcon />
+      </ComposerBanner.Icon>
+      <ComposerBanner.Content className="text-muted-foreground">Copy all to</ComposerBanner.Content>
+      <ComposerBanner.Actions>
+        {targets.map((environment) => {
+          const unavailableReason =
+            environment.connection.phase !== "connected" || environment.serverConfig === null
+              ? "Not connected"
+              : environment.serverConfig.environment.capabilities.promptStash !== true
+                ? "Server needs an update"
+                : null;
+          return (
+            <Button
+              key={environment.environmentId}
+              size="micro"
+              variant="outline"
+              disabled={unavailableReason !== null}
+              title={unavailableReason ?? undefined}
+              // Labelled buttons keep Enter from restoring the highlighted prompt.
+              aria-label={`Copy all saved prompts to ${environment.label}`}
+              // Keep focus in the composer, like the rest of the menu.
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() =>
+                props.onCopyAll({ id: environment.environmentId, label: environment.label })
+              }
+            >
+              {unavailableReason
+                ? `${environment.label} (${unavailableReason})`
+                : environment.label}
+            </Button>
+          );
+        })}
+      </ComposerBanner.Actions>
+    </ComposerBanner.Row>
+  );
+}

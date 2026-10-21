@@ -168,7 +168,17 @@ On web and desktop, press `Cmd+S` on macOS or `Ctrl+S` on Windows and Linux to s
 the current prompt and its attachments for later. Wait for uploads to finish first.
 With an empty composer, the same shortcut restores a single stash or opens the
 stash menu when there are several.
-Restoring copies the prompt into the composer; it stays saved until you delete it.
+Restoring copies the prompt into the composer; it stays saved until you delete it,
+and the menu stays open so you can add more. Typing closes it.
+
+Saved prompts are stored on the connected server and shared with other web and desktop
+clients of that environment. Prompts saved in this browser by an earlier version move
+to the server automatically, and stay in the browser until the server confirms each one.
+Prompts with uploaded files move to the server that holds the files.
+
+Saved prompts belong to one environment. To use them on another, open the stash menu and
+choose an environment under **Copy all to**. Prompts with uploaded files stay where they
+are, and copying again never creates duplicates.
 
 Stashes containing uploaded files must be restored in their original environment.
 Those files are retained for 24 hours. After an upload expires, restore the prompt

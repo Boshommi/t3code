@@ -26,6 +26,7 @@ import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
 import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { PromptStashEntry, PromptStashError, PromptStashSummary } from "./promptStash.ts";
 import {
   CodexAuthCallbackInput,
   CodexAuthCallbackState,
@@ -479,6 +480,10 @@ export const WS_METHODS = {
   serverCommitDesktopUpdate: "server.commitDesktopUpdate",
   serverUpsertKeybinding: "server.upsertKeybinding",
   serverRemoveKeybinding: "server.removeKeybinding",
+  promptStashSubscribe: "promptStash.subscribe",
+  promptStashGet: "promptStash.get",
+  promptStashSave: "promptStash.save",
+  promptStashDelete: "promptStash.delete",
   serverRunStorageCleanup: "server.runStorageCleanup",
   serverGetStorageCleanupReport: "server.getStorageCleanupReport",
   serverGetDatabaseStorage: "server.getDatabaseStorage",
@@ -591,6 +596,32 @@ const WsServerRemoveKeybindingRpc = Rpc.make(WS_METHODS.serverRemoveKeybinding, 
   payload: ServerRemoveKeybindingInput,
   success: ServerRemoveKeybindingResult,
   error: Schema.Union([KeybindingsConfigError, EnvironmentAuthorizationError]),
+});
+
+const WsPromptStashSubscribeRpc = Rpc.make(WS_METHODS.promptStashSubscribe, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(PromptStashSummary),
+  error: Schema.Union([PromptStashError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+const WsPromptStashGetRpc = Rpc.make(WS_METHODS.promptStashGet, {
+  payload: Schema.Struct({ id: Schema.String }),
+  success: Schema.NullOr(PromptStashEntry),
+  error: Schema.Union([PromptStashError, EnvironmentAuthorizationError]),
+});
+
+/** Entries are immutable: saving an existing or deleted id is a no-op, so retries are safe. */
+const WsPromptStashSaveRpc = Rpc.make(WS_METHODS.promptStashSave, {
+  payload: Schema.Struct({ entry: PromptStashEntry }),
+  success: Schema.Void,
+  error: Schema.Union([PromptStashError, EnvironmentAuthorizationError]),
+});
+
+const WsPromptStashDeleteRpc = Rpc.make(WS_METHODS.promptStashDelete, {
+  payload: Schema.Struct({ id: Schema.String }),
+  success: Schema.Void,
+  error: Schema.Union([PromptStashError, EnvironmentAuthorizationError]),
 });
 
 const WsServerProbeRpc = Rpc.make(WS_METHODS.serverProbe, {
@@ -1904,6 +1935,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerCommitDesktopUpdateRpc,
   WsServerUpsertKeybindingRpc,
   WsServerRemoveKeybindingRpc,
+  WsPromptStashSubscribeRpc,
+  WsPromptStashGetRpc,
+  WsPromptStashSaveRpc,
+  WsPromptStashDeleteRpc,
   WsServerRunStorageCleanupRpc,
   WsServerGetStorageCleanupReportRpc,
   WsServerGetDatabaseStorageRpc,
