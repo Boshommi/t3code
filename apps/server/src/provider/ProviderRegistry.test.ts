@@ -39,6 +39,7 @@ import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 
 import { checkCodexProviderStatus, type CodexAppServerProviderSnapshot } from "./CodexProvider.ts";
 import { checkClaudeProviderStatus } from "./ClaudeProvider.ts";
+import { SYNTHETIC_CLAUDE_MODEL_CATALOG } from "./ClaudeModelCatalog.testFixtures.ts";
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as AntigravityInstallation from "./AntigravityInstallation.ts";
 import * as ModelManifest from "./ModelManifest.ts";
@@ -2140,6 +2141,41 @@ it.layer(
   });
 
   describe("checkClaudeProviderStatus", () => {
+    it.effect("publishes models from a configured API alongside saved custom models", () =>
+      Effect.gen(function* () {
+        const manifestSlugs = SYNTHETIC_CLAUDE_MODEL_CATALOG.models.map((e) => e.model.slug);
+        for (const [discovered, expected] of [
+          [[{ id: "gateway-model" }], ["gateway-model"]],
+          [[], []],
+          [undefined, manifestSlugs],
+        ] as const) {
+          const status = yield* checkClaudeProviderStatus(
+            { ...defaultClaudeSettings, customModels: ["manual-model"] },
+            claudeCapabilities(),
+            {},
+            undefined,
+            SYNTHETIC_CLAUDE_MODEL_CATALOG,
+            undefined,
+            undefined,
+            () => Effect.succeed(discovered),
+          );
+          assert.strictEqual(status.status, "ready");
+          assert.deepStrictEqual(
+            status.models.map((model) => [model.slug, model.isCustom]),
+            [...expected.map((slug) => [slug, false]), ["manual-model", true]],
+          );
+        }
+      }).pipe(
+        Effect.provide(
+          layerMockSpawner((args) => {
+            const joined = args.join(" ");
+            if (joined === "--version") return { stdout: "99.0.0\n", stderr: "", code: 0 };
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+
     it.effect("reports a logged-out CLI as unauthenticated", () =>
       Effect.gen(function* () {
         // The capability probe resolves for a logged-out CLI, so `tokenSource:

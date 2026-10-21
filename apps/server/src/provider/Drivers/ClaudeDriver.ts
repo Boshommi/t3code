@@ -36,6 +36,7 @@ import {
 import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
 import * as ModelCatalog from "@t3tools/provider-core/server/ModelCatalog";
 import { resolveClaudeModelCatalog } from "../ClaudeModelCatalog.ts";
+import { discoverClaudeModels } from "../ClaudeModelDiscovery.ts";
 import {
   defaultProviderContinuationIdentity,
   type ProviderDriver,
@@ -271,6 +272,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
                   Effect.provideService(HttpClient.HttpClient, httpClient),
                   Effect.provideService(FileSystem.FileSystem, fileSystem),
                   Effect.provideService(Path.Path, path),
+                ),
+              () =>
+                discoverClaudeModels(effectiveConfig, processEnv, stateDir).pipe(
+                  Effect.provideService(HttpClient.HttpClient, httpClient),
+                  Effect.provideService(FileSystem.FileSystem, fileSystem),
+                  Effect.provideService(Path.Path, path),
+                  Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
                 ),
             ),
           ),

@@ -52,6 +52,7 @@ import {
   resolveClaudeModelsForVersion,
   resolveClaudeUpdateRequiredModels,
 } from "./ClaudeModelCatalog.ts";
+import { applyDiscoveredClaudeModels, type DiscoveredClaudeModel } from "./ClaudeModelDiscovery.ts";
 
 const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
@@ -484,6 +485,8 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   /** Shared with the adapter so turn events reuse the scoped-bucket names this probe saw. */
   scopedLimitNames?: Ref.Ref<ClaudeScopedLimitNames>,
   resolveResetCredits?: (version: string) => Effect.Effect<ServerProviderResetCredits | undefined>,
+  /** Models served by a configured API; `undefined` keeps the manifest's list. */
+  resolveModels?: () => Effect.Effect<ReadonlyArray<DiscoveredClaudeModel> | undefined>,
 ): Effect.fn.Return<
   ServerProviderDraft,
   never,
@@ -582,13 +585,17 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     });
   }
 
+  const availableCatalog = applyDiscoveredClaudeModels(
+    modelCatalog,
+    resolveModels ? yield* resolveModels() : undefined,
+  );
   const models = providerModelsFromSettings(
-    resolveClaudeModelsForVersion(modelCatalog, parsedVersion),
+    resolveClaudeModelsForVersion(availableCatalog, parsedVersion),
     claudeSettings.customModels,
     DEFAULT_CLAUDE_MODEL_CAPABILITIES,
   );
-  const updateRequiredModels = resolveClaudeUpdateRequiredModels(modelCatalog, parsedVersion);
-  const versionUpgradeMessage = formatClaudeVersionUpgradeMessage(modelCatalog, parsedVersion);
+  const updateRequiredModels = resolveClaudeUpdateRequiredModels(availableCatalog, parsedVersion);
+  const versionUpgradeMessage = formatClaudeVersionUpgradeMessage(availableCatalog, parsedVersion);
 
   const probeResult = resolveCapabilities
     ? yield* resolveCapabilities(claudeSettings).pipe(Effect.result)

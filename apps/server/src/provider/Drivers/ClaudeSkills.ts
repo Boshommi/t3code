@@ -124,7 +124,7 @@ function claudeManagedSettingsPath(
   return "/etc/claude-code/managed-settings.json";
 }
 
-function skillOverrideSettingsPaths(
+export function skillOverrideSettingsPaths(
   path: Path.Path,
   configDirPath: string,
   cwd: string | undefined,
@@ -147,7 +147,7 @@ function skillOverrideSettingsPaths(
   ];
 }
 
-const findRepositoryRoot = Effect.fn("findRepositoryRoot")(function* (
+export const findRepositoryRoot = Effect.fn("findRepositoryRoot")(function* (
   cwd: string,
 ): Effect.fn.Return<string | undefined, never, FileSystem.FileSystem | Path.Path> {
   const fileSystem = yield* FileSystem.FileSystem;
