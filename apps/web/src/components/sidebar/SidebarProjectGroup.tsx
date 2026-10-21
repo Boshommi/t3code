@@ -316,7 +316,7 @@ export function SidebarProjectGroup(props: {
         {props.project ? (
           <span
             className={cn(
-              "flex shrink-0 items-center opacity-0 transition-opacity focus-within:opacity-100 group-any-hover/project-header:opacity-100",
+              "flex shrink-0 items-center opacity-0 transition-opacity focus-within:opacity-100 group-any-hover/project-header:opacity-100 pointer-coarse:opacity-100",
               props.colorPickerOpen && "opacity-100",
             )}
           >

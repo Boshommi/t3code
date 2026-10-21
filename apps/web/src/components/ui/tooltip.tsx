@@ -46,6 +46,18 @@ type TooltipHoverTracker = ReturnType<typeof createTooltipHoverTracker>;
 const TooltipHoverContext = createContext<TooltipActionsRef | null>(null);
 const TooltipScrollContext = createContext<TooltipHoverTracker | null>(null);
 
+// Base UI tooltips only open on mouse hover or keyboard focus, which leaves
+// touch users without them. A tap on a trigger that has no action of its own
+// (a status icon, a timestamp, truncated text) toggles the tooltip instead;
+// buttons and links keep their tap for their action.
+const TooltipTapContext = createContext<{
+  open: boolean;
+  setOpen: (open: boolean) => void;
+} | null>(null);
+
+const TAP_ACTION_SELECTOR =
+  "button, a[href], input, select, textarea, [role=button], [role=link], [role=menuitem], [role=tab], [role=checkbox], [role=switch]";
+
 function TooltipScrollDismissArea({ onScrollCapture, ...props }: ComponentProps<"div">) {
   const [tracker] = useState(createTooltipHoverTracker);
   return (
@@ -61,41 +73,78 @@ function TooltipScrollDismissArea({ onScrollCapture, ...props }: ComponentProps<
   );
 }
 
-function Tooltip<Payload>(props: TooltipPrimitive.Root.Props<Payload>) {
+function Tooltip<Payload>({
+  open: openProp,
+  defaultOpen = false,
+  onOpenChange,
+  ...props
+}: TooltipPrimitive.Root.Props<Payload>) {
   const tracker = use(TooltipScrollContext);
   const localActionsRef = useRef<TooltipPrimitive.Root.Actions | null>(null);
   const actionsRef = props.actionsRef ?? localActionsRef;
+  const [openState, setOpenState] = useState(defaultOpen);
   useEffect(() => () => tracker?.release(actionsRef), [actionsRef, tracker]);
+  // Callers that control `open` own it, so tap-to-open stays out of their way.
+  const tap = openProp === undefined ? { open: openState, setOpen: setOpenState } : null;
 
-  if (!tracker) return <TooltipPrimitive.Root {...props} />;
+  const root = (
+    <TooltipPrimitive.Root
+      {...props}
+      actionsRef={actionsRef}
+      open={openProp ?? openState}
+      onOpenChange={(open, details) => {
+        onOpenChange?.(open, details);
+        if (details.isCanceled) return;
+        setOpenState(open);
+        if (!open) tracker?.release(actionsRef);
+      }}
+    />
+  );
   return (
-    <TooltipHoverContext value={actionsRef}>
-      <TooltipPrimitive.Root
-        {...props}
-        actionsRef={actionsRef}
-        onOpenChange={(open, details) => {
-          props.onOpenChange?.(open, details);
-          if (!open && !details.isCanceled) tracker.release(actionsRef);
-        }}
-      />
-    </TooltipHoverContext>
+    <TooltipTapContext value={tap}>
+      {tracker ? <TooltipHoverContext value={actionsRef}>{root}</TooltipHoverContext> : root}
+    </TooltipTapContext>
   );
 }
 
 function TooltipTrigger(props: TooltipPrimitive.Trigger.Props) {
   const tracker = use(TooltipScrollContext);
   const actionsRef = use(TooltipHoverContext);
-  if (!tracker || !actionsRef) {
-    return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
-  }
+  const tap = use(TooltipTapContext);
+  // Base UI closes an open tooltip on pointerdown, so the toggle reads the
+  // state from before that press.
+  const pressRef = useRef<{ touch: boolean; wasOpen: boolean } | null>(null);
+  const tapProps: Partial<TooltipPrimitive.Trigger.Props> = tap
+    ? {
+        onPointerDown: (event) => {
+          pressRef.current = { touch: event.pointerType === "touch", wasOpen: tap.open };
+          props.onPointerDown?.(event);
+        },
+        onClick: (event) => {
+          props.onClick?.(event);
+          const press = pressRef.current;
+          pressRef.current = null;
+          if (!press?.touch || event.defaultPrevented) return;
+          if (event.currentTarget.matches(TAP_ACTION_SELECTOR)) return;
+          tap.setOpen(!press.wasOpen);
+        },
+      }
+    : {};
+  const hoverProps: Partial<TooltipPrimitive.Trigger.Props> =
+    tracker && actionsRef
+      ? {
+          onMouseEnter: (event) => {
+            props.onMouseEnter?.(event);
+            tracker.hover(event.currentTarget, actionsRef);
+          },
+        }
+      : {};
   return (
     <TooltipPrimitive.Trigger
       data-slot="tooltip-trigger"
       {...props}
-      onMouseEnter={(event) => {
-        props.onMouseEnter?.(event);
-        tracker.hover(event.currentTarget, actionsRef);
-      }}
+      {...tapProps}
+      {...hoverProps}
     />
   );
 }

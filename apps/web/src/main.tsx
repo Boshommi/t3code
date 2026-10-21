@@ -14,6 +14,7 @@ import {
 } from "./lib/windowControlsOverlay";
 import { AppRoot } from "./AppRoot";
 import { clearChunkReloadGuard, reloadOnceForChunkLoadError } from "./lib/chunkReloadGuard";
+import { installTouchContextMenu } from "./lib/touchContextMenu";
 
 prepareProviderAuthDelivery();
 
@@ -21,6 +22,8 @@ prepareProviderAuthDelivery();
 const history = isElectron ? createHashHistory() : createBrowserHistory();
 
 const router = getRouter(history);
+
+installTouchContextMenu();
 
 if (isElectron) {
   syncDocumentElectronPlatformClasses(navigator.platform);

@@ -1338,7 +1338,7 @@ function UsageEnvironmentFilter({
             />
           ) : (
             <ChevronDownIcon
-              className="size-3.5 opacity-0 transition-opacity group-hover/usage-environment:opacity-100 group-focus-visible/usage-environment:opacity-100 group-data-popup-open/usage-environment:opacity-100"
+              className="size-3.5 opacity-0 transition-opacity group-hover/usage-environment:opacity-100 group-focus-visible/usage-environment:opacity-100 group-data-popup-open/usage-environment:opacity-100 pointer-coarse:opacity-100"
               aria-hidden
             />
           )}

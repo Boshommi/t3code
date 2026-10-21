@@ -65,6 +65,9 @@ saved on this device only.
 Drag and drop is off while threads are grouped, so use the thread actions instead. To switch
 back to a single list, use the list button in the sidebar header.
 
+On phones and tablets, the open thread's row shows its actions. Long-press any other row or a
+project header to open its menu.
+
 ## Pin and reorder threads
 
 Pin a thread from its menu to keep it above your active work.

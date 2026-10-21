@@ -1475,7 +1475,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
                       type="button"
                       aria-label="Discard draft"
                       onClick={handleDiscard}
-                      className="pointer-events-none inline-flex cursor-pointer items-center rounded-md bg-transparent px-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100"
+                      className="pointer-events-none inline-flex cursor-pointer items-center rounded-md bg-transparent px-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:opacity-100"
                     >
                       <XIcon className="size-3" />
                     </button>
@@ -2018,6 +2018,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     props.sortable?.isDragging &&
       "bg-sidebar bg-linear-to-b from-sidebar-row-active to-sidebar-row-active text-sidebar-foreground opacity-100 shadow-lg",
   );
+  // Touch never hovers, so the open thread's row shows its hover actions in
+  // place of the resting label. Other rows reach them through the context
+  // menu, which a long press opens.
+  const touchHideRestingClassName =
+    props.isActive && "pointer-coarse:absolute pointer-coarse:right-0 pointer-coarse:opacity-0";
+  const touchShowActionsClassName =
+    props.isActive &&
+    "pointer-coarse:pointer-events-auto pointer-coarse:static pointer-coarse:opacity-100";
   const activeMarker = props.isActive ? (
     <span
       aria-hidden
@@ -2307,6 +2315,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   "pointer-events-none transition-opacity",
                   hasHoverActions &&
                     "group-any-hover/sidebar-row:absolute group-any-hover/sidebar-row:right-0 group-any-hover/sidebar-row:opacity-0 group-has-[:focus-visible]/sidebar-row:absolute group-has-[:focus-visible]/sidebar-row:right-0 group-has-[:focus-visible]/sidebar-row:opacity-0",
+                  hasHoverActions && touchHideRestingClassName,
                   snoozeMenuOpen && "absolute right-0 opacity-0",
                 )}
               >
@@ -2316,6 +2325,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 <span
                   className={cn(
                     "pointer-events-none absolute inset-y-0 right-0 -mr-1 flex items-stretch opacity-0 transition-opacity has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:static has-[:focus-visible]:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:static group-any-hover/sidebar-row:opacity-100",
+                    touchShowActionsClassName,
                     snoozeMenuOpen && "pointer-events-auto static opacity-100",
                   )}
                 >
@@ -2385,6 +2395,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   }
 
   if (variant === "slim") {
+    const slimTouchActionClassName =
+      props.isActive &&
+      cn(
+        "pointer-coarse:pointer-events-auto pointer-coarse:opacity-100",
+        isWoke && "pointer-coarse:static",
+      );
     return (
       <li
         data-thread-item={threadKey}
@@ -2448,6 +2464,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   className={cn(
                     "inline-flex justify-end tabular-nums text-secondary-label transition-opacity",
                     !isWoke && "group-any-hover/sidebar-row:opacity-0",
+                    !isWoke &&
+                      props.isActive &&
+                      (variantAction === "unsnooze"
+                        ? props.snoozeSupported
+                        : props.settlementSupported) &&
+                      "pointer-coarse:opacity-0",
                   )}
                 >
                   {variantAction === "unsnooze" && props.snoozeWakeLabelText !== null ? (
@@ -2493,6 +2515,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                       className={cn(
                         "pointer-events-none absolute inset-y-0 right-0 -mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
                         isWoke && "group-any-hover/sidebar-row:static",
+                        slimTouchActionClassName,
                       )}
                     >
                       <AlarmClockOffIcon className="mb-px size-3" />
@@ -2510,6 +2533,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                           className={cn(
                             "pointer-events-none absolute inset-y-0 right-0 -mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
                             isWoke && "group-any-hover/sidebar-row:static",
+                            slimTouchActionClassName,
                           )}
                         />
                       }
@@ -2527,6 +2551,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                     className={cn(
                       "pointer-events-none absolute inset-y-0 right-0 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-2 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100",
                       isWoke && "group-any-hover/sidebar-row:static",
+                      slimTouchActionClassName,
                     )}
                   >
                     <CheckIcon className="size-3" />
@@ -2612,6 +2637,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                         ? "pointer-events-auto"
                         : "pointer-events-none group-has-[:focus-visible]/sidebar-status-slot:absolute group-has-[:focus-visible]/sidebar-status-slot:right-0 group-has-[:focus-visible]/sidebar-status-slot:opacity-0 group-any-hover/sidebar-row:absolute group-any-hover/sidebar-row:right-0 group-any-hover/sidebar-row:opacity-0",
                       "flex items-center self-center justify-self-end tabular-nums text-secondary-label transition-opacity",
+                      !isWokeStatus &&
+                        (props.settlementSupported || showSnoozeButton || hasUnsentDraft) &&
+                        touchHideRestingClassName,
                       snoozeMenuOpen && "pointer-events-none absolute right-0 opacity-0",
                     )}
                   >
@@ -2684,6 +2712,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                         // once the pointer moves away (e.g. after a failed
                         // settle) instead of cross-fading back.
                         "pointer-events-none absolute inset-y-0 right-0 flex items-stretch opacity-0 transition-opacity has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:static has-[:focus-visible]:opacity-100 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:static group-any-hover/sidebar-row:opacity-100",
+                        touchShowActionsClassName,
                         snoozeMenuOpen && "pointer-events-auto static opacity-100",
                       )}
                     >
