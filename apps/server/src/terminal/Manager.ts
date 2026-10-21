@@ -201,10 +201,19 @@ export class TerminalManager extends Context.Service<
      */
     readonly close: (input: TerminalCloseInput) => Effect.Effect<void, TerminalError>;
 
+    /**
+     * Closes the thread's shells that sit at a prompt, keeping their history so
+     * reopening the same terminal restores its scrollback. With `idleSinceMs`,
+     * a terminal with output or a resize after that instant stays open too.
+     */
     readonly closeIdle: (input: {
       readonly threadId: string;
       readonly terminalId?: string;
+      readonly idleSinceMs?: number;
     }) => Effect.Effect<void>;
+
+    /** Lightweight metadata for every live session. */
+    readonly list: () => Effect.Effect<ReadonlyArray<TerminalSummary>>;
 
     readonly subscribe: (
       listener: (event: TerminalEvent) => Effect.Effect<void>,
@@ -3331,7 +3340,8 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           (session): session is TerminalSessionState & { pid: number } =>
             session.status === "running" &&
             Number.isInteger(session.pid) &&
-            (input.terminalId === undefined || session.terminalId === input.terminalId),
+            (input.terminalId === undefined || session.terminalId === input.terminalId) &&
+            (input.idleSinceMs === undefined || Date.parse(session.updatedAt) <= input.idleSinceMs),
         );
         if (running.length === 0) return;
         const marks = new Map(
@@ -3374,6 +3384,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     restart,
     close,
     closeIdle,
+    list: readAllTerminalMetadata,
     subscribe,
     subscribeMetadata,
   });

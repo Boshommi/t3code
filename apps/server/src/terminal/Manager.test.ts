@@ -690,6 +690,40 @@ it.layer(
     }),
   );
 
+  it.effect("closes a shell quiet since the given instant and restores its scrollback", () =>
+    Effect.gen(function* () {
+      const ptyAdapter = new FakePtyAdapter();
+      const { manager } = yield* createManager(5, {
+        ptyAdapter,
+        subprocessPollIntervalMs: 60_000,
+        subprocessInspector: () =>
+          Effect.succeed({ hasRunningSubprocess: false, childCommand: null, processIds: [] }),
+      });
+      const outputSeen = yield* Deferred.make<void>();
+      const unsubscribeOutput = yield* manager.subscribe((event) =>
+        event.type === "output"
+          ? Deferred.succeed(outputSeen, undefined).pipe(Effect.asVoid)
+          : Effect.void,
+      );
+      yield* Effect.addFinalizer(() => Effect.sync(unsubscribeOutput));
+      yield* manager.open(openInput());
+      const [shell] = ptyAdapter.processes;
+      shell!.emitData("before release\n");
+      yield* Deferred.await(outputSeen);
+      const [summary] = yield* manager.list();
+      const lastActivityMs = Date.parse(summary!.updatedAt);
+
+      yield* manager.closeIdle({ threadId: "thread-1", idleSinceMs: lastActivityMs - 1 });
+      expect(shell!.killed).toBe(false);
+
+      yield* manager.closeIdle({ threadId: "thread-1", idleSinceMs: lastActivityMs });
+      expect(shell!.killed).toBe(true);
+
+      const reopened = yield* manager.open(openInput());
+      expect(reopened.history).toContain("before release");
+    }),
+  );
+
   it.effect("caps incrementally appended history without losing partial or empty lines", () =>
     Effect.gen(function* () {
       const { manager, ptyAdapter } = yield* createManager(3);

@@ -131,8 +131,13 @@ without deleting the conversation. **Un-settle thread** restores it to active wo
 and prevents automatic settlement until new activity resumes the usual rules.
 Manually settling an idle thread dismisses unanswered async questions without
 sending an answer or restarting the agent. Settling also closes the thread's
-terminals that wait at an idle prompt, and keeps their output. A terminal that
-runs a command, such as a dev server, stays open.
+browser tabs and its terminals that wait at an idle prompt, and keeps their
+output. A terminal that runs a command, such as a dev server, stays open.
+
+A thread that has been quiet for five minutes, with no agent work and no recent
+visit, frees resources before it settles: terminals at an idle prompt with no
+output for five minutes close, and so do desktop browser tabs that have not
+navigated for five minutes.
 
 To reclaim disk space from settled work, turn on **Run in the thread's worktree when the
 thread settles** for one of the project's actions, or set `"runOnSettle": true` on a

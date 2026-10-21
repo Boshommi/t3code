@@ -30,6 +30,7 @@ import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 
 import * as GitManager from "../git/GitManager.ts";
+import * as PreviewManager from "../preview/Manager.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as ServerActivation from "../serverActivation.ts";
@@ -502,6 +503,7 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
   const invalidatedCwds = yield* Ref.make<ReadonlyArray<string>>([]);
   const domainEvents = yield* PubSub.unbounded<OrchestrationV2DomainEvent>();
   const closedIdle = yield* Queue.unbounded<{ readonly threadId: string }>();
+  const closedPreviews = yield* Queue.unbounded<{ readonly threadId: string }>();
   const scriptRuns =
     yield* Queue.unbounded<ProjectSetupScriptRunner.ProjectSetupScriptRunnerInput>();
 
@@ -592,6 +594,9 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
       closeIdle: (input) =>
         Queue.offer(closedIdle, input).pipe(Effect.andThen(options.onCloseIdle?.() ?? Effect.void)),
     }),
+    Layer.mock(PreviewManager.PreviewManager)({
+      close: (input) => Queue.offer(closedPreviews, input),
+    }),
     Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({
       runForThread: (input) =>
         Queue.offer(scriptRuns, input).pipe(
@@ -629,6 +634,7 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
     summaryRecovery,
     invalidatedCwds,
     closedIdle,
+    closedPreviews,
     scriptRuns,
     publishEvent: (event: OrchestrationV2DomainEvent) => PubSub.publish(domainEvents, event),
     updateSettings,
@@ -947,6 +953,28 @@ describe("ThreadSettlementServiceV2 terminals", () => {
           yield* fixture.publishEvent(settledEvent(settled));
           yield* fixture.publishEvent(settledEvent(marker));
           assert.deepStrictEqual(yield* Queue.take(fixture.closedIdle), { threadId: marker.id });
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
+  it.effect("closes a settled thread's previews along with its idle shells", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const settled = appThread("settled-thread", "settled");
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([]),
+          currentThreads: [settled],
+        });
+
+        yield* Effect.gen(function* () {
+          const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
+          yield* startHarness(service, fixture.activation, fixture.snapshotReads);
+          yield* fixture.publishEvent(settledEvent(settled));
+          assert.deepStrictEqual(yield* Queue.take(fixture.closedPreviews), {
+            threadId: settled.id,
+          });
+          assert.deepStrictEqual(yield* Queue.take(fixture.closedIdle), { threadId: settled.id });
         }).pipe(Effect.provide(fixture.layer));
       }),
     ),

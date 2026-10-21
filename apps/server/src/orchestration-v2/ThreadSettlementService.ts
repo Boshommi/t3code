@@ -20,6 +20,7 @@ import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import * as GitManager from "../git/GitManager.ts";
+import * as PreviewManager from "../preview/Manager.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -298,6 +299,7 @@ export const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const fileSystem = yield* FileSystem.FileSystem;
   const terminals = yield* TerminalManager.TerminalManager;
+  const previews = yield* PreviewManager.PreviewManager;
   const projectScripts = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
   // Settling a settled thread re-emits thread.settled with the same settledAt,
   // so this keeps the settle action to one run per settlement.
@@ -543,13 +545,20 @@ export const make = Effect.gen(function* () {
     runSweep(null, threadId),
   );
 
-  // Then the project's settle script runs in the thread's own worktree; a
-  // thread in the shared checkout skips it, because other threads may still be
-  // working there.
+  // A settled thread lets go of its browser tabs and idle shells. Then the
+  // project's settle script runs in the thread's own worktree; a thread in the
+  // shared checkout skips it, because other threads may still be working there.
   const cleanUpSettledThread = Effect.fn("ThreadSettlementServiceV2.cleanUpSettledThread")(
     function* (threadId: ThreadId) {
       const settled = yield* projections.getThread(threadId);
       if (settled.settledOverride !== "settled") return;
+      yield* previews
+        .close({ threadId })
+        .pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("closing a settled thread's previews failed", { threadId, error }),
+          ),
+        );
       yield* terminals.closeIdle({ threadId });
       const worktreePath = settled.worktreePath;
       if (worktreePath === null || !(yield* fileSystem.exists(worktreePath))) return;

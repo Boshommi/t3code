@@ -59,6 +59,8 @@ export class PreviewManager extends Context.Service<
     readonly refresh: (input: PreviewRefreshInput) => Effect.Effect<void, PreviewError>;
     readonly close: (input: PreviewCloseInput) => Effect.Effect<void, PreviewError>;
     readonly list: (input: PreviewListInput) => Effect.Effect<PreviewListResult>;
+    /** Every open tab across threads, for server-side lifecycle sweeps. */
+    readonly listAll: Effect.Effect<ReadonlyArray<PreviewSessionSnapshot>>;
     readonly events: Stream.Stream<PreviewEvent>;
     readonly subscribeEvents: Effect.Effect<PubSub.Subscription<PreviewEvent>, never, Scope.Scope>;
   }
@@ -436,6 +438,10 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     },
   );
 
+  const listAll: PreviewManager["Service"]["listAll"] = SynchronizedRef.get(stateRef).pipe(
+    Effect.map((state) => Array.from(state.sessions.values(), (session) => session.snapshot)),
+  );
+
   const requestReveal: PreviewManager["Service"]["requestReveal"] = Effect.fn(
     "PreviewManager.requestReveal",
   )(function* (input) {
@@ -477,6 +483,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     refresh,
     close,
     list,
+    listAll,
     events,
     subscribeEvents: PubSub.subscribe(eventsPubSub),
   });
