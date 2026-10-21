@@ -85,7 +85,7 @@ export function resolveBrowserNavigationTarget(
  * address (WSL NAT mode binds the distro IP), but a dev server bound to
  * loopback only answers on `localhost` there.
  */
-const reachesEnvironmentLoopback = (target: ConnectionTarget): boolean =>
+export const reachesEnvironmentLoopback = (target: ConnectionTarget): boolean =>
   isElectron &&
   (target._tag === "PrimaryConnectionTarget" || isDesktopLocalConnectionTarget(target));
 

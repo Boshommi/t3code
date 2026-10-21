@@ -56,6 +56,7 @@ import {
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
+  ArrowLeftRightIcon,
   ChartNoAxesColumnIcon,
   CheckIcon,
   ChevronRightIcon,
@@ -147,6 +148,7 @@ import {
 } from "../lib/projectPaths";
 import { onOpenCommandPalette } from "../commandPaletteBus";
 import { isPreviewFocused } from "../lib/previewFocus";
+import { canForwardPorts, openPortForwardsDialog } from "../browser/portForwards";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import {
   PULL_REQUESTS_PANEL_REF,
@@ -1773,6 +1775,20 @@ function OpenCommandPaletteDialog(props: {
           },
         });
         if (refreshed._tag === "Failure") throw squashAtomCommandFailure(refreshed);
+      },
+    });
+  }
+
+  if (activeThread !== null && canForwardPorts(activeThread.environmentId)) {
+    const { environmentId } = activeThread;
+    actionItems.push({
+      kind: "action",
+      value: "action:forward-ports",
+      searchTerms: ["forward port", "ports", "port forwarding", "localhost", "tunnel"],
+      title: "Forward ports…",
+      icon: <ArrowLeftRightIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        openPortForwardsDialog(environmentId);
       },
     });
   }

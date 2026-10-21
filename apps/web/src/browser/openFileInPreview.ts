@@ -17,6 +17,7 @@ import { AsyncResult } from "effect/reactivity";
 
 import { resolveAssetUrl } from "~/assets/assetUrls";
 import { isPreviewAvailableFor, previewRuntimeFor } from "~/browser/previewRuntime";
+import { desktopTabLinkUrl } from "~/browser/portForwards";
 import {
   applyPreviewServerSnapshot,
   readThreadPreviewState,
@@ -79,7 +80,10 @@ export async function openUrlInPreview<E>(input: {
     environmentId: input.threadRef.environmentId,
     input: {
       threadId: input.threadRef.threadId,
-      url: input.url,
+      url:
+        runtime === "server"
+          ? input.url
+          : await desktopTabLinkUrl(input.threadRef.environmentId, input.url),
       viewport: browserDefaultOpenViewport(defaults),
       profileId: input.profileId ?? browserDefaultOpenProfileId(defaults),
       ...(runtime === undefined ? {} : { runtime }),

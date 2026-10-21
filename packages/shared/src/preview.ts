@@ -55,6 +55,26 @@ export function isLoopbackHost(host: string): boolean {
   return false;
 }
 
+/**
+ * WebSocket route on the environment server that carries one TCP connection
+ * to its loopback, `?port=N`. Desktop port forwards dial it per connection.
+ */
+export const PREVIEW_TUNNEL_PATH = "/api/preview-tunnel";
+
+/** The TCP port an http(s) URL on a loopback host points at, or null. */
+export function loopbackUrlPort(rawUrl: string): number | null {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  if (!isLoopbackHost(url.hostname)) return null;
+  if (url.port !== "") return Number(url.port);
+  return url.protocol === "https:" ? 443 : 80;
+}
+
 export class PreviewUrlNormalizationError extends Schema.TaggedError<PreviewUrlNormalizationError>()(
   "PreviewUrlNormalizationError",
   {

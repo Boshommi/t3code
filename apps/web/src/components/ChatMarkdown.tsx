@@ -239,6 +239,7 @@ import {
   BrowserSettingsReadError,
 } from "../browser/openFileInPreview";
 import { resolveLinkTarget } from "../browser/browserLinkTarget";
+import { openUrlInSystemBrowser, urlNeedsPortForward } from "../browser/portForwards";
 import { PullRequestLinkPreview } from "./pullRequest/PullRequestLinkPreview";
 
 const isAssetNotFoundError = Schema.is(AssetWorkspaceAssetNotFoundError);
@@ -3167,18 +3168,17 @@ const CHAT_MARKDOWN_COMPONENTS = {
             ) {
               // Chromium turns an Option/Alt-click into a download that never reaches the
               // shell. On desktop, open the link here while the key is still down, so link
-              // routers such as Finicky can still read it.
-              if (isElectron && event.altKey) {
+              // routers such as Finicky can still read it. A remote environment's localhost
+              // link needs its port forwarded before the shell opens it.
+              if (isElectron && (event.altKey || urlNeedsPortForward(environmentId, href))) {
                 event.preventDefault();
                 event.stopPropagation();
-                void readLocalApi()
-                  ?.shell.openExternal(href)
-                  .catch((cause) =>
-                    reportMarkdownActionFailure(
-                      { operation: "open-link-external", target: href },
-                      cause,
-                    ),
-                  );
+                void openUrlInSystemBrowser(environmentId, href).catch((cause) =>
+                  reportMarkdownActionFailure(
+                    { operation: "open-link-external", target: href },
+                    cause,
+                  ),
+                );
               }
               return;
             }
@@ -3191,7 +3191,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
                 result.cause,
               );
               if (squashAtomCommandFailure(result) instanceof BrowserSettingsReadError) return;
-              void readLocalApi()?.shell.openExternal(href);
+              void openUrlInSystemBrowser(environmentId, href).catch(() => undefined);
             });
           }}
           onContextMenu={(event) => {
@@ -3222,7 +3222,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
                   );
                 }
               },
-              openExternal: (target) => api.shell.openExternal(target),
+              openExternal: (target) => openUrlInSystemBrowser(environmentId, target),
               copyLink: (target) => writeTextToClipboard(target, "link"),
               updateThreadLink: updateThreadPullRequestLink,
               reportFailure: (operation, cause) => {

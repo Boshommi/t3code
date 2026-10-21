@@ -2,7 +2,7 @@ import * as Schema from "effect/Schema";
 import type { PreviewCaptureFailureEncoded } from "./previewCapture.ts";
 
 import { SnapShotSource } from "./chatAttachment.ts";
-import { EnvironmentId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { EnvironmentId, PortSchema, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { BrowserProfileId } from "./browserProfile.ts";
 import type {
   BrowserImportResult,
@@ -977,6 +977,27 @@ export const DesktopPreviewNavigateInputSchema = Schema.Struct({
   url: Schema.String,
 });
 
+export const DesktopPortForwardTargetSchema = Schema.Struct({
+  environmentId: EnvironmentId,
+  remotePort: PortSchema,
+});
+
+export const DesktopPortForwardInputSchema = Schema.Struct({
+  ...DesktopPortForwardTargetSchema.fields,
+  /**
+   * The environment's `/api/preview-tunnel` WebSocket URL with a `wsTicket`.
+   * Tickets expire, so each call replaces the environment's URL.
+   */
+  tunnelUrl: Schema.String,
+});
+
+export const DesktopPortForwardSchema = Schema.Struct({
+  ...DesktopPortForwardTargetSchema.fields,
+  /** Port on this computer's 127.0.0.1; the remote port unless that was taken. */
+  localPort: PortSchema,
+});
+export type DesktopPortForward = typeof DesktopPortForwardSchema.Type;
+
 export const DesktopPreviewConfigInputSchema = Schema.Struct({
   environmentId: EnvironmentId,
   /**
@@ -1187,6 +1208,14 @@ export interface DesktopPreviewBridge {
     environmentId: EnvironmentId,
     profileId?: string,
   ) => Promise<DesktopPreviewWebviewConfig>;
+  /**
+   * Listens on this computer's loopback and tunnels each connection to a
+   * remote environment's localhost port. Calling it again for a running
+   * forward only refreshes the environment's tunnel ticket.
+   */
+  forwardPort: (input: typeof DesktopPortForwardInputSchema.Type) => Promise<DesktopPortForward>;
+  stopPortForward: (input: typeof DesktopPortForwardTargetSchema.Type) => Promise<void>;
+  listPortForwards: () => Promise<ReadonlyArray<DesktopPortForward>>;
   listBrowserImportSources: () => Promise<ReadonlyArray<BrowserImportSource>>;
   importBrowserCookies: (input: {
     readonly environmentId: EnvironmentId;

@@ -40,7 +40,12 @@ import {
   updatePreviewServerSnapshot,
   useThreadPreviewState,
 } from "~/previewStateStore";
-import { resolveDiscoveredServerUrl } from "~/browser/browserTargetResolver";
+import {
+  environmentUrlFor,
+  forwardEnvironmentUrl,
+  openUrlInSystemBrowser,
+  resolveDesktopTabUrl,
+} from "~/browser/portForwards";
 import { useEnvironmentSupportsServerBrowser } from "~/state/entities";
 import {
   useEnvironment,
@@ -297,16 +302,26 @@ export function PreviewView({
       const resolved =
         isServerTab || !previewBridge
           ? normalizePreviewUrl(next)
-          : resolveDiscoveredServerUrl(threadRef.environmentId, next);
+          : await resolveDesktopTabUrl(threadRef.environmentId, next);
       if (await navigateToResolvedUrl(resolved)) {
         recordVisitForThread(threadRef, next);
       }
     } catch {}
   };
 
+  const refreshDesktopTab = async (bridge: NonNullable<typeof previewBridge>, tab: string) => {
+    // Forwards end with the app, so a restored remote `localhost` page fails
+    // to load until its forward is back. A page that loads is left alone.
+    const forwarded =
+      url && isUnreachable
+        ? await forwardEnvironmentUrl(threadRef.environmentId, url).catch(() => null)
+        : null;
+    if (forwarded && forwarded !== url) await bridge.navigate(tab, forwarded);
+    else await bridge.refresh(tab);
+  };
   const handleRefresh = () => {
     if (isServerTab) serverSurfaceRef.current?.reload();
-    else if (previewBridge && runtimeTabId) void previewBridge.refresh(runtimeTabId);
+    else if (previewBridge && runtimeTabId) void refreshDesktopTab(previewBridge, runtimeTabId);
   };
 
   const adjustServerTab = async (change: Omit<PreviewAdjustInput, "threadId" | "tabId">) => {
@@ -416,7 +431,13 @@ export function PreviewView({
 
   const handleOpenInBrowser = () => {
     if (!localApi || !url) return;
-    void localApi.shell.openExternal(url).catch(() => undefined);
+    void openUrlInSystemBrowser(threadRef.environmentId, url).catch((error: unknown) => {
+      toastManager.add({
+        type: "error",
+        title: "Unable to open in browser",
+        description: error instanceof Error ? error.message : "An error occurred.",
+      });
+    });
   };
 
   const moveTarget = alternatePreviewRuntime(
@@ -436,8 +457,8 @@ export function PreviewView({
         ? {
             url:
               moveTarget === "desktop"
-                ? resolveDiscoveredServerUrl(threadRef.environmentId, url)
-                : url,
+                ? await resolveDesktopTabUrl(threadRef.environmentId, url)
+                : environmentUrlFor(threadRef.environmentId, url),
           }
         : {}),
       viewport,

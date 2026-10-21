@@ -3,6 +3,9 @@ import {
   DesktopPreviewAnnotationThemeInputSchema,
   DesktopPreviewArtifactInputSchema,
   DesktopPreviewConfigInputSchema,
+  DesktopPortForwardInputSchema,
+  DesktopPortForwardSchema,
+  DesktopPortForwardTargetSchema,
   DesktopPreviewNavigateInputSchema,
   DesktopPreviewRecordingArtifactSchema,
   DesktopPreviewRecordingSaveInputSchema,
@@ -33,6 +36,7 @@ import * as NodeURL from "node:url";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
+import * as PortForwarder from "../../preview/PortForwarder.ts";
 import { normalizeCaptureFailure } from "../../preview/captureErrors.ts";
 import * as DesktopClientSettings from "../../settings/DesktopClientSettings.ts";
 import { PREVIEW_WEBVIEW_PREFERENCES } from "../../preview/WebviewPreferences.ts";
@@ -327,6 +331,36 @@ const getPreviewConfig = DesktopIpc.makeIpcMethod({
   }),
 });
 
+const forwardPort = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_FORWARD_PORT_CHANNEL,
+  payload: DesktopPortForwardInputSchema,
+  result: DesktopPortForwardSchema,
+  handler: Effect.fn("desktop.ipc.preview.forwardPort")(function* (input) {
+    const forwarder = yield* PortForwarder.PortForwarder;
+    return yield* forwarder.forward(input);
+  }),
+});
+
+const stopPortForward = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_STOP_PORT_FORWARD_CHANNEL,
+  payload: DesktopPortForwardTargetSchema,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.preview.stopPortForward")(function* (input) {
+    const forwarder = yield* PortForwarder.PortForwarder;
+    yield* forwarder.stop(input);
+  }),
+});
+
+const listPortForwards = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_LIST_PORT_FORWARDS_CHANNEL,
+  payload: Schema.Void,
+  result: Schema.Array(DesktopPortForwardSchema),
+  handler: Effect.fn("desktop.ipc.preview.listPortForwards")(function* () {
+    const forwarder = yield* PortForwarder.PortForwarder;
+    return yield* forwarder.list;
+  }),
+});
+
 export const listBrowserImportSources = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_IMPORT_SOURCES_CHANNEL,
   payload: Schema.Void,
@@ -456,6 +490,9 @@ export const methods = [
   clearCookies,
   clearCache,
   getPreviewConfig,
+  forwardPort,
+  stopPortForward,
+  listPortForwards,
   setAnnotationTheme,
   setAnnotationSendEnabled,
   pickElement,

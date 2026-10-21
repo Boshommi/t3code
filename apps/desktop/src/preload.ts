@@ -359,6 +359,10 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.invoke(IpcChannels.PREVIEW_CLEAR_CACHE_CHANNEL, { environmentId, profileId }),
     getPreviewConfig: (environmentId, profileId) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_GET_CONFIG_CHANNEL, { environmentId, profileId }),
+    forwardPort: (input) => ipcRenderer.invoke(IpcChannels.PREVIEW_FORWARD_PORT_CHANNEL, input),
+    stopPortForward: (input) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_STOP_PORT_FORWARD_CHANNEL, input),
+    listPortForwards: () => ipcRenderer.invoke(IpcChannels.PREVIEW_LIST_PORT_FORWARDS_CHANNEL),
     setAnnotationTheme: (theme) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_SET_ANNOTATION_THEME_CHANNEL, { theme }),
     setAnnotationSendEnabled: (tabId, enabled) =>

@@ -1,12 +1,28 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  loopbackUrlPort,
   normalizePreviewUrl,
   PreviewUrlNormalizationError,
   resolveAddressBarInput,
   previewPdfAssetUrl,
   resolveSearchUrlTemplate,
 } from "./preview.ts";
+
+describe("loopbackUrlPort", () => {
+  it.each([
+    ["http://localhost:5173/app", 5173],
+    ["http://127.0.0.1/", 80],
+    ["https://localhost/", 443],
+    ["http://[::1]:3000", 3000],
+    ["http://0.0.0.0:8080", 8080],
+    ["http://192.168.1.4:3000", null],
+    ["ws://localhost:3000", null],
+    ["not a url", null],
+  ])("%s -> %s", (url, port) => {
+    expect(loopbackUrlPort(url)).toBe(port);
+  });
+});
 
 describe("previewPdfAssetUrl", () => {
   it.each([

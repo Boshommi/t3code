@@ -217,6 +217,25 @@ On a phone, tap the floating preview's corner dot to show its controls, then
 **Pop into separate window** to keep watching in picture-in-picture over other
 apps.
 
+### Forward a remote dev server to this computer
+
+In the desktop app, a dev server on a remote environment is reachable at
+`localhost` on your computer, even when it only listens on the remote's own
+loopback. When a thread on that environment opens one of its `localhost` pages
+on this computer, such as a link, a detected server, or **Open in system
+browser**, T3 Code forwards the port over the environment's connection, the
+way `ssh -L` does. The forward keeps the remote port number unless your
+computer already uses it, and then picks a free one.
+
+**Ports** in the thread header, or **Forward ports** in the command palette,
+lists the forwarded ports and the servers listening on the remote. Forward any
+port there, open it in your browser, or stop it. A page that loads from several
+ports, such as an app that embeds a sign-in page from another port, needs each
+of them forwarded. Forwards belong to the environment, last until you stop them
+or quit the app, and need a connection that may operate the environment's
+browser. A tab restored after a restart reconnects its forward when you reload
+it.
+
 ### Browser host setup
 
 macOS, Windows, and Linux desktops run the browser as is. Some Linux hosts need
