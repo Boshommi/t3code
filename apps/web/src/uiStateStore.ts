@@ -27,6 +27,9 @@ export interface PersistedUiState {
   projectOrderCwds?: string[];
   defaultAdvertisedEndpointKey?: string | null;
   sidebarProjectScopeKey?: string | null;
+  sidebarGroupByProject?: boolean;
+  projectColorByKey?: Record<string, ProjectColor>;
+  projectShelfExpandedByKey?: Record<string, boolean>;
   threadChangedFilesExpansionVersion?: number;
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
   pullRequestMergeMethod?: string;
@@ -36,6 +39,20 @@ export interface UiProjectState {
   projectExpandedById: Record<string, boolean>;
   projectOrder: string[];
   sidebarProjectScopeKey: string | null;
+  // Sidebar lists threads under a header per logical project instead of one
+  // flat lifecycle list.
+  sidebarGroupByProject: boolean;
+  // Per-device tint for a logical project's sidebar group.
+  projectColorByKey: Record<string, ProjectColor>;
+  // Grouped sidebar shelves, keyed by `sidebarProjectShelfKey`.
+  projectShelfExpandedByKey: Record<string, boolean>;
+}
+
+export interface ProjectColor {
+  /** `#rrggbb` */
+  color: string;
+  /** Tint strength, 0..1. */
+  opacity: number;
 }
 
 export interface UiThreadState {
@@ -58,6 +75,9 @@ const initialState: UiState = {
   projectExpandedById: {},
   projectOrder: [],
   sidebarProjectScopeKey: null,
+  sidebarGroupByProject: true,
+  projectColorByKey: {},
+  projectShelfExpandedByKey: {},
   threadLastVisitedAtById: {},
   threadChangedFilesExpandedById: {},
   defaultAdvertisedEndpointKey: null,
@@ -113,6 +133,26 @@ function sanitizeTimestampRecord(value: unknown): Record<string, string> {
   );
 }
 
+export function normalizeProjectColor(value: unknown): ProjectColor | null {
+  if (!value || typeof value !== "object") return null;
+  const { color, opacity } = value as Partial<Record<keyof ProjectColor, unknown>>;
+  if (typeof color !== "string" || !/^#[\da-f]{6}$/i.test(color)) return null;
+  if (typeof opacity !== "number" || !Number.isFinite(opacity)) return null;
+  return { color: color.toLowerCase(), opacity: Math.min(1, Math.max(0, opacity)) };
+}
+
+function sanitizeProjectColorRecord(value: unknown): Record<string, ProjectColor> {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([key, entry]) => {
+      const color = normalizeProjectColor(entry);
+      return key.length > 0 && color !== null ? [[key, color] as const] : [];
+    }),
+  );
+}
+
 function isPullRequestMergeMethod(value: unknown): value is PullRequestMergeMethod {
   return value === "merge" || value === "squash" || value === "rebase";
 }
@@ -151,6 +191,12 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
         : {},
     defaultAdvertisedEndpointKey: sanitizeOptionalKey(parsed.defaultAdvertisedEndpointKey),
     sidebarProjectScopeKey: sanitizeOptionalKey(parsed.sidebarProjectScopeKey),
+    sidebarGroupByProject:
+      typeof parsed.sidebarGroupByProject === "boolean"
+        ? parsed.sidebarGroupByProject
+        : initialState.sidebarGroupByProject,
+    projectColorByKey: sanitizeProjectColorRecord(parsed.projectColorByKey),
+    projectShelfExpandedByKey: sanitizeBooleanRecord(parsed.projectShelfExpandedByKey),
     pullRequestMergeMethod: isPullRequestMergeMethod(parsed.pullRequestMergeMethod)
       ? parsed.pullRequestMergeMethod
       : initialState.pullRequestMergeMethod,
@@ -225,6 +271,9 @@ export function persistState(state: UiState): void {
         threadLastVisitedAtById: state.threadLastVisitedAtById,
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
         sidebarProjectScopeKey: state.sidebarProjectScopeKey,
+        sidebarGroupByProject: state.sidebarGroupByProject,
+        projectColorByKey: state.projectColorByKey,
+        projectShelfExpandedByKey: state.projectShelfExpandedByKey,
         threadChangedFilesExpansionVersion: THREAD_CHANGED_FILES_EXPANSION_VERSION,
         threadChangedFilesExpandedById: state.threadChangedFilesExpandedById,
         pullRequestMergeMethod: state.pullRequestMergeMethod,
@@ -334,6 +383,41 @@ function setSidebarProjectScopeKey(state: UiState, projectKey: string | null): U
   };
 }
 
+export function setProjectColor(
+  state: UiState,
+  projectKey: string,
+  color: ProjectColor | null,
+): UiState {
+  const next = color === null ? null : normalizeProjectColor(color);
+  const current = state.projectColorByKey[projectKey];
+  if (
+    next === null
+      ? current === undefined
+      : current?.color === next.color && current.opacity === next.opacity
+  ) {
+    return state;
+  }
+  const projectColorByKey = { ...state.projectColorByKey };
+  if (next === null) {
+    delete projectColorByKey[projectKey];
+  } else {
+    projectColorByKey[projectKey] = next;
+  }
+  return { ...state, projectColorByKey };
+}
+
+function setProjectShelfExpanded(state: UiState, shelfKey: string, expanded: boolean): UiState {
+  if ((state.projectShelfExpandedByKey[shelfKey] ?? false) === expanded) return state;
+  const projectShelfExpandedByKey = { ...state.projectShelfExpandedByKey };
+  // Collapsed is the default, so only expanded shelves need an entry.
+  if (expanded) {
+    projectShelfExpandedByKey[shelfKey] = true;
+  } else {
+    delete projectShelfExpandedByKey[shelfKey];
+  }
+  return { ...state, projectShelfExpandedByKey };
+}
+
 function setPullRequestMergeMethod(state: UiState, method: PullRequestMergeMethod): UiState {
   return state.pullRequestMergeMethod === method
     ? state
@@ -423,6 +507,9 @@ interface UiStateStore extends UiState {
   setThreadChangedFilesExpanded: (threadId: string, turnId: string, expanded: boolean) => void;
   setDefaultAdvertisedEndpointKey: (key: string | null) => void;
   setSidebarProjectScopeKey: (projectKey: string | null) => void;
+  setSidebarGroupByProject: (enabled: boolean) => void;
+  setProjectColor: (projectKey: string, color: ProjectColor | null) => void;
+  setProjectShelfExpanded: (shelfKey: string, expanded: boolean) => void;
   setPullRequestMergeMethod: (method: PullRequestMergeMethod) => void;
   setProjectExpanded: (projectIds: string | readonly string[], expanded: boolean) => void;
   reorderProjects: (
@@ -444,6 +531,15 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setDefaultAdvertisedEndpointKey(state, key)),
   setSidebarProjectScopeKey: (projectKey) =>
     set((state) => setSidebarProjectScopeKey(state, projectKey)),
+  setSidebarGroupByProject: (enabled) =>
+    set((state) =>
+      state.sidebarGroupByProject === enabled
+        ? state
+        : { ...state, sidebarGroupByProject: enabled },
+    ),
+  setProjectColor: (projectKey, color) => set((state) => setProjectColor(state, projectKey, color)),
+  setProjectShelfExpanded: (shelfKey, expanded) =>
+    set((state) => setProjectShelfExpanded(state, shelfKey, expanded)),
   setPullRequestMergeMethod: (method) => set((state) => setPullRequestMergeMethod(state, method)),
   setProjectExpanded: (projectIds, expanded) =>
     set((state) => setProjectExpanded(state, projectIds, expanded)),

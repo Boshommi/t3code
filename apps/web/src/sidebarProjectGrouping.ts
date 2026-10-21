@@ -6,6 +6,7 @@ import {
 } from "./logicalProject";
 import { resolveScratchProjectScopeKey } from "@t3tools/client-runtime/state/project-grouping";
 import type { Project } from "./types";
+import { legacyProjectCwdPreferenceKey } from "./uiStateStore";
 
 export type EnvironmentPresence = "local-only" | "remote-only" | "mixed";
 
@@ -24,6 +25,17 @@ export interface SidebarProjectSnapshot extends Project {
   memberProjects: readonly SidebarProjectGroupMember[];
   memberProjectRefs: readonly ScopedProjectRef[];
   remoteEnvironmentLabels: readonly string[];
+}
+
+/** Every key a project's collapse preference may be stored under, most specific first. */
+export function projectExpansionPreferenceKeys(
+  project: Pick<SidebarProjectSnapshot, "projectKey" | "memberProjects">,
+): string[] {
+  return [
+    project.projectKey,
+    ...project.memberProjects.map((member) => member.physicalProjectKey),
+    ...project.memberProjects.map((member) => legacyProjectCwdPreferenceKey(member.workspaceRoot)),
+  ];
 }
 
 export function projectGroupsSpanEnvironments(

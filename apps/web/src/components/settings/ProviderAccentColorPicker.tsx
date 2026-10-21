@@ -10,7 +10,7 @@ import { normalizeProviderAccentColor } from "../../providerInstances";
 
 const FALLBACK_ACCENT_COLOR = "#2563eb";
 
-function ProviderCustomColorPanel(props: {
+export function ProviderCustomColorPanel(props: {
   readonly value: string;
   readonly onCommit: (value: string) => void;
 }) {

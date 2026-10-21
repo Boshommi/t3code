@@ -1347,3 +1347,122 @@ export function sortScopedProjectsForSidebar<
       left.id.localeCompare(right.id),
   );
 }
+
+/** Threads whose project isn't in the catalog (yet) still need a home. */
+export const SIDEBAR_UNGROUPED_PROJECT_KEY = "\0ungrouped";
+
+const SIDEBAR_SECTIONS = ["pinned", "active", "working", "snoozed", "settled"] as const;
+
+export type SidebarProjectThreadGroup<TThread> = {
+  /** Logical project key, or SIDEBAR_UNGROUPED_PROJECT_KEY. */
+  readonly projectKey: string;
+} & Readonly<Record<SidebarSection, readonly TThread[]>>;
+
+/** Splits the lifecycle sections across logical projects. Each section keeps
+    its incoming order, every listed project gets a group (empty ones too, so
+    they stay reachable), and unknown projects collect in a trailing group. */
+export function groupSidebarThreadsByProject<
+  TThread extends { readonly environmentId: string; readonly projectId: string },
+>(input: {
+  readonly projectKeys: readonly string[];
+  /** `${environmentId}:${projectId}` to logical project key. */
+  readonly projectKeyByMemberKey: ReadonlyMap<string, string>;
+  readonly sections: Readonly<Record<SidebarSection, readonly TThread[]>>;
+}): SidebarProjectThreadGroup<TThread>[] {
+  type MutableGroup = Record<SidebarSection, TThread[]>;
+  const groups = new Map<string, MutableGroup>();
+  const emptyGroup = (): MutableGroup => ({
+    pinned: [],
+    active: [],
+    working: [],
+    snoozed: [],
+    settled: [],
+  });
+  for (const projectKey of input.projectKeys) groups.set(projectKey, emptyGroup());
+  for (const section of SIDEBAR_SECTIONS) {
+    for (const thread of input.sections[section]) {
+      const projectKey =
+        input.projectKeyByMemberKey.get(`${thread.environmentId}:${thread.projectId}`) ??
+        SIDEBAR_UNGROUPED_PROJECT_KEY;
+      let group = groups.get(projectKey);
+      if (group === undefined) {
+        group = emptyGroup();
+        groups.set(projectKey, group);
+      }
+      group[section].push(thread);
+    }
+  }
+  return [...groups].map(([projectKey, group]) => ({ projectKey, ...group }));
+}
+
+export type SidebarProjectShelf = "working" | "snoozed" | "settled";
+
+/** Key of a grouped project's shelf in the persisted expansion map. */
+export function sidebarProjectShelfKey(projectKey: string, shelf: SidebarProjectShelf): string {
+  return `${projectKey}:${shelf}`;
+}
+
+export interface SidebarProjectShelfLayout<TThread> {
+  readonly count: number;
+  readonly expanded: boolean;
+  /** The shelf's rows while it and its project are open; otherwise only the open thread. */
+  readonly rows: readonly TThread[];
+}
+
+export interface SidebarProjectGroupLayout<TThread> {
+  readonly group: SidebarProjectThreadGroup<TThread>;
+  readonly expanded: boolean;
+  /** Pinned, then active rows; only the open thread while the project is collapsed. */
+  readonly liveRows: readonly { readonly thread: TThread; readonly section: "pinned" | "active" }[];
+  readonly shelves: Readonly<Record<SidebarProjectShelf, SidebarProjectShelfLayout<TThread>>>;
+  /** Settled rows past the current page, offered through "Show more". */
+  readonly hiddenSettledCount: number;
+}
+
+/** What each project group renders. A collapsed project or shelf still shows
+    the open thread, the same rule as the flat list's shelves. */
+export function buildSidebarProjectGroupLayouts<TThread>(input: {
+  readonly groups: readonly SidebarProjectThreadGroup<TThread>[];
+  readonly isProjectExpanded: (projectKey: string) => boolean;
+  readonly isShelfExpanded: (shelfKey: string) => boolean;
+  readonly settledPageSize: (projectKey: string) => number;
+  readonly isRouteThread: (thread: TThread) => boolean;
+}): SidebarProjectGroupLayout<TThread>[] {
+  const routeOnly = (threads: readonly TThread[]) => threads.filter(input.isRouteThread);
+  return input.groups.map((group) => {
+    const expanded = input.isProjectExpanded(group.projectKey);
+    const live = [
+      ...group.pinned.map((thread) => ({ thread, section: "pinned" as const })),
+      ...group.active.map((thread) => ({ thread, section: "active" as const })),
+    ];
+    const shelf = (name: SidebarProjectShelf, all: readonly TThread[], paged = all) => {
+      const shelfExpanded = input.isShelfExpanded(sidebarProjectShelfKey(group.projectKey, name));
+      return {
+        count: all.length,
+        expanded: shelfExpanded,
+        rows: expanded && shelfExpanded ? paged : routeOnly(all),
+      };
+    };
+    const settledLimit = input.settledPageSize(group.projectKey);
+    const pagedSettled =
+      group.settled.length <= settledLimit
+        ? group.settled
+        : [
+            ...group.settled.slice(0, settledLimit),
+            ...routeOnly(group.settled.slice(settledLimit)),
+          ];
+    const settled = shelf("settled", group.settled, pagedSettled);
+    return {
+      group,
+      expanded,
+      liveRows: expanded ? live : live.filter(({ thread }) => input.isRouteThread(thread)),
+      shelves: {
+        working: shelf("working", group.working),
+        snoozed: shelf("snoozed", group.snoozed),
+        settled,
+      },
+      hiddenSettledCount:
+        expanded && settled.expanded ? group.settled.length - pagedSettled.length : 0,
+    };
+  });
+}

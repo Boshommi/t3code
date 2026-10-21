@@ -6,8 +6,10 @@ import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import {
   archiveSelectedThreadEntries,
+  buildSidebarProjectGroupLayouts,
   deleteSelectedThreadEntries,
   getFallbackThreadIdAfterDelete,
+  groupSidebarThreadsByProject,
   hasUnseenCompletion,
   resolveSidebarRowThreadId,
   isSidebarThreadWorking,
@@ -29,6 +31,7 @@ import {
   sortScopedProjectsForSidebar,
   sortSidebarV2ProjectGroups,
   shouldNavigateAfterThreadPark,
+  SIDEBAR_UNGROUPED_PROJECT_KEY,
   type SidebarListItem,
   type SidebarListMarker,
   type SidebarSection,
@@ -1214,5 +1217,107 @@ describe("Working shelf (beta)", () => {
         unsnooze: false,
       });
     });
+  });
+});
+
+describe("grouping sidebar threads by project", () => {
+  const row = (id: string, environmentId: string, projectId: string) => ({
+    id,
+    environmentId,
+    projectId,
+  });
+
+  it("keeps every project, each section's order, and collects unknown projects last", () => {
+    const groups = groupSidebarThreadsByProject({
+      projectKeys: ["repo-a", "repo-b", "empty"],
+      projectKeyByMemberKey: new Map([
+        ["local:a", "repo-a"],
+        ["remote:a", "repo-a"],
+        ["local:b", "repo-b"],
+      ]),
+      sections: {
+        pinned: [row("pin-b", "local", "b")],
+        active: [row("a2", "remote", "a"), row("orphan", "local", "gone"), row("a1", "local", "a")],
+        working: [row("w-a", "local", "a")],
+        snoozed: [],
+        settled: [row("s-a", "local", "a"), row("s-b", "local", "b")],
+      },
+    });
+
+    expect(
+      groups.map((group) => ({
+        projectKey: group.projectKey,
+        pinned: group.pinned.map((thread) => thread.id),
+        active: group.active.map((thread) => thread.id),
+        working: group.working.map((thread) => thread.id),
+        settled: group.settled.map((thread) => thread.id),
+      })),
+    ).toEqual([
+      {
+        projectKey: "repo-a",
+        pinned: [],
+        active: ["a2", "a1"],
+        working: ["w-a"],
+        settled: ["s-a"],
+      },
+      { projectKey: "repo-b", pinned: ["pin-b"], active: [], working: [], settled: ["s-b"] },
+      { projectKey: "empty", pinned: [], active: [], working: [], settled: [] },
+      {
+        projectKey: SIDEBAR_UNGROUPED_PROJECT_KEY,
+        pinned: [],
+        active: ["orphan"],
+        working: [],
+        settled: [],
+      },
+    ]);
+  });
+
+  it("keeps the open thread visible in collapsed projects and shelves, and pages settled rows", () => {
+    const [group] = groupSidebarThreadsByProject({
+      projectKeys: ["repo"],
+      projectKeyByMemberKey: new Map([["local:p", "repo"]]),
+      sections: {
+        pinned: [row("pin", "local", "p")],
+        active: [row("a1", "local", "p"), row("open", "local", "p")],
+        working: [],
+        snoozed: [row("z1", "local", "p")],
+        settled: ["s1", "s2", "s3", "s4"].map((id) => row(id, "local", "p")),
+      },
+    });
+    const layout = (options: {
+      projectExpanded: boolean;
+      shelvesExpanded: boolean;
+      openThread: string;
+    }) =>
+      buildSidebarProjectGroupLayouts({
+        groups: [group!],
+        isProjectExpanded: () => options.projectExpanded,
+        isShelfExpanded: () => options.shelvesExpanded,
+        settledPageSize: () => 2,
+        isRouteThread: (thread) => thread.id === options.openThread,
+      })[0]!;
+    const ids = (threads: readonly { id: string }[]) => threads.map((thread) => thread.id);
+
+    const collapsed = layout({ projectExpanded: false, shelvesExpanded: true, openThread: "open" });
+    expect(collapsed.liveRows.map(({ thread, section }) => [thread.id, section])).toEqual([
+      ["open", "active"],
+    ]);
+    expect(ids(collapsed.shelves.settled.rows)).toEqual([]);
+    expect(collapsed.shelves.settled.count).toBe(4);
+    expect(collapsed.hiddenSettledCount).toBe(0);
+
+    const closedShelves = layout({
+      projectExpanded: true,
+      shelvesExpanded: false,
+      openThread: "s4",
+    });
+    expect(closedShelves.liveRows.map(({ thread }) => thread.id)).toEqual(["pin", "a1", "open"]);
+    expect(ids(closedShelves.shelves.snoozed.rows)).toEqual([]);
+    expect(ids(closedShelves.shelves.settled.rows)).toEqual(["s4"]);
+
+    const paged = layout({ projectExpanded: true, shelvesExpanded: true, openThread: "s4" });
+    expect(ids(paged.shelves.snoozed.rows)).toEqual(["z1"]);
+    expect(ids(paged.shelves.settled.rows)).toEqual(["s1", "s2", "s4"]);
+    expect(paged.hiddenSettledCount).toBe(1);
   });
 });

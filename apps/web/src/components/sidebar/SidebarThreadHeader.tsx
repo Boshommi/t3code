@@ -1,4 +1,11 @@
-import { FolderPlusIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
+import {
+  FolderPlusIcon,
+  ListIcon,
+  ListTreeIcon,
+  SearchIcon,
+  SquarePenIcon,
+  XIcon,
+} from "lucide-react";
 import {
   type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -16,6 +23,9 @@ export interface SidebarThreadHeaderProps {
   searchFieldRef?: RefObject<HTMLDivElement | null>;
   hasProjects: boolean;
   projectScope: ReactNode;
+  /** Threads listed under per-project headers instead of one flat list. */
+  groupByProject: boolean;
+  onToggleGroupByProject: () => void;
   onNewProject: () => void;
   onNewThread: (event: ReactMouseEvent) => void;
   newThreadDisabled: boolean;
@@ -36,6 +46,8 @@ export function SidebarThreadHeader({
   searchFieldRef,
   hasProjects,
   projectScope,
+  groupByProject,
+  onToggleGroupByProject,
   onNewProject,
   onNewThread,
   newThreadDisabled,
@@ -106,6 +118,12 @@ export function SidebarThreadHeader({
       <div className="flex shrink-0 items-center">
         {hasProjects ? (
           <>
+            <SidebarHeaderIconButton
+              label={groupByProject ? "Show one list" : "Group by project"}
+              onClick={onToggleGroupByProject}
+            >
+              {groupByProject ? <ListIcon /> : <ListTreeIcon />}
+            </SidebarHeaderIconButton>
             {projectScope}
             <SidebarHeaderIconButton label="Add project" onClick={onNewProject}>
               <FolderPlusIcon />
