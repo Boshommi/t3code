@@ -1068,6 +1068,38 @@ describe("AcpSessionRuntime", () => {
     ),
   );
 
+  it.live("times out a hung initialize handshake", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      const error = yield* runtime.start().pipe(Effect.flip);
+
+      expect(error._tag).toBe("AcpTransportError");
+      if (error._tag === "AcpTransportError") {
+        expect(error.method).toBe("initialize");
+        expect(error.detail).toContain("timed out");
+      }
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          authMethodId: "test",
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              T3_ACP_HANG_INITIALIZE: "1",
+              T3_ACP_HANDSHAKE_DELAY_MS: "10000",
+            },
+          },
+          cwd: process.cwd(),
+          sessionRpcTimeout: "200 millis",
+          clientInfo: { name: "t3-test", version: "0.0.0" },
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+    ),
+  );
+
   it.effect("ignores session/update replay notifications during session/load", () =>
     Effect.gen(function* () {
       const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;

@@ -81,6 +81,8 @@ const omitXAiPromptCompleteStopReason =
 const failLoadSession = process.env.T3_ACP_FAIL_LOAD_SESSION === "1";
 const failLoadSessionAfterConfigReplay =
   process.env.T3_ACP_FAIL_LOAD_SESSION_AFTER_CONFIG_REPLAY === "1";
+const hangInitialize = process.env.T3_ACP_HANG_INITIALIZE === "1";
+const handshakeDelayMs = Number(process.env.T3_ACP_HANDSHAKE_DELAY_MS ?? "30000");
 const emitLoadReplay = process.env.T3_ACP_EMIT_LOAD_REPLAY === "1";
 const hangLoadSessionAfterReplay = process.env.T3_ACP_HANG_LOAD_SESSION_AFTER_REPLAY === "1";
 const delayLoadSessionAfterReplay = process.env.T3_ACP_DELAY_LOAD_SESSION_AFTER_REPLAY === "1";
@@ -504,6 +506,9 @@ const program = Effect.gen(function* () {
               process.stderr.write("stderr".repeat(350_000), () => resolve());
             }),
         );
+      }
+      if (hangInitialize) {
+        yield* Effect.sleep(handshakeDelayMs);
       }
       parameterizedModelPicker = request.capabilities?._meta?.parameterizedModelPicker === true;
       return {

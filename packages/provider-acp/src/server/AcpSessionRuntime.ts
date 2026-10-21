@@ -77,6 +77,8 @@ export type AcpSessionRuntimeEvent =
     };
 
 const defaultSessionLoadTimeout = Duration.seconds(90);
+// A hung handshake would otherwise block the thread forever.
+const defaultSessionRpcTimeout = Duration.seconds(20);
 const defaultSessionLoadReplayIdleGap = Duration.seconds(2);
 const defaultCancelTimeout = Duration.seconds(15);
 const maxStartupMetadataUpdates = 32;
@@ -98,6 +100,8 @@ export interface AcpSessionRuntimeOptions {
   readonly resumeSessionId?: string;
   readonly resumeMethod?: "load" | "resume";
   readonly sessionLoadTimeout?: Duration.Input;
+  /** Bounds initialize, authenticate, and session/new. */
+  readonly sessionRpcTimeout?: Duration.Input;
   readonly sessionLoadReplayIdleGap?: Duration.Input;
   readonly interruptPromptOnCancel?: boolean;
   readonly cancelMeta?: EffectAcpSchema.CancelNotification["_meta"];
@@ -1361,6 +1365,31 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
   const logRequest = (event: AcpSessionRequestLogEvent) =>
     options.requestLogger ? options.requestLogger(event) : Effect.void;
 
+  const sessionRpcTimeout = Duration.fromInputUnsafe(
+    options.sessionRpcTimeout ?? defaultSessionRpcTimeout,
+  );
+  const withRpcTimeout = <A>(
+    method: string,
+    effect: Effect.Effect<A, EffectAcpErrors.AcpError>,
+  ): Effect.Effect<A, EffectAcpErrors.AcpError> =>
+    effect.pipe(
+      Effect.timeoutOption(sessionRpcTimeout),
+      Effect.flatMap((result) =>
+        Option.match(result, {
+          onNone: () =>
+            Effect.fail(
+              new EffectAcpErrors.AcpTransportError({
+                operation: "call-rpc",
+                method,
+                detail: `${method} timed out after ${String(Duration.toMillis(sessionRpcTimeout))}ms`,
+                cause: undefined,
+              }),
+            ),
+          onSome: Effect.succeed,
+        }),
+      ),
+    );
+
   const runLoggedRequest = <A>(
     method: string,
     payload: unknown,
@@ -2065,7 +2094,7 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
     const initializeResult = yield* runLoggedRequest(
       "initialize",
       initializePayload,
-      acp.agent.initialize(initializePayload),
+      withRpcTimeout("initialize", acp.agent.initialize(initializePayload)),
     );
     yield* options.onInitialized?.(initializeResult) ?? Effect.void;
     return initializeResult;
@@ -2162,7 +2191,7 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
         yield* runLoggedRequest(
           "authenticate",
           authenticatePayload,
-          acp.agent.authenticate(authenticatePayload),
+          withRpcTimeout("authenticate", acp.agent.authenticate(authenticatePayload)),
         );
       },
     );
@@ -2216,7 +2245,7 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
         const created = yield* runLoggedRequest(
           "session/new",
           createPayload,
-          acp.agent.createSession(createPayload),
+          withRpcTimeout("session/new", acp.agent.createSession(createPayload)),
         );
         sessionId = created.sessionId;
         sessionSetupResult = created;
@@ -2234,7 +2263,7 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
       yield* runLoggedRequest(
         "authenticate",
         authenticatePayload,
-        acp.agent.authenticate(authenticatePayload),
+        withRpcTimeout("authenticate", acp.agent.authenticate(authenticatePayload)),
       );
     }
     const { sessionId, sessionSetupResult } = yield* setupSession.pipe(
