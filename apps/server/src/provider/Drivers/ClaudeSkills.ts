@@ -60,7 +60,13 @@ function parseFrontmatterBoolean(value: unknown): boolean | undefined {
   }
 }
 
-function parseSkillFrontmatter(contents: string): SkillFrontmatter {
+/** Reads frontmatter as leniently as Claude Code does for skills and agent definitions. */
+export function parseClaudeFrontmatter(
+  contents: string,
+):
+  | { readonly kind: "missing" }
+  | { readonly kind: "malformed" }
+  | { readonly kind: "parsed"; readonly record: Record<string, unknown> } {
   const match = FRONTMATTER_PATTERN.exec(contents);
   if (!match) {
     return { kind: "missing" };
@@ -92,8 +98,13 @@ function parseSkillFrontmatter(contents: string): SkillFrontmatter {
   if (typeof parsed !== "object" || parsed === null) {
     return { kind: "malformed" };
   }
+  return { kind: "parsed", record: parsed as Record<string, unknown> };
+}
 
-  const record = parsed as Record<string, unknown>;
+function parseSkillFrontmatter(contents: string): SkillFrontmatter {
+  const frontmatter = parseClaudeFrontmatter(contents);
+  if (frontmatter.kind !== "parsed") return frontmatter;
+  const { record } = frontmatter;
   const name = typeof record.name === "string" ? record.name.trim() : "";
   const description = typeof record.description === "string" ? record.description.trim() : "";
   return {

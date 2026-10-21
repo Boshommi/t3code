@@ -125,6 +125,7 @@ import {
   type ClaudeSkillTarget,
 } from "../../provider/Drivers/ClaudeSkillDispatch.ts";
 import { discoverClaudeSkills } from "../../provider/Drivers/ClaudeSkills.ts";
+import { resolveClaudeSubagentDefaults } from "../../provider/Drivers/ClaudeAgentDefinitions.ts";
 import {
   compileClaudeModelSelection,
   type CompiledClaudeModelSelection,
@@ -7982,9 +7983,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 launch?.ownerToolUseId === undefined
                   ? undefined
                   : yield* resolveSubagentByToolUseId(context, launch.ownerToolUseId);
-              // With no model of its own, a nested subagent runs on its
-              // owner's (the SDK's default for a subagent's Agent call).
-              const model = launch?.model ?? owner?.task.model ?? undefined;
               if (
                 message.is_backgrounded === true &&
                 !(yield* isNestedSubagentTask(message.task_id))
@@ -8003,6 +8001,33 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               const isWorkflow =
                 claudeTaskTypeFromSdkMessage(message) === CLAUDE_WORKFLOW_TASK_TYPE;
               const workflowName = isWorkflow ? text(field(message, "workflow_name")) : undefined;
+              // A new subagent without Agent call overrides runs on its
+              // definition file's model/effort or CLAUDE_CODE_SUBAGENT_MODEL,
+              // else a nested one on its owner's model (the SDK's default).
+              // A resume keeps what its first run resolved.
+              const isResume =
+                context.subagentsByTaskId.has(message.task_id) ||
+                (yield* Ref.get(sessionSubagentsByTaskId)).has(message.task_id);
+              const defaults =
+                isResume || isWorkflow
+                  ? {}
+                  : yield* resolveClaudeSubagentDefaults({
+                      subagentType: message.subagent_type,
+                      cwd: context.input.runtimePolicy.cwd,
+                      configDir: homePath,
+                      environment: adapterOptions.environment,
+                    }).pipe(
+                      Effect.provideService(FileSystem.FileSystem, fileSystem),
+                      Effect.provideService(Path.Path, path),
+                    );
+              const model =
+                launch?.model ??
+                (defaults.model === undefined
+                  ? undefined
+                  : canonicalClaudeSubagentModel(subagentModelCatalog, defaults.model)) ??
+                owner?.task.model ??
+                undefined;
+              const effort = launch?.effort ?? defaults.effort;
 
               yield* updateClaudeSubagentNode({
                 context,
@@ -8011,7 +8036,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 ...(message.tool_use_id === undefined ? {} : { toolUseId: message.tool_use_id }),
                 ...(message.prompt === undefined ? {} : { prompt: message.prompt }),
                 ...(model === undefined ? {} : { model }),
-                ...(launch?.effort === undefined ? {} : { effort: launch.effort }),
+                ...(effort === undefined ? {} : { effort }),
                 ...(owner === undefined ? {} : { owner }),
                 ...(isWorkflow
                   ? {

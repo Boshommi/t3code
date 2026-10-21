@@ -9916,6 +9916,115 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
+  it.effect("seeds a subagent's model and effort from its definition file and environment", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-claude-agents-" });
+        const cwd = path.join(root, "project");
+        const configDir = path.join(root, "config");
+        yield* fileSystem.makeDirectory(path.join(cwd, ".claude", "agents"), { recursive: true });
+        yield* fileSystem.makeDirectory(path.join(configDir, "agents"), { recursive: true });
+        yield* fileSystem.writeFileString(
+          path.join(cwd, ".claude", "agents", "scout.md"),
+          "---\nname: scout\nmodel: sonnet\neffort: max\n---\nYou scout.\n",
+        );
+        yield* fileSystem.writeFileString(
+          path.join(configDir, "agents", "reviewer.md"),
+          "---\nname: reviewer\neffort: low\n---\nYou review.\n",
+        );
+        const harness = yield* makeWakeHarnessWithOptions({
+          settings: { ...DEFAULT_CLAUDE_SETTINGS, homePath: configDir },
+          environment: { CLAUDE_CODE_SUBAGENT_MODEL: "haiku" },
+        });
+        const now = yield* DateTime.now;
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make("attempt-subagent-definitions"),
+            text: "Spawn defined subagents.",
+            attachments: [],
+            runtimePolicy: { ...CLAUDE_TEST_RUNTIME_POLICY, cwd },
+          }),
+        );
+        const agentCall = (id: string, subagentType: string, overrides = {}) => ({
+          type: "tool_use" as const,
+          id,
+          name: "Agent",
+          input: { description: id, subagent_type: subagentType, prompt: "Go.", ...overrides },
+        });
+        const calls = [
+          agentCall("toolu-defined-scout", "scout"),
+          agentCall("toolu-overridden-scout", "scout", { model: "opus", effort: "low" }),
+          agentCall("toolu-defined-reviewer", "reviewer"),
+        ];
+        for (const frame of [
+          claudeSdkFrame({
+            type: "assistant",
+            parent_tool_use_id: null,
+            message: {
+              model: CLAUDE_TEST_MODEL_SELECTION.model,
+              id: "msg_defined_subagents_launch",
+              type: "message",
+              role: "assistant",
+              content: calls,
+            },
+            uuid: "00000000-0000-4000-8000-000000000241",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+          ...calls.map((call, index) =>
+            claudeSdkFrame({
+              type: "system",
+              subtype: "task_started",
+              task_id: `task-${call.id}`,
+              tool_use_id: call.id,
+              description: call.id,
+              subagent_type: call.input.subagent_type,
+              task_type: "local_agent",
+              uuid: `00000000-0000-4000-8000-00000000024${index + 2}`,
+              session_id: WAKE_NATIVE_SESSION,
+            }),
+          ),
+          makeResultFrame({
+            uuid: "00000000-0000-4000-8000-000000000249",
+            result: "Spawned the subagents.",
+          }),
+        ]) {
+          yield* Queue.offer(harness.sdkMessages, frame);
+        }
+        yield* Queue.take(harness.terminalReceipts);
+
+        const selections = Object.fromEntries(
+          harness.events.flatMap((event) =>
+            event.type === "subagent.updated"
+              ? [
+                  [
+                    event.subagent.nativeTaskRef?.nativeId,
+                    [
+                      event.subagent.modelSelection?.model,
+                      getModelSelectionStringOptionValue(event.subagent.modelSelection, "effort"),
+                    ],
+                  ] as const,
+                ]
+              : [],
+          ),
+        );
+        assert.deepEqual(selections, {
+          "task-toolu-defined-scout": ["claude-sonnet-5-5", "max"],
+          "task-toolu-overridden-scout": ["claude-opus-5-5", "low"],
+          "task-toolu-defined-reviewer": ["claude-haiku-5-5", "low"],
+        });
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
   it.effect("extracts text from direct content-block subagent results", () =>
     Effect.scoped(
       Effect.gen(function* () {
