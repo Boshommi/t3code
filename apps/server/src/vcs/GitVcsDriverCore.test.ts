@@ -3083,6 +3083,62 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("creates worktrees inside the main checkout by default", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const realCwd = yield* fileSystem.realPath(cwd);
+        const excludePath = pathService.join(realCwd, ".git", "info", "exclude");
+        yield* fileSystem.writeFileString(excludePath, "*.log");
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        const first = yield* driver.createWorktree({
+          cwd,
+          path: null,
+          refName: initialBranch,
+          newRefName: "feature/in-project",
+        });
+        assert.equal(
+          first.worktree.path,
+          pathService.join(realCwd, ".t3", "worktrees", "feature-in-project"),
+        );
+        // Created from a linked worktree, the next one still lands in the main checkout.
+        const second = yield* driver.createWorktree({
+          cwd: first.worktree.path,
+          path: null,
+          refName: initialBranch,
+          newRefName: "feature/second",
+        });
+        assert.equal(
+          second.worktree.path,
+          pathService.join(realCwd, ".t3", "worktrees", "feature-second"),
+        );
+        assert.equal(yield* fileSystem.readFileString(excludePath), "*.log\n/.t3/worktrees/\n");
+        assert.equal(yield* git(cwd, ["status", "--porcelain"]), "");
+
+        // A git dir not named `.git` has no main checkout to hold worktrees.
+        const separate = yield* makeTmpDir();
+        const separateCheckout = pathService.join(separate, "checkout");
+        yield* git(separate, [
+          "clone",
+          `--separate-git-dir=${pathService.join(separate, "store")}`,
+          cwd,
+          separateCheckout,
+        ]);
+        const fallback = yield* driver.createWorktree({
+          cwd: separateCheckout,
+          path: null,
+          refName: initialBranch,
+          newRefName: "feature/fallback",
+        });
+        assert.equal(pathService.basename(fallback.worktree.path), "feature-fallback");
+        assert.equal(pathService.basename(pathService.dirname(fallback.worktree.path)), "checkout");
+        assert.isFalse(fallback.worktree.path.startsWith(separate));
+      }),
+    );
+
     it.effect("creates worktrees under the configured worktrees directory", () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;

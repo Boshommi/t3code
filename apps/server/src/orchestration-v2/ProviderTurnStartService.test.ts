@@ -250,6 +250,30 @@ it.each([
     recreated: false,
   },
   { label: "a relative path", worktreePath: "project/feature-restore", recreated: false },
+  {
+    label: "<project>/.t3/worktrees/<branch>",
+    worktreePath: "/tmp/provider-turn-start-project/.t3/worktrees/feature-restore",
+    recreated: true,
+  },
+  {
+    label: "a folder nested below the project's worktrees folder",
+    worktreePath: "/tmp/provider-turn-start-project/.t3/worktrees/group/feature-restore",
+    recreated: false,
+  },
+  {
+    label: "another project's worktrees folder",
+    worktreePath: "/tmp/other-project/.t3/worktrees/feature-restore",
+    recreated: false,
+  },
+  {
+    label: "a .t3 symlink in the project that leads out",
+    worktreePath: "/tmp/provider-turn-start-project/.t3/worktrees/feature-restore",
+    realPaths: {
+      "/tmp/provider-turn-start-project": "/tmp/provider-turn-start-project",
+      "/tmp/provider-turn-start-project/.t3": "/tmp/elsewhere",
+    },
+    recreated: false,
+  },
 ])("recreates a missing worktree only at the managed location: $label", async (input) => {
   const harness = startWithMissingWorktree(input.worktreePath, input.realPaths);
   await harness.start;

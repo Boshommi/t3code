@@ -43,7 +43,11 @@ import { threadHasQueuedTurnStart } from "./orchestration-v2/ThreadSettlementSer
 import { forkParked } from "./serverActivation.ts";
 import * as Settings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
-import { isFilesystemRoot, managedWorktreesDirectories } from "./worktreesDirectory.ts";
+import {
+  isFilesystemRoot,
+  managedWorktreesDirectories,
+  projectWorktreesDirectory,
+} from "./worktreesDirectory.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import { withWorkspaceLease } from "./workspace/workspaceLease.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -760,7 +764,16 @@ const make = Effect.gen(function* () {
         const realParent = yield* fs.realPath(path.dirname(worktreePath));
         if (realPath !== path.join(realParent, path.basename(worktreePath)))
           return keep("worktree is a symbolic link");
-        if (!roots.some((root) => inside(root, realPath)))
+        // In-project worktrees count only directly inside their own project's folder.
+        const projectRoot = path.resolve(project.workspaceRoot);
+        const projectWorktrees = projectWorktreesDirectory(
+          yield* fs.realPath(projectRoot).pipe(Effect.orElseSucceed(() => projectRoot)),
+          path,
+        );
+        if (
+          !roots.some((root) => inside(root, realPath)) &&
+          pathKey(path.dirname(realPath)) !== pathKey(projectWorktrees)
+        )
           return keep("outside the managed worktree folder");
         if (yield* containsProjectRoot(worktreePath, [project, ...snapshot.projects]))
           return keep("contains a project checkout");

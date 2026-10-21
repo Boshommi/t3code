@@ -650,6 +650,44 @@ it.live("preserves late tracked edits when submodules were never initialized", (
   ),
 );
 
+it.effect("removes worktrees directly inside their project's .t3/worktrees folder only", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(NOW_MS);
+    const fixture = yield* cleanupFixture();
+    const inside = `${fixture.repo}/.t3/worktrees/inside`;
+    const nested = `${fixture.repo}/.t3/worktrees/group/nested`;
+    const elsewhere = `${fixture.repo}/elsewhere`;
+    for (const [branch, worktreePath] of [
+      ["inside", inside],
+      ["nested", nested],
+      ["elsewhere", elsewhere],
+    ] as const)
+      yield* fixture.command(fixture.repo, ["worktree", "add", "-b", branch, worktreePath]);
+    fixture.setThreads(
+      [inside, nested, elsewhere].map((worktreePath, index) =>
+        shell({
+          id: ThreadId.make(`thread-${index + 1}`),
+          branch:
+            worktreePath === inside ? "inside" : worktreePath === nested ? "nested" : "elsewhere",
+          worktreePath,
+        }),
+      ),
+    );
+    const report = yield* fixture.service.runNow;
+    expect(report.entries.find((entry) => entry.path === inside)).toMatchObject({
+      outcome: "removed",
+    });
+    expect(yield* fixture.fs.exists(inside)).toBe(false);
+    for (const kept of [nested, elsewhere]) {
+      expect(report.entries.find((entry) => entry.path === kept)).toMatchObject({
+        outcome: "kept",
+        reason: "Outside the managed worktree folder",
+      });
+      expect(yield* fixture.fs.exists(kept)).toBe(true);
+    }
+  }).pipe(Effect.provide(cleanupTestLayer), Effect.scoped),
+);
+
 describe("subagent worktree ownership", () => {
   it.effect.each([
     "idle",

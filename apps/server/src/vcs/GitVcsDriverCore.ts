@@ -43,7 +43,11 @@ import * as GitVcsDriver from "./GitVcsDriver.ts";
 import { removeEmptyDirectory } from "./removeEmptyDirectory.ts";
 import { copyWorktreeEnvFiles, worktreeEnvFilePathspecs } from "./seedWorktreeEnvFiles.ts";
 import { explicitBareRepositoryEnv, gitConfigEnv } from "./VcsProcess.ts";
-import { resolveWorktreesDirectory } from "../worktreesDirectory.ts";
+import {
+  projectWorktreesDirectory,
+  resolveWorktreesDirectory,
+  withProjectWorktreesExcluded,
+} from "../worktreesDirectory.ts";
 import {
   parseRemoteNames,
   parseRemoteNamesInGitOrder,
@@ -3707,6 +3711,41 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       ];
     });
 
+  // `<main checkout>/.t3/worktrees/<branch>`, kept out of the main checkout's status
+  // via `info/exclude`. Null when the git folder is not `<checkout>/.git`, as in a bare repo.
+  const projectWorktreePath = Effect.fn("projectWorktreePath")(function* (
+    cwd: string,
+    folderName: string,
+  ) {
+    const repositoryPaths = yield* resolveRepositoryPaths(cwd).pipe(
+      Effect.orElseSucceed(() => null),
+    );
+    if (repositoryPaths === null || path.basename(repositoryPaths.gitCommonDir) !== ".git") {
+      return null;
+    }
+    const excludePath = path.join(repositoryPaths.gitCommonDir, "info", "exclude");
+    yield* Effect.gen(function* () {
+      const existing = yield* fileSystem
+        .readFileString(excludePath)
+        .pipe(Effect.orElseSucceed(() => ""));
+      const next = withProjectWorktreesExcluded(existing);
+      if (next === existing) return;
+      yield* fileSystem.makeDirectory(path.dirname(excludePath), { recursive: true });
+      yield* fileSystem.writeFileString(excludePath, next);
+    }).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("Failed to exclude project worktrees from the main checkout", {
+          excludePath,
+          cause,
+        }),
+      ),
+    );
+    return path.join(
+      projectWorktreesDirectory(path.dirname(repositoryPaths.gitCommonDir), path),
+      folderName,
+    );
+  });
+
   const createWorktree: GitVcsDriver.GitVcsDriver["Service"]["createWorktree"] = Effect.fn(
     "createWorktree",
   )(function* (input, options) {
@@ -3717,6 +3756,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     // resolve: a cwd like `<repo>/sub/..` must not name the folder `..`.
     const repoName = path.basename(path.resolve(input.cwd));
     let worktreePath = input.path;
+    if (worktreePath == null && (options?.worktreesDirectory ?? "") === "") {
+      worktreePath = yield* projectWorktreePath(input.cwd, sanitizedBranch);
+    }
     if (worktreePath == null) {
       const parentDir = resolveWorktreesDirectory(
         options?.worktreesDirectory ?? "",

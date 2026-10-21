@@ -174,10 +174,15 @@ worktree are left alone. Setup scripts run after the copy.
 
 ## Worktree location
 
-New worktrees go in the `worktrees` folder of the T3 home directory. To put them somewhere else,
-such as another drive, set **Settings → Storage → Worktree location** to an absolute path like
-`D:\worktrees` or `~/worktrees`. The setting is per machine. Existing worktrees stay where they
-are, and cleanup covers both the default folder and the custom one.
+New worktrees go inside the project, at `.t3/worktrees/<branch>` in its main checkout. T3 Code
+adds `.t3/worktrees/` to the repository's `.git/info/exclude`, so they never show up as changes.
+Repositories whose git folder lives outside the checkout, such as bare ones, use the `worktrees`
+folder of the T3 home directory instead.
+
+To put them somewhere else, such as another drive, set **Settings → Storage → Worktree location**
+to an absolute path like `D:\worktrees` or `~/worktrees`. The setting is per machine. Existing
+worktrees stay where they are, and cleanup covers in-project worktrees, the T3 home folder, and
+every custom folder you have used.
 
 ## Storage cleanup
 
