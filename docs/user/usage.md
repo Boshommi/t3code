@@ -106,9 +106,10 @@ Opening Limits checks the selected connected environments automatically. Each cl
 least five minutes between automatic checks of an environment, including after a failed check.
 If a window still looks stale, refresh Limits to re-check every provider and hub.
 
-The model button in the composer shows how much the current account has left in its tightest
-window, such as **43% left**. In the model picker, a bar under each account shows the same, and the
-line under the search box lists every window of the selected account with its time to reset.
+Once the current account drops to 20% or less in any window, the model button in the composer
+shows what is left, and when it runs out, when it is back. In the model picker, accounts that are
+low or out get a dot, and the line at the bottom shows the selected account's tightest window.
+Hover it to see every window.
 
 Pick `/usage-limits` from the composer's command menu, or send it as a message, to check the
 current model's limits without leaving the conversation. The result opens above the composer and

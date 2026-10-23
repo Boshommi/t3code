@@ -3,7 +3,7 @@ import type {
   ProviderDriverKind,
   ServerProviderUsageLimits,
 } from "@t3tools/contracts";
-import { tightestLimitWindow } from "@t3tools/shared/usageLimits";
+import { quotaAlert, quotaAlertLabel, type QuotaAlert } from "@t3tools/shared/usageLimits";
 import {
   buildTraitsTriggerDisplay,
   getPromptControlledTraits,
@@ -13,6 +13,18 @@ import { resolveProviderOptionDescriptors } from "../lib/providerOptions";
 import { AppText as Text } from "./ui/AppText";
 import { ComposerInlineControl } from "./ComposerToolbar";
 import { ProviderIcon, ProviderInstanceIcon } from "./ProviderIcon";
+
+const DAY = 24 * 60 * 60 * 1000;
+
+// Nothing re-renders this on a timer, so a return time is shown as a clock time, which never goes stale.
+function mobileQuotaLabel(alert: QuotaAlert, readAt: number): string {
+  if (alert.level === "low" || alert.backAt === null) return quotaAlertLabel(alert, readAt);
+  const back = new Date(alert.backAt);
+  const time = back.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return alert.backAt - readAt < DAY
+    ? `Back at ${time}`
+    : `Back ${back.toLocaleDateString(undefined, { weekday: "short" })} ${time}`;
+}
 
 export function ComposerModelControl(props: {
   readonly modelOption: ModelOption | null;
@@ -24,7 +36,7 @@ export function ComposerModelControl(props: {
   readonly disabled?: boolean;
   readonly iconOnly?: boolean;
   readonly showSummary?: boolean;
-  /** The selected account's limits, shown as what its tightest window has left. */
+  /** The selected account's limits, mentioned only once they run low or out. */
   readonly usageLimits?: ServerProviderUsageLimits | undefined;
   readonly onPress: () => void;
 }) {
@@ -44,11 +56,9 @@ export function ComposerModelControl(props: {
       }).label
     : "";
   // Judged as of the reading, which refreshes whenever the server sends new limits.
-  const quota = props.usageLimits
-    ? tightestLimitWindow(props.usageLimits, Date.parse(props.usageLimits.checkedAt))
-    : null;
-  const quotaLabel = quota ? `${quota.remaining}% left` : null;
-  const suffixText = [summary, quotaLabel].filter(Boolean).join(" · ");
+  const quotaNow = props.usageLimits ? Date.parse(props.usageLimits.checkedAt) : 0;
+  const quota = quotaAlert(props.usageLimits, quotaNow);
+  const quotaLabel = quota ? mobileQuotaLabel(quota, quotaNow) : null;
   const badge = props.modelOption?.providerBadge;
   const label = props.modelOption?.label ?? props.selection?.model ?? "Choose model";
   return (
@@ -86,9 +96,19 @@ export function ComposerModelControl(props: {
       label={label}
       iconOnly={props.iconOnly}
       suffix={
-        props.showSummary !== false && suffixText ? (
+        props.showSummary !== false && (summary || quotaLabel) ? (
           <Text className="text-xs text-foreground-muted" numberOfLines={1}>
-            {suffixText}
+            {summary}
+            {summary && quotaLabel ? " · " : ""}
+            {quotaLabel ? (
+              <Text
+                className={
+                  quota?.level === "empty" ? "text-danger-foreground" : "text-warning-foreground"
+                }
+              >
+                {quotaLabel}
+              </Text>
+            ) : null}
           </Text>
         ) : undefined
       }

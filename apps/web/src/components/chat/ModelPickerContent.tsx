@@ -24,7 +24,7 @@ import {
 import { ChevronRightIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
-import { AccountQuotaSummary } from "./AccountQuota";
+import { AccountQuotaFooter } from "./AccountQuota";
 import { getProviderStatusMessage, hasProviderSetup } from "./ProviderStatusBanner";
 import {
   modelPickerLegacySectionKey,
@@ -933,9 +933,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               onMouseDown={(e) => e.stopPropagation()}
               onTouchStart={(e) => e.stopPropagation()}
             />
-            {selectedQuotaProvider && !isSearching ? (
-              <AccountQuotaSummary provider={selectedQuotaProvider} />
-            ) : null}
 
             <ModelPickerList
               listRef={modelListRef}
@@ -1011,6 +1008,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               onRequestClose={onRequestClose}
               onOpenProviderSetup={onOpenProviderSetup}
             />
+            {selectedQuotaProvider && !isSearching ? (
+              <AccountQuotaFooter provider={selectedQuotaProvider} />
+            ) : null}
           </div>
         </Combobox>
       </div>

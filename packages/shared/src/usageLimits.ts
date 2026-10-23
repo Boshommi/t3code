@@ -550,6 +550,40 @@ export function tightestLimitWindow(
   return tightest;
 }
 
+/** At or below this share left, clients start pointing out an account's quota. */
+export const LOW_QUOTA_PERCENT = 20;
+
+export type QuotaAlert =
+  | { readonly level: "low"; readonly remaining: number }
+  /** `backAt` is when every exhausted window has reset, or null when one has no reset time. */
+  | { readonly level: "empty"; readonly backAt: number | null };
+
+/** Only accounts that are running low or out are worth a glance; healthy ones stay quiet. */
+export function quotaAlert(
+  limits: ServerProviderUsageLimits | undefined,
+  now: number,
+): QuotaAlert | null {
+  const tightest = tightestLimitWindow(limits, now);
+  if (tightest === null || tightest.remaining > LOW_QUOTA_PERCENT) return null;
+  if (tightest.remaining > 0) return { level: "low", remaining: tightest.remaining };
+  let backAt: number | null = 0;
+  for (const window of limits?.windows ?? []) {
+    const resetsAt = resetMillis(window);
+    if (resetsAt !== null && resetsAt <= now) continue;
+    if (remainingPercent(window) > 0) continue;
+    backAt = resetsAt === null || backAt === null ? null : Math.max(backAt, resetsAt);
+  }
+  return { level: "empty", backAt };
+}
+
+export function quotaAlertLabel(alert: QuotaAlert, now: number): string {
+  if (alert.level === "low") return `${alert.remaining}% left`;
+  if (alert.backAt === null) return "Limit reached";
+  return alert.backAt - now < MINUTE
+    ? "Back shortly"
+    : `Back in ${formatDuration(alert.backAt - now)}`;
+}
+
 function resetMillis(window: ServerProviderUsageWindow): number | null {
   if (window.resetsAt === undefined) return null;
   const at = Date.parse(window.resetsAt);

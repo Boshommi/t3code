@@ -20,6 +20,8 @@ import {
   elapsedShare,
   paceOf,
   paceRemainingPercent,
+  quotaAlert,
+  quotaAlertLabel,
   tightestLimitWindow,
   usesChatGptSharing,
 } from "./usageLimits.ts";
@@ -1324,5 +1326,52 @@ describe("tightestLimitWindow", () => {
         now,
       ),
     ).toBeNull();
+  });
+});
+
+describe("quotaAlert", () => {
+  const weekly = { ...window, id: "seven_day", kind: "weekly" as const, label: "Weekly" };
+  const limits = (windows: ReadonlyArray<ServerProviderUsageWindow>) => ({
+    checkedAt: "2026-09-03T11:00:00.000Z",
+    windows,
+  });
+
+  it("stays quiet while every window has room", () => {
+    expect(quotaAlert(limits([window, { ...weekly, usedPercent: 79 }]), now)).toBeNull();
+    expect(quotaAlert(undefined, now)).toBeNull();
+  });
+
+  it("warns when the tightest window runs low", () => {
+    const alert = quotaAlert(limits([window, { ...weekly, usedPercent: 82 }]), now);
+    expect(alert).toEqual({ level: "low", remaining: 18 });
+    expect(quotaAlertLabel(alert!, now)).toBe("18% left");
+  });
+
+  it("is back once every exhausted window has reset", () => {
+    const alert = quotaAlert(
+      limits([
+        { ...window, usedPercent: 100 },
+        { ...weekly, usedPercent: 100, resetsAt: "2026-09-03T15:05:00.000Z" },
+      ]),
+      now,
+    );
+    expect(alert).toEqual({ level: "empty", backAt: Date.parse("2026-09-03T15:05:00.000Z") });
+    expect(quotaAlertLabel(alert!, now)).toBe("Back in 3h 5m");
+  });
+
+  it("ignores an exhausted window that already reset", () => {
+    expect(
+      quotaAlert(
+        limits([{ ...window, usedPercent: 100, resetsAt: "2026-09-03T11:00:00.000Z" }]),
+        now,
+      ),
+    ).toBeNull();
+  });
+
+  it("has no return time when an exhausted window has no reset", () => {
+    const { resetsAt: _, ...noReset } = window;
+    const alert = quotaAlert(limits([{ ...noReset, usedPercent: 100 }]), now);
+    expect(alert).toEqual({ level: "empty", backAt: null });
+    expect(quotaAlertLabel(alert!, now)).toBe("Limit reached");
   });
 });
