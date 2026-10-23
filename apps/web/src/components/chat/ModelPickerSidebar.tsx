@@ -5,6 +5,7 @@ import { SparklesIcon, StarIcon } from "lucide-react";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
+import { AccountQuotaBar, accountQuotaLabel, useQuotaNow } from "./AccountQuota";
 import {
   isProviderInstancePickerReady,
   shouldShowInstanceBadge,
@@ -50,6 +51,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
   };
   const showFavorites = props.showFavorites ?? true;
   const [hoveredInstanceId, setHoveredInstanceId] = useState<ProviderInstanceId | null>(null);
+  const quotaNow = useQuotaNow();
   const sidebarContentRef = useRef<HTMLDivElement>(null);
   const [selectedIndicatorTop, setSelectedIndicatorTop] = useState<number | null>(null);
   useLayoutEffect(() => {
@@ -150,6 +152,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                 : showNewBadge
                   ? `${entry.displayName} — New`
                   : entry.displayName;
+            const quotaLabel = isUnavailable ? null : accountQuotaLabel(entry.snapshot, quotaNow);
 
             const button = (
               <Toolbar.Button
@@ -202,6 +205,13 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                     <SparklesIcon className="size-2" />
                   </span>
                 ) : null}
+                {quotaLabel ? (
+                  <AccountQuotaBar
+                    provider={entry.snapshot}
+                    now={quotaNow}
+                    className="absolute inset-x-2 bottom-0.5"
+                  />
+                ) : null}
               </Toolbar.Button>
             );
 
@@ -224,7 +234,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                     sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
                     align="center"
                   >
-                    {tooltip}
+                    {quotaLabel ? `${tooltip} · ${quotaLabel}` : tooltip}
                   </TooltipPopup>
                 </Tooltip>
               </div>

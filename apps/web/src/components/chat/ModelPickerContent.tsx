@@ -24,6 +24,7 @@ import {
 import { ChevronRightIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
+import { AccountQuotaSummary } from "./AccountQuota";
 import { getProviderStatusMessage, hasProviderSetup } from "./ProviderStatusBanner";
 import {
   modelPickerLegacySectionKey,
@@ -793,6 +794,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     handleModelSelect(model.slug, model.instanceId);
   };
 
+  const selectedQuotaProvider =
+    selectedInstanceId === "favorites"
+      ? undefined
+      : instanceEntries.find((entry) => entry.instanceId === selectedInstanceId)?.snapshot;
+
   return (
     <TooltipProvider delay={0}>
       <WindowKeyDownListener onKeyDown={onWindowKeyDown} />
@@ -927,6 +933,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               onMouseDown={(e) => e.stopPropagation()}
               onTouchStart={(e) => e.stopPropagation()}
             />
+            {selectedQuotaProvider && !isSearching ? (
+              <AccountQuotaSummary provider={selectedQuotaProvider} />
+            ) : null}
 
             <ModelPickerList
               listRef={modelListRef}

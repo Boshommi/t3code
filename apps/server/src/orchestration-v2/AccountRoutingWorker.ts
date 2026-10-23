@@ -8,7 +8,7 @@ import {
   type ServerProvider,
   type ServerSettings as ServerSettingsValue,
 } from "@t3tools/contracts";
-import { remainingPercent } from "@t3tools/shared/usageLimits";
+import { tightestLimitWindow } from "@t3tools/shared/usageLimits";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -27,27 +27,6 @@ function accountIdentity(provider: ServerProvider): string | null {
   if (email) return `email:${email}`;
   const fingerprint = provider.usageLimits?.credentialFingerprint;
   return fingerprint ? `credential:${fingerprint}` : null;
-}
-
-/**
- * The tightest window decides how much an account has left. A window whose
- * reset time has passed is treated as refilled, since readings can be older
- * than the reset. Accounts without a reading are skipped: they may be API-key
- * accounts that bill per request, or limited without us knowing.
- */
-export function accountQuotaLeft(provider: ServerProvider, nowMs: number): number | null {
-  const limits = provider.usageLimits;
-  if (limits === undefined || limits.unavailable?.reason === "unsupported") return null;
-  if (limits.windows.length === 0) return null;
-  let left = 100;
-  for (const window of limits.windows) {
-    const resetsAt = window.resetsAt === undefined ? Number.NaN : Date.parse(window.resetsAt);
-    left = Math.min(
-      left,
-      Number.isFinite(resetsAt) && resetsAt <= nowMs ? 100 : remainingPercent(window),
-    );
-  }
-  return left;
 }
 
 /**
@@ -86,8 +65,9 @@ export function pickRoutingAccount(input: {
     ) {
       continue;
     }
-    const left = accountQuotaLeft(provider, input.nowMs);
-    if (left === null || left <= 0) continue;
+    // Accounts without a reading may bill per request or be limited without us knowing.
+    const left = tightestLimitWindow(provider.usageLimits, input.nowMs)?.remaining;
+    if (left === undefined || left <= 0) continue;
     if (best === null || left > best.left) best = { provider, left };
   }
   return best?.provider ?? null;
@@ -190,7 +170,7 @@ const makeSweep = Effect.gen(function* () {
         discard: true,
       }).pipe(
         // Command ids are stable per limited run and account, so a rejected switch repeats its first answer.
-        Effect.catchTag("OrchestratorCommandPreviouslyRejectedError", () => Effect.void),
+        Effect.catchTags({ OrchestratorCommandPreviouslyRejectedError: () => Effect.void }),
         Effect.catchCause((cause) =>
           Effect.logWarning("orchestration-v2.account-routing.dispatch-failed", {
             threadId: candidate.threadId,

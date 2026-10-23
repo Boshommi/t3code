@@ -3,6 +3,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
+  type ServerProviderUsageWindow,
   UsageLimitSourceId,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
@@ -19,6 +20,7 @@ import {
   elapsedShare,
   paceOf,
   paceRemainingPercent,
+  tightestLimitWindow,
   usesChatGptSharing,
 } from "./usageLimits.ts";
 
@@ -1288,5 +1290,39 @@ describe("ChatGPT sharing presentation", () => {
         auth: { status: "unauthenticated", subscriptionSharing: true },
       }),
     ).toBe(false);
+  });
+});
+
+describe("tightestLimitWindow", () => {
+  const weekly = { ...window, id: "seven_day", kind: "weekly" as const, label: "Weekly" };
+  const limits = (windows: ReadonlyArray<ServerProviderUsageWindow>) => ({
+    checkedAt: "2026-09-03T11:00:00.000Z",
+    windows,
+  });
+
+  it("reports the window that runs out first", () => {
+    expect(
+      tightestLimitWindow(limits([window, { ...weekly, usedPercent: 78 }]), now),
+    ).toMatchObject({ window: { id: "seven_day" }, remaining: 22 });
+  });
+
+  it("treats a window past its reset as refilled", () => {
+    expect(
+      tightestLimitWindow(
+        limits([{ ...window, usedPercent: 100, resetsAt: "2026-09-03T11:00:00.000Z" }]),
+        now,
+      )?.remaining,
+    ).toBe(100);
+  });
+
+  it("has no answer without a reading", () => {
+    expect(tightestLimitWindow(undefined, now)).toBeNull();
+    expect(tightestLimitWindow(limits([]), now)).toBeNull();
+    expect(
+      tightestLimitWindow(
+        { ...limits([window]), unavailable: { reason: "probeFailed" as const } },
+        now,
+      ),
+    ).toBeNull();
   });
 });

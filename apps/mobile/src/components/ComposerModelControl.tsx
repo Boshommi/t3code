@@ -1,4 +1,9 @@
-import type { ModelSelection, ProviderDriverKind } from "@t3tools/contracts";
+import type {
+  ModelSelection,
+  ProviderDriverKind,
+  ServerProviderUsageLimits,
+} from "@t3tools/contracts";
+import { tightestLimitWindow } from "@t3tools/shared/usageLimits";
 import {
   buildTraitsTriggerDisplay,
   getPromptControlledTraits,
@@ -19,6 +24,8 @@ export function ComposerModelControl(props: {
   readonly disabled?: boolean;
   readonly iconOnly?: boolean;
   readonly showSummary?: boolean;
+  /** The selected account's limits, shown as what its tightest window has left. */
+  readonly usageLimits?: ServerProviderUsageLimits | undefined;
   readonly onPress: () => void;
 }) {
   const descriptors = resolveProviderOptionDescriptors({
@@ -36,6 +43,12 @@ export function ComposerModelControl(props: {
         reportedModelSelection: props.reportedSelection,
       }).label
     : "";
+  // Judged as of the reading, which refreshes whenever the server sends new limits.
+  const quota = props.usageLimits
+    ? tightestLimitWindow(props.usageLimits, Date.parse(props.usageLimits.checkedAt))
+    : null;
+  const quotaLabel = quota ? `${quota.remaining}% left` : null;
+  const suffixText = [summary, quotaLabel].filter(Boolean).join(" · ");
   const badge = props.modelOption?.providerBadge;
   const label = props.modelOption?.label ?? props.selection?.model ?? "Choose model";
   return (
@@ -45,6 +58,7 @@ export function ComposerModelControl(props: {
         label,
         badge?.showBadge ? badge.displayName : null,
         summary,
+        quotaLabel,
       ]
         .filter(Boolean)
         .join(", ")}
@@ -72,9 +86,9 @@ export function ComposerModelControl(props: {
       label={label}
       iconOnly={props.iconOnly}
       suffix={
-        props.showSummary !== false && summary ? (
+        props.showSummary !== false && suffixText ? (
           <Text className="text-xs text-foreground-muted" numberOfLines={1}>
-            {summary}
+            {suffixText}
           </Text>
         ) : undefined
       }

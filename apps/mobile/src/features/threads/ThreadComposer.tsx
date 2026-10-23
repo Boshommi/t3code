@@ -771,6 +771,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
         surfaceColor={composerPanel}
         iconOnly={!usesCard && draftMessage.length > 0}
         showSummary={usesCard}
+        usageLimits={selectedProviderStatus?.usageLimits}
         onPress={openSettings}
       />
     </View>

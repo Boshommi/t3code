@@ -1742,6 +1742,7 @@ export function NewTaskDraftScreen(props: {
                         modelOption={flow.selectedModelOption}
                         selection={flow.selectedModel}
                         provider={flow.selectedProviderStatus?.driver}
+                        usageLimits={flow.selectedProviderStatus?.usageLimits}
                         prompt={flow.prompt}
                         surfaceColor={theme["--color-composer-panel"]}
                         disabled={isComposerInteractionLocked}

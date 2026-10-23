@@ -530,6 +530,26 @@ export function remainingPercent(window: ServerProviderUsageWindow): number {
   return Math.round(100 - Math.max(0, Math.min(100, window.usedPercent)));
 }
 
+/**
+ * The window that runs out first decides how much an account can still do.
+ * A window whose reset time has passed counts as refilled, since a reading can
+ * be older than its reset. Null when the account reports no windows.
+ */
+export function tightestLimitWindow(
+  limits: ServerProviderUsageLimits | undefined,
+  now: number,
+): { readonly window: ServerProviderUsageWindow; readonly remaining: number } | null {
+  if (limits === undefined || limitsNotice(limits) !== null) return null;
+  let tightest: { readonly window: ServerProviderUsageWindow; readonly remaining: number } | null =
+    null;
+  for (const window of limits.windows) {
+    const resetsAt = resetMillis(window);
+    const remaining = resetsAt !== null && resetsAt <= now ? 100 : remainingPercent(window);
+    if (tightest === null || remaining < tightest.remaining) tightest = { window, remaining };
+  }
+  return tightest;
+}
+
 function resetMillis(window: ServerProviderUsageWindow): number | null {
   if (window.resetsAt === undefined) return null;
   const at = Date.parse(window.resetsAt);
