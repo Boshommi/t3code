@@ -6,10 +6,16 @@ import * as Schema from "effect/Schema";
 
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { materializeShadowHome, type ShadowHomePolicy } from "./ShadowHome.ts";
 
 const quotePath = Schema.encodeSync(Schema.fromJsonString(Schema.String));
 
-export const resolveClaudeHomePath = Effect.fn("resolveClaudeHomePath")(function* (
+type ClaudeHomeConfig = Pick<ClaudeSettings, "homePath"> & {
+  readonly shadowHomePath?: string | undefined;
+};
+
+/** The directory whose conversations and settings every account of this home shares. */
+export const resolveClaudeSharedHomePath = Effect.fn("resolveClaudeSharedHomePath")(function* (
   config: Pick<ClaudeSettings, "homePath">,
   environment?: NodeJS.ProcessEnv,
 ): Effect.fn.Return<string, never, Path.Path> {
@@ -27,14 +33,26 @@ export const resolveClaudeHomePath = Effect.fn("resolveClaudeHomePath")(function
   return path.resolve(path.join(home, ".claude"));
 });
 
+/** The CLAUDE_CONFIG_DIR this instance runs with: its account directory when set. */
+export const resolveClaudeHomePath = Effect.fn("resolveClaudeHomePath")(function* (
+  config: ClaudeHomeConfig,
+  environment?: NodeJS.ProcessEnv,
+): Effect.fn.Return<string, never, Path.Path> {
+  const shadowHomePath = config.shadowHomePath?.trim() ?? "";
+  if (shadowHomePath.length === 0) return yield* resolveClaudeSharedHomePath(config, environment);
+  const path = yield* Path.Path;
+  return path.resolve(expandHomePath(shadowHomePath, yield* HostProcess.HomeDirectory));
+});
+
 export const makeClaudeEnvironment = Effect.fn("makeClaudeEnvironment")(function* (
-  config: Pick<ClaudeSettings, "homePath">,
+  config: ClaudeHomeConfig,
   baseEnv?: NodeJS.ProcessEnv,
 ): Effect.fn.Return<NodeJS.ProcessEnv, never, Path.Path> {
   const resolvedBaseEnv = baseEnv ?? process.env;
-  const homePath = config.homePath.trim();
-  if (homePath.length === 0) return resolvedBaseEnv;
-  const resolvedHomePath = yield* resolveClaudeHomePath(config);
+  if (config.homePath.trim().length === 0 && (config.shadowHomePath?.trim() ?? "") === "") {
+    return resolvedBaseEnv;
+  }
+  const resolvedHomePath = yield* resolveClaudeHomePath(config, resolvedBaseEnv);
   return {
     ...resolvedBaseEnv,
     // Overriding HOME also relocates the macOS login keychain lookup
@@ -44,6 +62,52 @@ export const makeClaudeEnvironment = Effect.fn("makeClaudeEnvironment")(function
     // keychain) intact.
     CLAUDE_CONFIG_DIR: resolvedHomePath,
   };
+});
+
+/**
+ * Claude keeps the login, account record and org-pushed settings in its config
+ * directory; everything else, including conversation transcripts, is shared so
+ * another account can resume the same thread. On macOS the login lives in a
+ * Keychain entry keyed by the config directory, which also stays per account.
+ */
+const CLAUDE_SHADOW_HOME_POLICY: ShadowHomePolicy = {
+  label: "Claude",
+  knownSharedDirectories: [
+    "projects",
+    "todos",
+    "tasks",
+    "file-history",
+    "session-env",
+    "shell-snapshots",
+    "plans",
+    "agents",
+    "commands",
+    "skills",
+    "plugins",
+  ],
+  privateEntries: new Set([
+    ".credentials.json",
+    ".claude.json",
+    ".claude.json.backup",
+    "remote-settings.json",
+    "statsig",
+  ]),
+  credentialEntry: ".credentials.json",
+  localEntries: new Set([".DS_Store", "backups", "debug", "ide", "logs"]),
+  // Resuming depends on shared transcripts; other runtime folders Claude made
+  // before they were shared are harmless to keep.
+  onLocalCopy: (entryName) => (entryName === "projects" ? "error" : "keep"),
+};
+
+export const materializeClaudeShadowHome = Effect.fn("materializeClaudeShadowHome")(function* (
+  config: ClaudeHomeConfig,
+  environment?: NodeJS.ProcessEnv,
+) {
+  if ((config.shadowHomePath?.trim() ?? "") === "") return;
+  yield* materializeShadowHome(CLAUDE_SHADOW_HOME_POLICY, {
+    sharedHomePath: yield* resolveClaudeSharedHomePath(config, environment),
+    effectiveHomePath: yield* resolveClaudeHomePath(config, environment),
+  });
 });
 
 /**
@@ -69,14 +133,17 @@ export const makeClaudeContinuationGroupKey = Effect.fn("makeClaudeContinuationG
     config: Pick<ClaudeSettings, "homePath">,
     environment?: NodeJS.ProcessEnv,
   ): Effect.fn.Return<string, never, Path.Path> {
-    const resolvedHomePath = yield* resolveClaudeHomePath(config, environment);
+    // Accounts sharing a home share transcripts, so they can resume each other's threads.
+    const resolvedHomePath = yield* resolveClaudeSharedHomePath(config, environment);
     return `claude:home:${resolvedHomePath}`;
   },
 );
 
 export const makeClaudeCapabilitiesCacheKey = Effect.fn("makeClaudeCapabilitiesCacheKey")(
   function* (
-    config: Pick<ClaudeSettings, "binaryPath" | "homePath">,
+    config: Pick<ClaudeSettings, "binaryPath" | "homePath"> & {
+      readonly shadowHomePath?: string | undefined;
+    },
     cwd?: string,
     environment?: NodeJS.ProcessEnv,
   ): Effect.fn.Return<string, never, Path.Path> {

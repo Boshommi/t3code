@@ -591,6 +591,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.snoozeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads
       ? ["Snooze limited threads"]
       : []),
+    ...(settings.switchLimitedAccounts !== DEFAULT_UNIFIED_SETTINGS.switchLimitedAccounts
+      ? ["Switch accounts at limits"]
+      : []),
     ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
     ...(settings.persistComposerContextStrip !==
     DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip
@@ -749,6 +752,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
       autoResumeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads,
       snoozeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads,
+      switchLimitedAccounts: DEFAULT_UNIFIED_SETTINGS.switchLimitedAccounts,
       responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
       continueThreadsAfterServerUpdate: DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate,
@@ -2273,6 +2277,22 @@ export function GeneralSettingsPanel() {
                 updateSettings({ snoozeLimitedThreads: Boolean(checked) })
               }
               aria-label="Snooze limited threads"
+            />
+          }
+        />
+        <SettingsRow
+          serverScoped
+          {...searchableSetting("switch-limited-accounts")}
+          description="When an account reaches its usage limit, continue the thread on the account with the most quota left. Only accounts that can resume the thread are used."
+          settingKeys={["switchLimitedAccounts"]}
+          control={
+            <ScopedSwitch
+              settingKeys={["switchLimitedAccounts"]}
+              checked={settings.switchLimitedAccounts}
+              onCheckedChange={(checked) =>
+                updateSettings({ switchLimitedAccounts: Boolean(checked) })
+              }
+              aria-label="Switch accounts at limits"
             />
           }
         />

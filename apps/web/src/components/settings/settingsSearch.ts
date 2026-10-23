@@ -318,6 +318,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["usage quota rate limit reset wake recover continue"],
   },
   {
+    id: "switch-limited-accounts",
+    title: "Switch accounts at limits",
+    to: "/settings/general",
+    searchTerms: ["usage quota rate limit account rotate route failover multiple accounts"],
+  },
+  {
     id: "auto-resume-limited-threads",
     title: "Auto-resume limited threads",
     to: "/settings/general",

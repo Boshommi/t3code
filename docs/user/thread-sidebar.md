@@ -256,6 +256,16 @@ the snooze. Enable **Snooze limited threads** in thread behavior settings to
 snooze limit stops by default. Providers without a reset time offer manual
 retry and the normal snooze choices.
 
+Enable **Switch accounts at limits** in the same settings to continue a limited
+thread on another account right away. T3 Code picks the account with the most
+quota left among the ones that can resume the thread: Codex accounts that share
+a Codex home, or Claude accounts that share a Claude config directory. Accounts
+without subscription limits, such as API-key accounts, are never used. The
+thread shows which account it moved to, and messages queued behind the limit
+move with it. Choose another account in the model picker to start a thread on
+it; switching only happens once that account reaches its limit. When every
+compatible account is limited, the thread waits as usual.
+
 On web and desktop, use **Agents** to follow work delegated to subagents.
 Stop on a thread also stops the subagents it delegated to.
 

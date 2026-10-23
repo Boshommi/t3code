@@ -9,6 +9,20 @@ export const ADD_PROVIDER_WIZARD_STEPS = ["Provider", "Identity", "Config"] as c
 export const ACP_REGISTRY_WIZARD_STEPS = ["Provider", "Identity", "Sign in"] as const;
 export const LOCAL_ACP_WIZARD_STEPS = ["Provider", "Identity"] as const;
 
+/**
+ * A new Claude account with no folder of its own gets an account directory
+ * that shares conversations with the default Claude home, so existing threads
+ * can continue on it. A folder the user chose is left as is.
+ */
+export function withClaudeAccountDirectory(
+  config: Record<string, unknown>,
+  instanceId: string,
+): Record<string, unknown> {
+  const isBlank = (value: unknown) => typeof value !== "string" || value.trim().length === 0;
+  if (!isBlank(config.homePath) || !isBlank(config.shadowHomePath)) return config;
+  return { ...config, shadowHomePath: `~/.claude-t3/${instanceId}` };
+}
+
 export interface ProviderIdentityDraft {
   readonly label: string;
   readonly accentColor: string;

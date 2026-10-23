@@ -43,6 +43,7 @@ import {
   resolveAcpRegistryWizardNavigation,
   resolveWizardNavigation,
   updateProviderIdentityDraft,
+  withClaudeAccountDirectory,
   type ProviderIdentityDraft,
   type WizardNavigation,
 } from "./AddProviderInstanceDialog.logic";
@@ -302,7 +303,9 @@ export function AddProviderInstanceDialog({
     const config =
       driver === "codex"
         ? { ...configByDriver[driver], setupMode: "existing" }
-        : (configByDriver[driver] ?? {});
+        : driver === "claudeAgent"
+          ? withClaudeAccountDirectory(configByDriver[driver] ?? {}, instanceId)
+          : (configByDriver[driver] ?? {});
     const hasConfig = Object.keys(config).length > 0;
     const normalizedAccentColor = normalizeProviderAccentColor(accentColor);
 
@@ -332,7 +335,7 @@ export function AddProviderInstanceDialog({
       return;
     }
     onCreated?.(brandedId);
-    if (isAcpRegistry && !isLocalAcp) {
+    if ((isAcpRegistry && !isLocalAcp) || driver === "claudeAgent") {
       setCreatedInstanceId(brandedId);
       setIsSaving(false);
       setWizardStep(2);

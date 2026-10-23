@@ -14,6 +14,7 @@ import {
   type OrchestrationV2ProviderTurnTokenUsage,
   type OrchestrationV2ThreadProjection,
   ProjectId,
+  type ServerProvider,
   ProviderInstanceId,
   ProviderSessionId,
   ProviderThreadId,
@@ -54,6 +55,7 @@ import * as EffectOutbox from "../EffectOutbox.ts";
 import * as ProjectionMaintenance from "../ProjectionMaintenance.ts";
 import * as ProjectionStore from "../ProjectionStore.ts";
 import * as ProviderAdapterRegistry from "../ProviderAdapterRegistry.ts";
+import { accountRoutingCommands } from "../AccountRoutingWorker.ts";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import {
   CLAUDE_MODEL_SELECTION,
@@ -2452,6 +2454,225 @@ describe("orchestration v2 provider switching", () => {
           );
         }),
       ),
+  );
+
+  it.live("continues a limited thread and its queue on another account", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const cwd = yield* checkpointWorkspace("account-routing");
+        const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+        const started = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        const workSelection: ModelSelection = {
+          ...CODEX_MODEL_SELECTION,
+          instanceId: ProviderInstanceId.make("codex-work"),
+        };
+        const adapters = [
+          makeTestAdapter({
+            instanceId: CODEX_MODEL_SELECTION.instanceId,
+            driver: CODEX_DRIVER,
+            capabilities: CodexProviderCapabilitiesV2,
+            modelSelection: CODEX_MODEL_SELECTION,
+            responseByRunOrdinal: {},
+            capturedTurns,
+            holdFirstTurn: started,
+            releaseFirstTurn: release,
+            failedRunOrdinals: new Set([1]),
+            failure: makeProviderFailure({
+              message: "Usage limit reached",
+              class: "usage_limit",
+              code: "usage_limit",
+            }),
+          }),
+          makeTestAdapter({
+            instanceId: workSelection.instanceId,
+            driver: CODEX_DRIVER,
+            capabilities: CodexProviderCapabilitiesV2,
+            modelSelection: workSelection,
+            responseByRunOrdinal: {},
+            capturedTurns,
+          }),
+        ];
+        const groupKey = "codex:shared-native-account-history";
+        const layerRegistry = Layer.succeed(
+          ProviderAdapterRegistry.ProviderAdapterRegistryV2,
+          ProviderAdapterRegistry.ProviderAdapterRegistryV2.of({
+            get: (instanceId) => {
+              const adapter = adapters.find((candidate) => candidate.instanceId === instanceId);
+              return adapter === undefined
+                ? Effect.fail(
+                    new ProviderAdapterRegistry.ProviderAdapterRegistryLookupError({ instanceId }),
+                  )
+                : Effect.succeed(adapter);
+            },
+            list: () => Effect.succeed(adapters.map((adapter) => adapter.instanceId)),
+            getMetadata: (instanceId) =>
+              Effect.succeed({
+                driver: CODEX_DRIVER,
+                continuationKey: groupKey,
+                enabled: true,
+                capabilities: CodexProviderCapabilitiesV2,
+                displayName: instanceId === workSelection.instanceId ? "Work" : "Personal",
+              }),
+          }),
+        );
+        const account = (instanceId: ProviderInstanceId, usedPercent: number): ServerProvider => ({
+          instanceId,
+          driver: CODEX_DRIVER,
+          continuation: { groupKey },
+          enabled: true,
+          installed: true,
+          version: null,
+          status: "ready",
+          auth: { status: "authenticated", email: `${instanceId}@example.com` },
+          checkedAt: "2026-10-23T00:00:00.000Z",
+          models: [
+            {
+              slug: CODEX_MODEL_SELECTION.model,
+              name: CODEX_MODEL_SELECTION.model,
+              isCustom: false,
+              capabilities: null,
+            },
+          ],
+          slashCommands: [],
+          skills: [],
+          usageLimits: {
+            checkedAt: "2026-10-23T00:00:00.000Z",
+            windows: [{ id: "primary", kind: "session", label: "Session", usedPercent }],
+          },
+        });
+        yield* Effect.gen(function* () {
+          const orchestrator = yield* Orchestrator.OrchestratorV2;
+          const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+          const dispatch = (
+            text: string,
+            dispatchMode: "start_immediately" | "queue_after_active",
+          ) =>
+            orchestrator.dispatch({
+              type: "message.dispatch",
+              commandId: CommandId.make(text),
+              messageId: MessageId.make(text),
+              threadId,
+              text,
+              modelSelection: CODEX_MODEL_SELECTION,
+              attachments: [],
+              createdBy: "user",
+              creationSource: "web",
+              dispatchMode: { type: dispatchMode },
+            });
+          yield* orchestrator.dispatch({
+            type: "thread.create",
+            commandId: CommandId.make("create"),
+            threadId,
+            projectId,
+            createdBy: "user",
+            creationSource: "web",
+            title: "Account routing",
+            modelSelection: CODEX_MODEL_SELECTION,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: cwd,
+          });
+          yield* dispatch("Original work", "start_immediately");
+          yield* Deferred.await(started);
+          yield* dispatch("Follow up", "queue_after_active");
+          const [limited, queued] = (yield* orchestrator.getThreadProjection(threadId)).runs;
+          assert.isDefined(limited);
+          assert.isDefined(queued);
+          yield* Deferred.succeed(release, undefined);
+          yield* orchestrator.streamStoredEvents.pipe(
+            Stream.filter(
+              ({ event }) =>
+                event.type === "run.updated" &&
+                event.runId === limited.id &&
+                event.payload.status === "failed",
+            ),
+            Stream.runHead,
+          );
+          yield* worker.drain();
+
+          const failed = yield* orchestrator.getThreadProjection(threadId);
+          const commands = accountRoutingCommands({
+            candidate: {
+              threadId,
+              projectId,
+              modelSelection: failed.thread.modelSelection,
+              runId: limited.id,
+              runProviderInstanceId: limited.providerInstanceId,
+              completedAt: DateTime.nowUnsafe(),
+              resetAt: null,
+              limitRecovery: null,
+              snoozedUntil: null,
+              queuedRuns: failed.runs
+                .filter((run) => run.status === "queued")
+                .map((run) => ({
+                  modelSelection: run.modelSelection,
+                  queueHeld: run.queueHeld === true,
+                })),
+            },
+            providers: [
+              account(CODEX_MODEL_SELECTION.instanceId, 100),
+              account(workSelection.instanceId, 10),
+            ],
+            settings: {
+              providerInstances: {
+                [CODEX_MODEL_SELECTION.instanceId]: { driver: CODEX_DRIVER },
+                [workSelection.instanceId]: { driver: CODEX_DRIVER },
+              },
+              projectSettingsOverrides: {},
+            },
+            nowMs: DateTime.toEpochMillis(yield* DateTime.now),
+          });
+          assert.isNotEmpty(commands);
+          for (const command of commands) yield* orchestrator.dispatch(command);
+          yield* orchestrator.streamStoredEvents.pipe(
+            Stream.filter(
+              ({ event }) =>
+                event.type === "run.updated" &&
+                event.runId === queued.id &&
+                (event.payload.status === "completed" || event.payload.status === "failed"),
+            ),
+            Stream.runHead,
+          );
+          yield* worker.drain();
+
+          const after = yield* orchestrator.getThreadProjection(threadId);
+          const turns = yield* Ref.get(capturedTurns);
+          assert.deepEqual(
+            after.runs.map((run) => [run.providerInstanceId, run.status]),
+            [
+              [CODEX_MODEL_SELECTION.instanceId, "failed"],
+              [workSelection.instanceId, "completed"],
+              [workSelection.instanceId, "completed"],
+            ],
+          );
+          assert.deepEqual(after.thread.modelSelection, workSelection);
+          assert.isEmpty(after.contextHandoffs);
+          assert.deepEqual(
+            turns.map((turn) => [turn.text, turn.nativeThreadId]),
+            [
+              ["Original work", turns[0]!.nativeThreadId],
+              ["Continue where you left off.", turns[0]!.nativeThreadId],
+              ["Follow up", turns[0]!.nativeThreadId],
+            ],
+          );
+          assert.deepEqual(
+            after.turnItems.flatMap((item) =>
+              item.type === "system_notice" ? [item.message] : [],
+            ),
+            ["Personal reached its usage limit. Continuing on Work."],
+          );
+        }).pipe(
+          Effect.provide(
+            ProviderReplayHarness.layerWithRegistry(
+              { name: "account-routing", runtimePolicyOverride: { cwd } },
+              layerRegistry,
+            ),
+          ),
+        );
+      }),
+    ),
   );
 
   it.live("fails an unsupported queued handoff and advances to the next queued provider", () =>

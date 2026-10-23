@@ -59,12 +59,21 @@ import {
 import {
   makeClaudeCapabilitiesCacheKey,
   makeClaudeContinuationGroupKey,
+  materializeClaudeShadowHome,
   resolveClaudeHomePath,
 } from "./ClaudeHome.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { makeClaudeAuth } from "../ClaudeAuth.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
+const CLAUDE_EXTERNAL_CREDENTIAL_VARIABLES = [
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_VERTEX",
+] as const;
 const CAPABILITIES_PROBE_TTL = Duration.minutes(5);
 
 const withoutUsage = (capabilities: ClaudeCapabilitiesProbe): ClaudeCapabilitiesProbe => {
@@ -155,19 +164,41 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
         Effect.provideService(Path.Path, path),
       ),
     );
+    yield* materializeClaudeShadowHome(effectiveConfig, processEnv).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.mapError(
+        (cause) =>
+          new ProviderDriverError({
+            driver: DRIVER_KIND,
+            instanceId,
+            detail: cause.message,
+            cause,
+          }),
+      ),
+    );
     const continuationGroupKey = yield* makeClaudeContinuationGroupKey(effectiveConfig, processEnv);
     const configDir = yield* resolveClaudeHomePath(effectiveConfig, processEnv);
     const accountConfigPath = yield* ClaudeResetCredits.claudeAccountConfigPath(
-      effectiveConfig.homePath.trim() || processEnv.CLAUDE_CONFIG_DIR?.trim()
+      effectiveConfig.homePath.trim() ||
+        effectiveConfig.shadowHomePath.trim() ||
+        processEnv.CLAUDE_CONFIG_DIR?.trim()
         ? configDir
         : undefined,
     );
-    const stampIdentity = withInstanceIdentity({
+    const stampInstance = withInstanceIdentity({
       instanceId,
       driverKind: DRIVER_KIND,
       displayName,
       accentColor,
       continuationGroupKey,
+    });
+    // Configured API credentials replace the subscription login, so signing in would not apply.
+    const canAuthenticate = !CLAUDE_EXTERNAL_CREDENTIAL_VARIABLES.some((name) =>
+      processEnv[name]?.trim(),
+    );
+    const stampIdentity: typeof stampInstance = (draft) => ({
+      ...stampInstance(draft),
+      setup: { canAuthenticate, canInstall: false },
     });
 
     const scopedLimitNames = yield* makeClaudeScopedLimitNames;
@@ -392,6 +423,17 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       ),
     );
 
+    const auth = yield* makeClaudeAuth({
+      instanceId,
+      settings: effectiveConfig,
+      environment: processEnv,
+      configDir,
+      onChanged: Cache.invalidateAll(capabilitiesProbeCache).pipe(
+        Effect.andThen(snapshot.refresh),
+        Effect.asVoid,
+      ),
+    }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
+
     return {
       instanceId,
       driverKind: DRIVER_KIND,
@@ -415,6 +457,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       orchestrationAdapter,
       textGeneration,
       consumeResetCredit,
+      ...(canAuthenticate ? { auth } : {}),
     } satisfies ProviderInstance;
   }),
 };

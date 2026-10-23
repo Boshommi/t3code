@@ -56,6 +56,7 @@ export interface ProviderAdapterRegistryV2Shape {
       readonly continuationKey: string;
       readonly enabled: boolean;
       readonly capabilities: OrchestrationV2ProviderCapabilities;
+      readonly displayName?: string | undefined;
     },
     ProviderAdapterRegistryV2Error
   >;
@@ -153,6 +154,7 @@ export const layerFromProviderInstanceRegistry: Layer.Layer<
           continuationKey: instance.continuationIdentity.continuationKey,
           enabled: instance.enabled,
           capabilities,
+          displayName: instance.displayName,
         };
       }),
     });

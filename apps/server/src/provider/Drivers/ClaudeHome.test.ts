@@ -3,12 +3,15 @@ import * as NodeOS from "node:os";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 
 import {
   makeClaudeCapabilitiesCacheKey,
   makeClaudeContinuationGroupKey,
   makeClaudeEnvironment,
+  materializeClaudeShadowHome,
   resolveClaudeHomePath,
 } from "./ClaudeHome.ts";
 
@@ -54,6 +57,46 @@ it.layer(NodeServices.layer)("ClaudeHome", (it) => {
         const second = yield* makeClaudeCapabilitiesCacheKey(config, "/repo-b");
         expect(first).not.toBe(second);
       }),
+    );
+  });
+  describe("Claude account directories", () => {
+    it.effect.skipIf(!symlinksSupported)(
+      "shares conversations and settings while keeping each login private",
+      () =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const sharedHome = yield* fileSystem.makeTempDirectoryScoped({
+            prefix: "claude-shared-",
+          });
+          const accountRoot = yield* fileSystem.makeTempDirectoryScoped({
+            prefix: "claude-account-",
+          });
+          const accountHome = path.join(accountRoot, "work");
+          yield* fileSystem.writeFileString(path.join(sharedHome, "settings.json"), "{}\n");
+          yield* fileSystem.writeFileString(path.join(sharedHome, ".credentials.json"), "shared");
+          yield* fileSystem.writeFileString(path.join(sharedHome, ".claude.json"), "shared");
+          const config = { homePath: sharedHome, shadowHomePath: accountHome };
+
+          yield* materializeClaudeShadowHome(config);
+          // A second account start must leave the first setup intact.
+          yield* materializeClaudeShadowHome(config);
+
+          expect(yield* resolveClaudeHomePath(config)).toBe(accountHome);
+          expect((yield* makeClaudeEnvironment(config)).CLAUDE_CONFIG_DIR).toBe(accountHome);
+          // Accounts on one shared home can resume each other's threads.
+          expect(yield* makeClaudeContinuationGroupKey(config)).toBe(
+            yield* makeClaudeContinuationGroupKey({ homePath: sharedHome }),
+          );
+          for (const shared of ["projects", "todos", "settings.json"]) {
+            expect(yield* fileSystem.readLink(path.join(accountHome, shared))).toBe(
+              path.join(sharedHome, shared),
+            );
+          }
+          for (const owned of [".credentials.json", ".claude.json"]) {
+            expect(yield* fileSystem.exists(path.join(accountHome, owned))).toBe(false);
+          }
+        }).pipe(Effect.scoped),
     );
   });
 });

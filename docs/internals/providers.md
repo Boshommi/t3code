@@ -9,6 +9,14 @@ A driver kind identifies an integration; an instance identifies one configuratio
 lifecycle. Route work by instance, so two accounts using the same driver do not share mutable
 session or catalog state. For a new driver, start with [adding a provider](./adding-a-provider.md).
 
+Instances with the same continuation key can resume each other's native threads. Codex and Claude
+get there with an account directory whose entries link to a shared home, except the login and
+account records ([shadow homes](../../apps/server/src/provider/Drivers/ShadowHome.ts)). Automatic
+account switching ([worker](../../apps/server/src/orchestration-v2/AccountRoutingWorker.ts)) only
+moves a limited thread within one continuation key, through the same continuation a user starts
+with **Resume**. It never picks an instance without a usage reading, because such an account may
+bill per request or already be limited.
+
 ## Process and account isolation
 
 The `opencode` driver probes the installed version and runs the 1.x or 2.x runtime. OpenCode's MCP

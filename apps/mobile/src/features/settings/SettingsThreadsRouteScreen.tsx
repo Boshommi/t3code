@@ -90,6 +90,7 @@ function AutoSettleSettingsRows() {
     patch: Partial<AutoSettleSettings> & {
       autoResumeLimitedThreads?: boolean;
       snoozeLimitedThreads?: boolean;
+      switchLimitedAccounts?: boolean;
     },
   ) => {
     if (
@@ -190,6 +191,13 @@ function AutoSettleSettingsRows() {
             value={uniformMobileSetting(displayTargets, "snoozeLimitedThreads")}
             disabled={disabled}
             onValueChange={(value) => writeToAll({ snoozeLimitedThreads: value })}
+          />
+          <SettingsSwitchRow
+            icon="arrow.left.arrow.right"
+            label="Switch accounts at limits"
+            value={uniformMobileSetting(displayTargets, "switchLimitedAccounts")}
+            disabled={disabled}
+            onValueChange={(value) => writeToAll({ switchLimitedAccounts: value })}
           />
         </SettingsSection>
       ) : null}

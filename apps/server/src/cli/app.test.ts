@@ -1,4 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- The integration fixture binds the same platform socket or named pipe as the CLI.
+// @effect-diagnostics anyUnknownInErrorContext:off - The whole CLI's error union is large enough
+// that this check gives up and reports `any`; the compiler still resolves the real requirements.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeEvents from "node:events";
 import * as NodeFSP from "node:fs/promises";

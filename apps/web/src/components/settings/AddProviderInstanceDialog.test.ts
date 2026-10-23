@@ -6,7 +6,25 @@ import {
   resolveAcpRegistryWizardNavigation,
   resolveWizardNavigation,
   updateProviderIdentityDraft,
+  withClaudeAccountDirectory,
 } from "./AddProviderInstanceDialog.logic";
+
+describe("withClaudeAccountDirectory", () => {
+  it("gives a new Claude account its own directory on the shared home", () => {
+    expect(withClaudeAccountDirectory({}, "claudeAgent_work")).toEqual({
+      shadowHomePath: "~/.claude-t3/claudeAgent_work",
+    });
+  });
+
+  it("keeps a folder the user chose", () => {
+    expect(withClaudeAccountDirectory({ homePath: "~/.claude_personal" }, "x")).toEqual({
+      homePath: "~/.claude_personal",
+    });
+    expect(withClaudeAccountDirectory({ shadowHomePath: "~/accounts/work" }, "x")).toEqual({
+      shadowHomePath: "~/accounts/work",
+    });
+  });
+});
 
 describe("resolveWizardNavigation", () => {
   const invalidId = { instanceIdError: "Instance ID is required." };

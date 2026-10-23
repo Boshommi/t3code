@@ -4,35 +4,38 @@ T3 Code uses Claude Code's login and configuration. Start with the default provi
 for one account; [provider setup](./install.md#providers) covers installation and
 shared provider settings.
 
-## Separate accounts or configurations
+## Add another Claude account
 
-Use a separate Claude config directory for each account. This also works for named
-presets that need different Claude settings or a router connection.
+Open **Settings > Providers**, choose **Add provider**, and pick Claude. Leave the
+config directory fields empty, then choose **Sign in** and open the sign-in page in
+any browser. Paste the code it shows back into T3 Code. This works for remote
+environments too, without opening a terminal on that machine.
 
-Keep your existing account in the default directory. On the environment's machine,
-create the second login:
+The new account keeps its login in its own **Account directory**
+(`~/.claude-t3/<instance>`) and shares conversations, settings, skills, and
+agents with your default Claude directory. Existing threads can therefore move
+to it from the model picker or when you enable **Switch accounts at limits**.
+User-level MCP servers and project trust live in the account's own
+`.claude.json`, so each account sets those up separately.
+
+To use an account from the Claude CLI on that machine, point it at the account
+directory:
 
 ```bash
-mkdir -p ~/.claude_personal
-CLAUDE_CONFIG_DIR=~/.claude_personal claude auth login
+CLAUDE_CONFIG_DIR=~/.claude-t3/claudeAgent_work claude
 ```
 
-Add another Claude instance in **Settings > Providers**:
+**Sign in** on the default Claude instance signs in the machine's normal Claude
+CLI login.
 
-| Instance        | Binary path | CLAUDE_CONFIG_DIR path |
-| --------------- | ----------- | ---------------------- |
-| Claude Work     | `claude`    | Leave empty            |
-| Claude Personal | `claude`    | `~/.claude_personal`   |
+## Separate configurations
 
-An empty config-directory setting uses Claude Code's normal configuration. The
-custom setting changes `CLAUDE_CONFIG_DIR`, leaving `HOME` and the system keychain
-location intact. Use the same variable for the login command. Setting `HOME`
-instead can put credentials where this provider will not find them.
-
-Check the account reported in provider settings after signing in. Existing
-threads can switch only between Claude instances with the same config directory.
-Separate account directories stay isolated, including their local conversation
-state. Claude does not have Codex's shared-home and shadow-home arrangement.
+To keep a Claude setup fully isolated, including its conversations, give the
+instance its own **CLAUDE_CONFIG_DIR path** and leave **Account directory**
+empty. This also works for named presets that need different Claude settings or
+a router connection. The custom setting changes `CLAUDE_CONFIG_DIR`, leaving
+`HOME` and the system keychain location intact. Threads can switch only between
+Claude instances that share a config directory.
 
 For presets that differ only in API keys or endpoints, use the instance's
 **Environment variables**. Variable assignments do not belong in **Launch arguments**.

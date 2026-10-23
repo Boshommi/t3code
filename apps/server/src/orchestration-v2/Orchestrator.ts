@@ -6874,6 +6874,65 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
     }
 
+    if (canResumeAcrossInstances) {
+      const fromInstanceId = activeProviderThread.providerInstanceId;
+      const fromLimited = usageLimitHoldsQueue(projection, fromInstanceId);
+      const accountName = (instanceId: ProviderInstanceId): Effect.Effect<string> =>
+        providerAdapters.getMetadata === undefined
+          ? Effect.succeed(instanceId)
+          : providerAdapters.getMetadata(instanceId).pipe(
+              Effect.map((metadata) => metadata.displayName ?? instanceId),
+              Effect.orElseSucceed(() => instanceId),
+            );
+      const fromName = yield* accountName(fromInstanceId);
+      const toName = yield* accountName(modelSelection.instanceId);
+      yield* emitEvent({
+        type: "turn-item.updated",
+        threadId: command.threadId,
+        runId,
+        nodeId: rootNodeId,
+        providerInstanceId: modelSelection.instanceId,
+        occurredAt: now,
+        payload: {
+          id: idAllocator.derive.runSignalTurnItem({ runId, signal: "account-switch" }),
+          threadId: command.threadId,
+          runId,
+          nodeId: rootNodeId,
+          providerThreadId: providerThread.id,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: ordinal * 100 - 2,
+          status: "completed",
+          title: null,
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+          type: "system_notice",
+          message: fromLimited
+            ? `${fromName} reached its usage limit. Continuing on ${toName}.`
+            : `Switched from ${fromName} to ${toName}.`,
+        },
+      });
+      // Queued messages would otherwise wait for the limited account to reset.
+      if (fromLimited) {
+        for (const queued of projection.runs) {
+          if (queued.status !== "queued" || queued.providerInstanceId !== fromInstanceId) continue;
+          yield* emitEvent({
+            type: "run.updated",
+            threadId: command.threadId,
+            runId: queued.id,
+            providerInstanceId: modelSelection.instanceId,
+            occurredAt: now,
+            payload: {
+              ...queued,
+              providerInstanceId: modelSelection.instanceId,
+              modelSelection: { ...queued.modelSelection, instanceId: modelSelection.instanceId },
+            },
+          });
+        }
+      }
+    }
     if (canResumeAcrossInstances && activeProviderThread.providerSessionId !== null) {
       const previousProviderSessionId = activeProviderThread.providerSessionId;
       yield* emitEvent({

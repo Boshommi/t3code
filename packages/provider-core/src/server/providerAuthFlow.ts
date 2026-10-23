@@ -32,6 +32,8 @@ export interface ProviderAuthFlowContext {
     interaction: ProviderAuthInteraction,
     respond?: (response: ProviderAuthResponse) => Effect.Effect<void, ProviderSetupError>,
     complete?: (callbackUrl: string) => Effect.Effect<void, ProviderSetupError>,
+    /** A page to open while answering, such as where a CLI login shows its code. */
+    authorizationUrl?: string,
   ) => Effect.Effect<void>;
   readonly verifying: Effect.Effect<void>;
 }
@@ -282,20 +284,22 @@ export const make = Effect.fn("ProviderAuthFlow.make")(function* (options: {
               ...(returnUrl ? { returnUrl } : {}),
               ...(callbackMode ? { callbackMode } : {}),
               // Terminal sign-in updates this for every output chunk within the auth operation.
-              setInteraction: Effect.fnUntraced(function* (interaction, respond, complete) {
-                if (active !== flow) return;
-                flow.respond = respond;
-                flow.complete = complete;
-                yield* publish(flow, {
-                  phase: "waiting",
-                  interaction,
-                  authorizationUrl:
-                    interaction.type === "browser" || interaction.type === "deviceCode"
-                      ? interaction.url
-                      : null,
-                  message: "Complete sign-in to continue.",
-                });
-              }),
+              setInteraction: Effect.fnUntraced(
+                function* (interaction, respond, complete, authorizationUrl) {
+                  if (active !== flow) return;
+                  flow.respond = respond;
+                  flow.complete = complete;
+                  yield* publish(flow, {
+                    phase: "waiting",
+                    interaction,
+                    authorizationUrl:
+                      interaction.type === "browser" || interaction.type === "deviceCode"
+                        ? interaction.url
+                        : (authorizationUrl ?? null),
+                    message: "Complete sign-in to continue.",
+                  });
+                },
+              ),
               verifying: Effect.gen(function* () {
                 flow.respond = undefined;
                 flow.complete = undefined;

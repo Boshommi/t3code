@@ -1,4 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - CLI integration exercises the filesystem boundary.
+// @effect-diagnostics anyUnknownInErrorContext:off - The whole CLI's error union is large enough
+// that this check gives up and reports `any`; the compiler still resolves the real requirements.
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
