@@ -27,11 +27,21 @@ provider instance's environment overrides to use ACP v1.
 Search only shows agents that can run on the connected server. Registry agents are third-party
 code; review an agent's source and license before adding it.
 
+## DeepSeek Harness
+
+Install and configure [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) on
+the machine running your T3 Code server. In **Settings → Providers → Add provider**, choose
+**DeepSeek Harness**. The setup fills in `dsh` with arguments `--profile` and `acp`; change the
+executable to its full path if it is not on the server's `PATH`, then add the instance.
+
+DeepSeek manages its own model credentials and configuration. Once configured, the instance is
+available from any client connected to that environment, including mobile.
+
 ## Add a local command
 
 In **Settings → Providers → Add provider**, select **Local ACP command**. Enter the executable
 name or path on the selected environment, add one literal argument per row, and choose a display
-name. For DeepSeek Harness, use `dsh` with arguments `--profile` and `acp`.
+name.
 
 Local commands require no registry entry or download. Environment overrides apply to the command;
 credentials and skills remain managed by the installed agent or its wrapper. Models and reasoning

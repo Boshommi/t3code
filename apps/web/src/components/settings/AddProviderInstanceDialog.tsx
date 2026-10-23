@@ -75,6 +75,18 @@ function deriveInstanceId(driver: ProviderDriverKind, label: string): string {
 const INSTANCE_ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 const ACP_REGISTRY_DRIVER_KIND = ProviderDriverKind.make("acpRegistry");
+const DEEPSEEK_HARNESS_OPTION = {
+  id: "deepseekHarness",
+  driverKind: ACP_REGISTRY_DRIVER_KIND,
+  label: "DeepSeek Harness",
+  badgeLabel: undefined,
+};
+const PROVIDER_OPTIONS = [
+  ...providerClients.definitions
+    .filter((option) => option.driverKind !== ACP_REGISTRY_DRIVER_KIND)
+    .map((option) => ({ ...option, id: option.driverKind })),
+  DEEPSEEK_HARNESS_OPTION,
+];
 const DEFAULT_DRIVER_OPTION = providerClients.definitions[0]!;
 const EMPTY_CONFIG_DRAFT: Record<string, unknown> = {};
 /**
@@ -112,7 +124,11 @@ export function AddProviderInstanceDialog({
 
   const [wizardStep, setWizardStep] = useState(0);
   const [addingChatGptAccount, setAddingChatGptAccount] = useState(false);
-  const [driver, setDriver] = useState<ProviderDriverKind>(DEFAULT_DRIVER_KIND);
+  const [selectedProvider, setSelectedProvider] = useState<string>(DEFAULT_DRIVER_KIND);
+  const isDeepSeekHarness = selectedProvider === DEEPSEEK_HARNESS_OPTION.id;
+  const driver = isDeepSeekHarness
+    ? ACP_REGISTRY_DRIVER_KIND
+    : ProviderDriverKind.make(selectedProvider);
   const [identityByDriver, setIdentityByDriver] = useState<Record<string, ProviderIdentityDraft>>(
     {},
   );
@@ -164,6 +180,7 @@ export function AddProviderInstanceDialog({
 
   const configDraft = configByDriver[driver] ?? EMPTY_CONFIG_DRAFT;
   const isLocalAcp = isAcpRegistry && isManualAcpConfiguration && configDraft.source === "local";
+  const localAcpLabel = isDeepSeekHarness ? DEEPSEEK_HARNESS_OPTION.label : "Local ACP command";
   const localCommandPath =
     typeof configDraft.commandPath === "string" ? configDraft.commandPath.trim() : "";
   const manualAgentId = typeof configDraft.agentId === "string" ? configDraft.agentId.trim() : "";
@@ -176,7 +193,7 @@ export function AddProviderInstanceDialog({
       : "Select an ACP or configure one manually.";
   const wizardStepSummaries = isAcpRegistry
     ? ([
-        isLocalAcp ? "Local ACP command" : (selectedAcp?.name ?? (manualAgentId || null)),
+        isLocalAcp ? localAcpLabel : (selectedAcp?.name ?? (manualAgentId || null)),
         previewLabel,
         null,
       ] as const)
@@ -230,7 +247,7 @@ export function AddProviderInstanceDialog({
   };
 
   const handleAcpPrepared = (agent: AcpRegistrySearchAgent) => {
-    setDriver(ACP_REGISTRY_DRIVER_KIND);
+    setSelectedProvider(ACP_REGISTRY_DRIVER_KIND);
     const nextLabel = agent.name;
     const registryIconUrl = resolveOfficialAcpRegistryIconUrl(agent.icon);
     const nextInstanceId = deriveAvailableInstanceId(
@@ -259,7 +276,7 @@ export function AddProviderInstanceDialog({
   };
 
   const handleManualAcpConfiguration = () => {
-    setDriver(ACP_REGISTRY_DRIVER_KIND);
+    setSelectedProvider(ACP_REGISTRY_DRIVER_KIND);
     setSelectedAcp(null);
     setIsManualAcpConfiguration(true);
     setConfigByDriver((existing) => {
@@ -276,17 +293,21 @@ export function AddProviderInstanceDialog({
     setHasAttemptedSubmit(false);
   };
 
-  const handleLocalAcpConfiguration = () => {
-    setDriver(ACP_REGISTRY_DRIVER_KIND);
+  const handleLocalAcpConfiguration = (deepSeek = false) => {
+    setSelectedProvider(deepSeek ? DEEPSEEK_HARNESS_OPTION.id : ACP_REGISTRY_DRIVER_KIND);
     setSelectedAcp(null);
     setIsManualAcpConfiguration(true);
     setConfigByDriver((existing) => ({
       ...existing,
-      [ACP_REGISTRY_DRIVER_KIND]: { source: "local", commandArgs: [] },
+      [ACP_REGISTRY_DRIVER_KIND]: {
+        source: "local",
+        commandArgs: deepSeek ? ["--profile", "acp"] : [],
+        ...(deepSeek ? { commandPath: "dsh" } : {}),
+      },
     }));
     setIdentityByDriver((existing) =>
       updateProviderIdentityDraft(existing, ACP_REGISTRY_DRIVER_KIND, {
-        label: "Local ACP",
+        label: deepSeek ? DEEPSEEK_HARNESS_OPTION.label : "Local ACP",
         instanceIdOverride: null,
       }),
     );
@@ -406,46 +427,48 @@ export function AddProviderInstanceDialog({
                 </div>
                 <RadioGroup
                   disabled={isPreparingRegistryAgent}
-                  value={driver}
+                  value={selectedProvider}
                   onValueChange={(value) => {
-                    setDriver(ProviderDriverKind.make(value));
+                    if (value === DEEPSEEK_HARNESS_OPTION.id) {
+                      handleLocalAcpConfiguration(true);
+                      return;
+                    }
+                    setSelectedProvider(value);
                     setIsManualAcpConfiguration(false);
                     setHasAttemptedSubmit(false);
                   }}
                   aria-labelledby="add-instance-driver-label"
                   className="grid grid-cols-1 sm:grid-cols-2"
                 >
-                  {providerClients.definitions
-                    .filter((option) => option.driverKind !== ACP_REGISTRY_DRIVER_KIND)
-                    .map((option) => {
-                      return (
-                        <RadioPrimitive.Root
-                          key={option.driverKind}
-                          value={option.driverKind}
-                          className="relative flex cursor-pointer items-center gap-3 rounded-lg bg-card px-3 py-3 text-left text-muted-foreground outline-none ring-1 ring-black/5 hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-checked:bg-primary/8 data-checked:text-foreground data-checked:ring-2 data-checked:ring-inset data-checked:ring-primary data-checked:hover:bg-primary/8 dark:bg-white/3 dark:ring-white/5 dark:hover:bg-white/5 dark:data-checked:bg-primary/15 dark:data-checked:ring-primary dark:data-checked:hover:bg-primary/15"
+                  {PROVIDER_OPTIONS.map((option) => {
+                    return (
+                      <RadioPrimitive.Root
+                        key={option.id}
+                        value={option.id}
+                        className="relative flex cursor-pointer items-center gap-3 rounded-lg bg-card px-3 py-3 text-left text-muted-foreground outline-none ring-1 ring-black/5 hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-checked:bg-primary/8 data-checked:text-foreground data-checked:ring-2 data-checked:ring-inset data-checked:ring-primary data-checked:hover:bg-primary/8 dark:bg-white/3 dark:ring-white/5 dark:hover:bg-white/5 dark:data-checked:bg-primary/15 dark:data-checked:ring-primary dark:data-checked:hover:bg-primary/15"
+                      >
+                        <ProviderInstanceIcon
+                          driverKind={option.driverKind}
+                          displayName={option.label}
+                          iconClassName="size-4"
+                        />
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                          {option.label}
+                        </span>
+                        <RadioPrimitive.Indicator
+                          className="grid size-5 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground"
+                          aria-hidden
                         >
-                          <ProviderInstanceIcon
-                            driverKind={option.driverKind}
-                            displayName={option.label}
-                            iconClassName="size-4"
-                          />
-                          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-                            {option.label}
-                          </span>
-                          <RadioPrimitive.Indicator
-                            className="grid size-5 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground"
-                            aria-hidden
-                          >
-                            <CheckIcon className="size-3.5 shrink-0" />
-                          </RadioPrimitive.Indicator>
-                          {option.badgeLabel ? (
-                            <Badge variant="warning" size="sm">
-                              {option.badgeLabel}
-                            </Badge>
-                          ) : null}
-                        </RadioPrimitive.Root>
-                      );
-                    })}
+                          <CheckIcon className="size-3.5 shrink-0" />
+                        </RadioPrimitive.Indicator>
+                        {option.badgeLabel ? (
+                          <Badge variant="warning" size="sm">
+                            {option.badgeLabel}
+                          </Badge>
+                        ) : null}
+                      </RadioPrimitive.Root>
+                    );
+                  })}
                 </RadioGroup>
               </div>
 
@@ -453,7 +476,11 @@ export function AddProviderInstanceDialog({
                 <div className="space-y-4 pt-4">
                   <div className="flex items-center gap-3 text-xs text-muted-foreground">
                     <div aria-hidden className="flex-1 border-t border-border/70" />
-                    <span>Or choose from ACP Registry</span>
+                    <span>
+                      {isAcpRegistry && isManualAcpConfiguration
+                        ? "Configuration"
+                        : "Or choose from ACP Registry"}
+                    </span>
                     <div aria-hidden className="flex-1 border-t border-border/70" />
                   </div>
                   {isAcpRegistry && isManualAcpConfiguration ? (
@@ -461,16 +488,29 @@ export function AddProviderInstanceDialog({
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <h3 className="text-sm font-medium text-foreground">
-                            {isLocalAcp ? "Local ACP command" : "Enter manually"}
+                            {isLocalAcp ? localAcpLabel : "Enter manually"}
                           </h3>
                           <p className="mt-0.5 text-xs text-muted-foreground">
-                            {isLocalAcp
-                              ? `Run an installed ACP executable on ${environmentLabel}.`
-                              : "Enter an official registry ID and any local executable or auth override."}
+                            {isLocalAcp && isDeepSeekHarness
+                              ? `Install and configure DeepSeek Harness on ${environmentLabel}, then choose its executable below.`
+                              : isLocalAcp
+                                ? `Run an installed ACP executable on ${environmentLabel}.`
+                                : "Enter an official registry ID and any local executable or auth override."}
                           </p>
+                          {isLocalAcp && isDeepSeekHarness ? (
+                            <a
+                              className="text-xs text-muted-foreground underline hover:text-foreground"
+                              href="https://github.com/deepseek-ai/deepseek-harness"
+                              rel="noreferrer"
+                              target="_blank"
+                            >
+                              DeepSeek Harness setup guide
+                            </a>
+                          ) : null}
                         </div>
                         <Button
                           onClick={() => {
+                            setSelectedProvider(ACP_REGISTRY_DRIVER_KIND);
                             setIsManualAcpConfiguration(false);
                             setHasAttemptedSubmit(false);
                           }}
@@ -506,7 +546,7 @@ export function AddProviderInstanceDialog({
                         providerInstances={settings.providerInstances}
                         onPrepared={handleAcpPrepared}
                         onManualConfiguration={handleManualAcpConfiguration}
-                        onLocalConfiguration={handleLocalAcpConfiguration}
+                        onLocalConfiguration={() => handleLocalAcpConfiguration()}
                         onLoadingChange={setIsRegistryLoading}
                         onPreparingChange={setIsPreparingRegistryAgent}
                       />

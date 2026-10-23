@@ -247,6 +247,92 @@ describe("AddProviderInstanceDialog environment routing", () => {
     expect(signInStep()).toBeNull();
   });
 
+  it("adds DeepSeek Harness with its ACP command in the selected environment", async () => {
+    setup();
+    await using screen = await render(dialog());
+    await userEvent.click(screen.getByRole("radio", { name: "DeepSeek Harness" }));
+    await expect
+      .element(screen.getByRole("textbox", { name: "Executable", exact: true }))
+      .toHaveValue("dsh");
+    await expect
+      .element(screen.getByRole("textbox", { name: "Argument 1" }))
+      .toHaveValue("--profile");
+    await expect.element(screen.getByRole("textbox", { name: "Argument 2" })).toHaveValue("acp");
+    await click("Next");
+    await click("Add instance");
+
+    expect(settingsHooks.useMutation).toHaveBeenCalledWith(remoteEnvironmentId);
+    expect(settingsHooks.mutate).toHaveBeenCalledWith({
+      operation: "create",
+      instanceId: "acpRegistry_deepseek_harness",
+      instance: {
+        driver: "acpRegistry",
+        enabled: true,
+        displayName: "DeepSeek Harness",
+        config: { source: "local", commandPath: "dsh", commandArgs: ["--profile", "acp"] },
+      },
+    });
+    expect(actions.onOpenChange).toHaveBeenCalledWith(false);
+    expect(signInStep()).toBeNull();
+  });
+
+  it("keeps a custom DeepSeek executable across Back and avoids replacing an existing instance", async () => {
+    setup();
+    settingsHooks.read.mockReturnValue({
+      providerInstances: { acpRegistry_deepseek_harness: { driver: "acpRegistry", enabled: true } },
+    });
+    await using screen = await render(dialog());
+    await userEvent.click(screen.getByRole("radio", { name: "DeepSeek Harness" }));
+    await type("#add-provider-acpRegistry-manual-commandPath", "/opt/deepseek/bin/dsh");
+    await click("Next");
+    await click("Back");
+    await expect
+      .element(screen.getByRole("textbox", { name: "Executable", exact: true }))
+      .toHaveValue("/opt/deepseek/bin/dsh");
+    await click("Next");
+    await click("Add instance");
+
+    expect(settingsHooks.mutate).toHaveBeenCalledWith({
+      operation: "create",
+      instanceId: "acpRegistry_deepseek_harness_2",
+      instance: {
+        driver: "acpRegistry",
+        enabled: true,
+        displayName: "DeepSeek Harness",
+        config: {
+          source: "local",
+          commandPath: "/opt/deepseek/bin/dsh",
+          commandArgs: ["--profile", "acp"],
+        },
+      },
+    });
+  });
+
+  it("switches from DeepSeek to a registry agent without retaining its command or identity", async () => {
+    setup();
+    await using screen = await render(dialog());
+    await userEvent.click(screen.getByRole("radio", { name: "DeepSeek Harness" }));
+    await click("Search registry");
+    await click("Use Kilo Code");
+    await click("Continue to sign-in");
+
+    expect(settingsHooks.mutate).toHaveBeenCalledWith({
+      operation: "create",
+      instanceId: "acpRegistry_kilo_code",
+      instance: {
+        driver: "acpRegistry",
+        enabled: true,
+        displayName: "Kilo Code",
+        config: {
+          agentId: "kilo",
+          distribution: "auto",
+          registryIconUrl: preparedAgent.icon,
+        },
+      },
+    });
+    expect(signInStep()?.textContent).toContain("remote-device/acpRegistry_kilo_code");
+  });
+
   it("rejects a queued save after the provider grant is revoked", async () => {
     setup();
     await using screen = await prepareCodexInstance();
