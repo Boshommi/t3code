@@ -3,6 +3,7 @@ import type { ClientSettings } from "@t3tools/contracts/settings";
 
 import completionUrl from "./assets/notification-completion.mp3";
 import inputUrl from "./assets/notification-input.mp3";
+import { controllingServiceWorker, setNotificationClickHandler } from "./pwa";
 
 type NotificationMode = ClientSettings["notificationMode"];
 export const NOTIFICATION_MODE_LABELS = {
@@ -35,6 +36,45 @@ export function threadNotificationTag(environmentId: EnvironmentId, threadId: Th
   return hash.toString(16).padStart(16, "0");
 }
 
+export interface SystemNotification {
+  readonly title: string;
+  readonly body: string;
+  readonly tag: string;
+  /** Opened when the notification is clicked after the app was closed. */
+  readonly url: string;
+  readonly onClick: () => void;
+}
+
+/**
+ * Shows an OS notification and returns it so the caller can close it later.
+ * Pages controlled by the service worker must show it through the worker:
+ * Android rejects page-created notifications, and the worker can reopen the
+ * app when it has been closed since.
+ */
+export async function showSystemNotification(options: SystemNotification) {
+  const { title, body, tag, url, onClick } = options;
+  try {
+    const registration = await controllingServiceWorker();
+    if (registration) {
+      setNotificationClickHandler(tag, onClick);
+      await registration.showNotification(title, { body, tag, silent: true, data: { url } });
+      const [notification] = await registration.getNotifications({ tag });
+      return notification ?? null;
+    }
+    const notification = new Notification(title, { body, tag, silent: true });
+    notification.addEventListener("click", () => {
+      notification.close();
+      window.focus();
+      void window.desktopBridge?.revealWindow?.().catch(() => undefined);
+      onClick();
+    });
+    return notification;
+  } catch {
+    // Some browsers expose Notification but reject desktop presentation.
+    return null;
+  }
+}
+
 let originalFavicon: HTMLLinkElement | undefined;
 let badgeFavicon: HTMLLinkElement | undefined;
 
@@ -59,6 +99,9 @@ export function setNotificationBadge(count: number) {
     }
   }
   if (!bridge) {
+    // Installed web apps show this on their dock or home screen icon; tabs ignore it.
+    if (count > 0) void navigator.setAppBadge?.(count).catch(() => undefined);
+    else void navigator.clearAppBadge?.().catch(() => undefined);
     if (image) {
       if (!badgeFavicon) {
         originalFavicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]') ?? undefined;

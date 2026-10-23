@@ -44,6 +44,7 @@ export interface SettingsSearchItem {
   readonly searchTerms?: ReadonlyArray<string>;
   readonly scope?: SettingsSearchScope;
   readonly desktopOnly?: boolean;
+  readonly webOnly?: boolean;
   readonly macOnly?: boolean;
   readonly windowsOnly?: boolean;
   readonly releaseChannelOnly?: boolean;
@@ -543,6 +544,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
     searchTerms: ["cli terminal shell path install command line"],
     desktopOnly: true,
+  },
+  {
+    id: "install-app",
+    title: "Install app",
+    to: "/settings/general",
+    searchTerms: ["pwa progressive web app home screen dock window offline badge"],
+    webOnly: true,
   },
   {
     id: "mobile-app",
@@ -1148,6 +1156,7 @@ export function searchSettings(
   return items
     .flatMap((item, index) => {
       if (!isElectron && item.desktopOnly === true) return [];
+      if (isElectron && item.webOnly === true) return [];
       if (item.releaseChannelOnly && !isElectron && HOSTED_APP_CHANNEL === null) return [];
       if (item.macOnly && !isMacPlatform(platform)) return [];
       if (item.windowsOnly && !isWindowsPlatform(platform)) return [];

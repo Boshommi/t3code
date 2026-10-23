@@ -23,6 +23,8 @@ import {
   hasNotificationSound,
   playNotificationSound,
   setNotificationBadge,
+  showSystemNotification,
+  type SystemNotification,
   threadNotificationTag,
   unlockNotificationAudio,
 } from "../threadNotifications";
@@ -38,10 +40,16 @@ export function ThreadNotificationCoordinator() {
   const pending = useRef(
     new Map<string, { environmentId: EnvironmentId; notification: Notification }>(),
   );
-  const onNotification = (environmentId: EnvironmentId, notification: Notification) => {
-    pending.current.get(notification.tag)?.notification.close();
-    pending.current.set(notification.tag, { environmentId, notification });
-    setNotificationBadge(pending.current.size);
+  const notify = (environmentId: EnvironmentId, options: SystemNotification) => {
+    // Close the previous one first: a worker notification fetched by tag is a
+    // handle to the newest one with that tag, so closing afterwards would close it.
+    pending.current.get(options.tag)?.notification.close();
+    pending.current.delete(options.tag);
+    void showSystemNotification(options).then((notification) => {
+      if (!notification) return;
+      pending.current.set(options.tag, { environmentId, notification });
+      setNotificationBadge(pending.current.size);
+    });
   };
 
   useEffect(() => {
@@ -85,11 +93,7 @@ export function ThreadNotificationCoordinator() {
   if (mode === "off" && !inAppNotificationsEnabled) return null;
 
   return environmentIds.map((environmentId) => (
-    <EnvironmentNotifications
-      key={environmentId}
-      environmentId={environmentId}
-      onNotification={onNotification}
-    />
+    <EnvironmentNotifications key={environmentId} environmentId={environmentId} notify={notify} />
   ));
 }
 
@@ -102,10 +106,10 @@ interface NotificationState {
 
 function EnvironmentNotifications({
   environmentId,
-  onNotification,
+  notify,
 }: {
   environmentId: EnvironmentId;
-  onNotification: (environmentId: EnvironmentId, notification: Notification) => void;
+  notify: (environmentId: EnvironmentId, options: SystemNotification) => void;
 }) {
   const shell = useAtomValue(environmentShell.stateValueAtom(environmentId));
   const threads =
@@ -218,25 +222,17 @@ function EnvironmentNotifications({
         Notification.permission !== "granted"
       )
         continue;
-      try {
-        const notification = new Notification(title, {
-          body: thread.title,
-          tag: threadNotificationTag(environmentId, thread.id),
-          silent: true,
-        });
-        onNotification(environmentId, notification);
-        notification.addEventListener("click", () => {
-          notification.close();
-          window.focus();
-          void window.desktopBridge?.revealWindow?.().catch(() => undefined);
+      notify(environmentId, {
+        title,
+        body: thread.title,
+        tag: threadNotificationTag(environmentId, thread.id),
+        url: `/${encodeURIComponent(environmentId)}/${encodeURIComponent(thread.id)}`,
+        onClick: () =>
           void navigate({
             to: "/$environmentId/$threadId",
             params: { environmentId, threadId: thread.id },
-          });
-        });
-      } catch {
-        // Some browsers expose Notification but reject desktop presentation.
-      }
+          }),
+      });
     }
     previous.current = next;
   }, [
@@ -246,7 +242,7 @@ function EnvironmentNotifications({
     inAppNotificationsEnabled,
     mode,
     navigate,
-    onNotification,
+    notify,
     threads,
   ]);
 

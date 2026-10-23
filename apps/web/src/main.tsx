@@ -15,6 +15,7 @@ import {
 import { AppRoot } from "./AppRoot";
 import { clearChunkReloadGuard, reloadOnceForChunkLoadError } from "./lib/chunkReloadGuard";
 import { installTouchContextMenu } from "./lib/touchContextMenu";
+import { installPwa } from "./pwa";
 
 prepareProviderAuthDelivery();
 
@@ -24,6 +25,7 @@ const history = isElectron ? createHashHistory() : createBrowserHistory();
 const router = getRouter(history);
 
 installTouchContextMenu();
+installPwa((href) => router.history.push(href));
 
 if (isElectron) {
   syncDocumentElectronPlatformClasses(navigator.platform);

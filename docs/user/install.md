@@ -106,6 +106,19 @@ Pass a path, such as `t3 app ../my-project`, to open another directory. It requi
 the desktop app, so a standalone server or an SSH session is not enough. If the
 command cannot reach the app, start or update the desktop app and try again.
 
+## Web app
+
+The web app, whether served by `t3` or at app.t3.codes, can be installed as an app.
+Use **Settings → General → Install app**, your browser's install option, or
+Share → Add to Home Screen on iPhone and iPad. The installed app opens in its own
+window, shows the number of unread notifications on its icon, and still opens while
+your server is unreachable, reconnecting once it is back.
+
+Browsers only offer this over HTTPS or on `localhost`. A server opened by a plain
+`http://` LAN or Tailscale IP address works in a browser tab but cannot be installed;
+use [Tailscale HTTPS](./remote-access.md#tailscale-https) or app.t3.codes instead. Notifications from the
+web app arrive only while it is open, even in the background.
+
 ## Mobile app
 
 Install T3 Code from the
