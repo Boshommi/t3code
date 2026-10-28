@@ -139,6 +139,7 @@ import {
   MessageSquareReplyIcon,
   MessagesSquareIcon,
   MousePointerClickIcon,
+  PinIcon,
   PaintbrushIcon,
   MinusIcon,
   Redo2Icon,
@@ -195,7 +196,12 @@ import { promptLinkFor } from "../promptLinks/copyPromptLink";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { WorkspaceEntryIcon, WorkspaceEntryTooltip } from "./WorkspaceEntryIcon";
 import { AssistantSelectionToolbar } from "./AssistantSelectionToolbar";
-import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
+import {
+  selectWholeAssistantText,
+  type AssistantCitationSourceAnchor,
+} from "~/lib/assistantTextSelection";
+import { toastManager } from "../ui/toast";
+import { usePinnedMessagesStore, useThreadPins } from "../../pinnedMessagesStore";
 import {
   AssistantCitationSource,
   type AssistantCitationRequest,
@@ -2869,12 +2875,13 @@ function AssistantMessageMeta({
   alwaysVisible?: boolean;
 }) {
   const ctx = use(TimelineRowCtx);
+  const pinned = useThreadPins(ctx.threadRef).some((pin) => pin.citation.messageId === message.id);
 
   return (
     <div
       className={cn(
         "flex items-center gap-2 text-xs tabular-nums transition-opacity duration-200",
-        alwaysVisible
+        alwaysVisible || pinned
           ? "opacity-100"
           : "opacity-0 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover/assistant:opacity-100",
         className,
@@ -2894,6 +2901,9 @@ function AssistantMessageMeta({
         <AssistantForkButton projectedItem={projectedItem} />
       ) : null}
       {!message.streaming && <ReplyInSideThreadButton messageId={message.id} />}
+      {!message.streaming && message.text ? (
+        <AssistantPinButton message={message} pinned={pinned} />
+      ) : null}
       {!message.streaming && (
         <Tooltip>
           <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>
@@ -2905,6 +2915,61 @@ function AssistantMessageMeta({
         </Tooltip>
       )}
     </div>
+  );
+}
+
+function AssistantPinButton({ message, pinned }: { message: ChatMessage; pinned: boolean }) {
+  const threadRef = use(TimelineRowCtx).threadRef;
+  if (!threadRef) return null;
+  const togglePin = () => {
+    const store = usePinnedMessagesStore.getState();
+    if (pinned) {
+      store.unpin(threadRef, message.id);
+      return;
+    }
+    // The meta can render in its own row, so find the response by its citation attributes.
+    const source = document.querySelector<HTMLElement>(
+      `[data-assistant-citation-source="${CSS.escape(message.id)}"][data-assistant-citation-thread="${CSS.escape(threadRef.threadId)}"]`,
+    );
+    const selector = source ? selectWholeAssistantText(source) : null;
+    if (!selector) {
+      toastManager.add({
+        type: "warning",
+        title: "Could not pin this response",
+        description: "Scroll it into view, then try again.",
+      });
+      return;
+    }
+    store.pin({
+      citation: {
+        version: 1,
+        environmentId: threadRef.environmentId,
+        threadId: threadRef.threadId,
+        messageId: message.id,
+        ...selector,
+      },
+      messageCreatedAt: message.createdAt,
+    });
+  };
+  const label = pinned ? "Unpin response" : "Pin response";
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            onClick={togglePin}
+            aria-label={label}
+            aria-pressed={pinned}
+          />
+        }
+      >
+        <PinIcon className={cn("size-3", pinned && "fill-current")} />
+      </TooltipTrigger>
+      <TooltipPopup side="top">{label}</TooltipPopup>
+    </Tooltip>
   );
 }
 

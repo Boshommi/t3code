@@ -132,6 +132,15 @@ The quoted text and comment count toward the message limit.
 Mobile displays saved quotes and comments, but does not create citations or
 navigate to their sources.
 
+## Pin an assistant response
+
+On web and desktop, hover a finished response and choose **Pin response**. The
+thread details card then lists the thread's pins under **Pinned**. Select a pin
+to jump back to its response, even if it is in older history.
+
+Pins are saved in this browser or desktop app only. They do not sync to other
+devices or to mobile.
+
 ## Recall a sent prompt
 
 Press `ArrowUp` in an empty composer to bring back the last prompt you sent in this thread. Press

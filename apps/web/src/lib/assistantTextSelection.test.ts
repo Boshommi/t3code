@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   ASSISTANT_CITATION_CONTEXT_LENGTH,
+  ASSISTANT_CITATION_MAX_TEXT_LENGTH,
   EnvironmentId,
   MessageId,
   ThreadId,
@@ -15,6 +16,7 @@ import {
   captureAssistantTextSelection,
   createAssistantTextSelector,
   findAssistantCitationText,
+  selectWholeAssistantText,
 } from "./assistantTextSelection";
 
 function selector(
@@ -336,6 +338,32 @@ describe("captureAssistantTextSelection", () => {
     expect(
       capture(source, nativeSelection([first, 0], [code, code.length], true))?.selector,
     ).toEqual(selector("Before 😀 cafe\u0301\nfirst line\r\n  second line\t🚀"));
+  });
+});
+
+describe("selectWholeAssistantText", () => {
+  it("quotes every block of the response, so the pin matches the rendered text", () => {
+    const source = assistantSource(
+      new SelectionNode("P").append(textNode("First line.")),
+      new SelectionNode("P").append(textNode("Second line.")),
+    );
+    const selected = selectWholeAssistantText(source as unknown as HTMLElement);
+
+    expect(selected?.text).toBe("First line.\nSecond line.");
+    expect(selected?.start).toBe(0);
+    expect(findAssistantCitationText("First line.\nSecond line.", selected!)).toEqual({
+      start: 0,
+      end: selected!.end,
+    });
+  });
+
+  it("caps long responses at the citation limit without splitting an emoji", () => {
+    const text = `${"a".repeat(ASSISTANT_CITATION_MAX_TEXT_LENGTH - 1)}😀 tail`;
+    const selected = selectWholeAssistantText(
+      assistantSource(new SelectionNode("P").append(textNode(text))) as unknown as HTMLElement,
+    );
+
+    expect(selected?.text).toBe("a".repeat(ASSISTANT_CITATION_MAX_TEXT_LENGTH - 1));
   });
 });
 

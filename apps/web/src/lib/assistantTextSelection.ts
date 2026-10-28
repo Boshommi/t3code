@@ -1,4 +1,8 @@
-import { ASSISTANT_CITATION_CONTEXT_LENGTH, type AssistantCitation } from "@t3tools/contracts";
+import {
+  ASSISTANT_CITATION_CONTEXT_LENGTH,
+  ASSISTANT_CITATION_MAX_TEXT_LENGTH,
+  type AssistantCitation,
+} from "@t3tools/contracts";
 
 import { mathWrapperOf } from "../markdown-clipboard";
 
@@ -251,6 +255,14 @@ export function captureAssistantTextSelection(
   if (rawStart === null) return null;
   const selector = createAssistantTextSelector(stream.text, rawStart, rawEnd);
   return selector === null ? null : { source, selector, range };
+}
+
+/** Selects the whole response, capped at the longest quote a citation holds. */
+export function selectWholeAssistantText(source: HTMLElement): AssistantTextSelector | null {
+  const { text } = readAssistantText(source);
+  let end = Math.min(text.length, ASSISTANT_CITATION_MAX_TEXT_LENGTH);
+  if (splitsSurrogatePair(text, end)) end -= 1;
+  return createAssistantTextSelector(text, 0, end);
 }
 
 function rawTextOffset(text: string, normalizedOffset: number): number {
