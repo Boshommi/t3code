@@ -917,9 +917,11 @@ describe("OrchestratorMcpService provider resolution", () => {
     readonly driver: ProviderDriverKind;
     readonly model?: string;
     readonly enabled?: boolean;
+    readonly groupKey?: string;
   }): ServerProvider => ({
     instanceId: input.instanceId,
     driver: input.driver,
+    ...(input.groupKey === undefined ? {} : { continuation: { groupKey: input.groupKey } }),
     enabled: input.enabled ?? true,
     installed: input.enabled !== false,
     version: input.enabled === false ? null : "test",
@@ -1314,6 +1316,71 @@ describe("OrchestratorMcpService provider resolution", () => {
           modelSelection: { instanceId: string; model: string };
         };
         assert.equal(request.modelSelection.instanceId, altInstanceId);
+      }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(layerDependencies))));
+    }),
+  );
+
+  it.effect("an explicit sibling account follows the parent's current account", () =>
+    Effect.gen(function* () {
+      const driver = ProviderDriverKind.make("codex");
+      const altInstanceId = ProviderInstanceId.make("codex-alt");
+      const otherHomeInstanceId = ProviderInstanceId.make("codex-other-home");
+      const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);
+      const layerDependencies = Layer.mergeAll(
+        NodeServices.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          hasReceipt: () => Effect.succeed(false),
+          getThreadRecords: (threadId) =>
+            Effect.succeed(threadId === parentThreadId ? parentProjection([]) : childProjection),
+          isProviderInstanceEnabledForProject: () => Effect.succeed(true),
+          assertProviderInstanceEnabled: () => Effect.void,
+          dispatch: (command) =>
+            Ref.update(dispatched, (commands) => [...commands, command]).pipe(
+              // The test only inspects the dispatched selection, so no subagent event follows.
+              Effect.as({ sequence: 1, storedEvents: [] } as never),
+            ),
+        }),
+        providerRegistryLayer([
+          providerSnapshot({
+            instanceId: codexInstanceId,
+            driver,
+            model: "gpt-5.4",
+            groupKey: "a",
+          }),
+          providerSnapshot({ instanceId: altInstanceId, driver, model: "gpt-5.4", groupKey: "a" }),
+          providerSnapshot({
+            instanceId: otherHomeInstanceId,
+            driver,
+            model: "gpt-5.4",
+            groupKey: "b",
+          }),
+        ]),
+        adapterRegistryLayer([codexInstanceId, altInstanceId, otherHomeInstanceId]),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+        ServerSettings.layerTest(),
+      );
+
+      yield* Effect.gen(function* () {
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        for (const providerInstanceId of [altInstanceId, otherHomeInstanceId]) {
+          yield* Effect.exit(
+            service.delegateTask(scope, {
+              task: "Summarize the diff.",
+              target: { providerInstanceId },
+              mode: "async",
+              clientRequestId: `delegate-sibling-${providerInstanceId}`,
+            }),
+          );
+        }
+        const commands = (yield* Ref.get(dispatched)) as ReadonlyArray<{
+          modelSelection: { instanceId: string };
+        }>;
+        assert.deepEqual(
+          commands.map((command) => command.modelSelection.instanceId),
+          [codexInstanceId, otherHomeInstanceId],
+        );
       }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(layerDependencies))));
     }),
   );

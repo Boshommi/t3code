@@ -312,6 +312,34 @@ function providerConstraints(
 }
 
 /**
+ * Accounts that share a continuation group are logins of the same harness. Agents copy instance
+ * ids from earlier in their context, so after the user switches the thread's account a child
+ * would otherwise start on the account they left, often because it hit its limit.
+ */
+function followParentAccount(input: {
+  readonly parent: Pick<OrchestrationV2ThreadProjection, "thread">;
+  readonly target: OrchestratorMcpTarget | undefined;
+  readonly providers: ReadonlyArray<ServerProvider>;
+}): OrchestratorMcpTarget | undefined {
+  const requestedInstanceId = input.target?.providerInstanceId;
+  const parentInstanceId = input.parent.thread.modelSelection.instanceId;
+  if (requestedInstanceId === undefined || requestedInstanceId === parentInstanceId) {
+    return input.target;
+  }
+  const requested = input.providers.find((p) => p.instanceId === requestedInstanceId);
+  const current = input.providers.find((p) => p.instanceId === parentInstanceId);
+  const groupKey = current?.continuation?.groupKey;
+  if (
+    groupKey === undefined ||
+    requested?.driver !== current?.driver ||
+    requested?.continuation?.groupKey !== groupKey
+  ) {
+    return input.target;
+  }
+  return { ...input.target, providerInstanceId: parentInstanceId };
+}
+
+/**
  * Models without descriptors skip the descriptor checks (mirroring how model slugs are only
  * validated when the provider advertises models), but duplicate ids always fail: downstream
  * consumers disagree on whether the first or last value of a duplicated id wins.
@@ -1234,7 +1262,11 @@ const make = Effect.gen(function* () {
       })
       .pipe(Effect.mapError(threadManagementFailure));
 
-  const resolveTargetRechecking = (input: Parameters<typeof resolveTarget>[0]) => {
+  const resolveTargetRechecking = (requested: Parameters<typeof resolveTarget>[0]) => {
+    const input =
+      requested.skipProjectEnablementFilter === true
+        ? requested
+        : { ...requested, target: followParentAccount(requested) };
     const instanceId =
       input.target?.providerInstanceId ??
       (input.target?.driverKind === undefined
