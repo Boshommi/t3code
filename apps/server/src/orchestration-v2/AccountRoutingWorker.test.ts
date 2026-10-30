@@ -77,10 +77,13 @@ function candidate(
 function route(
   providers: ReadonlyArray<ServerProvider>,
   overrides: Partial<ProjectionAccountRoutingCandidate> = {},
+  blockedUntil: ReadonlyMap<ProviderInstanceId, number> = new Map(),
+  at = nowMs,
 ) {
   return accountRoutingCommands({
     candidate: candidate(overrides),
     providers,
+    blockedUntil,
     // Unconfigured instances other than the default one count as disabled.
     settings: {
       providerInstances: Object.fromEntries(
@@ -88,7 +91,7 @@ function route(
       ),
       projectSettingsOverrides: {},
     },
-    nowMs,
+    nowMs: at,
   });
 }
 
@@ -117,6 +120,50 @@ describe("accountRoutingCommands", () => {
         provider("fresh", usage(50)),
       ]),
     ).toBe("stale");
+  });
+
+  it("waits for the first usable account reset when all accounts have failed", () => {
+    const work = provider("work");
+    const personal = provider("personal");
+    const firstReset = nowMs + 3_600_000;
+    const blockedUntil = new Map([
+      [limitedId, nowMs + 6 * 3_600_000],
+      [work.instanceId, firstReset],
+      [personal.instanceId, nowMs + 24 * 3_600_000],
+    ]);
+    // These healthy readings predate the accounts' usage-limit failures.
+    const providers = [limited, work, personal];
+    expect(route(providers, {}, blockedUntil)).toEqual([]);
+    expect(route(providers, {}, blockedUntil, firstReset - 1)).toEqual([]);
+    const [resumed] = route(providers, {}, blockedUntil, firstReset);
+    expect(resumed?.type === "message.dispatch" && resumed.modelSelection?.instanceId).toBe("work");
+  });
+
+  it("does not bypass a failed account through another instance of the same login", () => {
+    const work = provider("work");
+    const alias = provider("work-alias", { auth: work.auth });
+    expect(
+      route([limited, work, alias], {}, new Map([[work.instanceId, nowMs + 3_600_000]])),
+    ).toEqual([]);
+  });
+
+  it("waits for all exhausted windows on an account to reset", () => {
+    const work = provider("work", {
+      usageLimits: {
+        checkedAt: "2026-10-23T11:00:00.000Z",
+        windows: [
+          ...usage(100, "2026-10-23T11:30:00.000Z").usageLimits.windows,
+          {
+            id: "secondary",
+            kind: "weekly",
+            label: "Weekly",
+            usedPercent: 100,
+            resetsAt: "2026-10-24T12:00:00.000Z",
+          },
+        ],
+      },
+    });
+    expect(route([limited, work])).toEqual([]);
   });
 
   it("skips accounts that cannot take the thread", () => {

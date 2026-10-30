@@ -1105,6 +1105,135 @@ const assertProjectScopedShells = Effect.fn("assertProjectScopedShells")(functio
   return { projectId, activeThreadId, forkThreadId, otherThreadId };
 });
 
+it.effect.each([
+  ["memory", ProjectionStore.layerMemory],
+  ["SQL", layerTest],
+] as const)(
+  "%s remembers exhausted accounts across threads and switches until their reset",
+  ([, layer]) =>
+    Effect.gen(function* () {
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const now = yield* DateTime.now;
+      const nowMs = DateTime.toEpochMillis(now);
+      const firstReset = nowMs + 3_600_000;
+      const lastReset = nowMs + 6 * 3_600_000;
+      const otherId = ProviderInstanceId.make("other");
+      const unknownId = ProviderInstanceId.make("unknown-reset");
+      const recordLimit = Effect.fn("test.recordAccountLimit")(function* (
+        suffix: string,
+        instanceId: ProviderInstanceId,
+        resetMs: number | null,
+        child = false,
+      ) {
+        const threadId = yield* addRolledBackRecoveryCandidate(`account-limit:${suffix}`);
+        const projection = yield* store.getThreadProjection(threadId);
+        const original = projection.runs[0]!;
+        const run = {
+          ...original,
+          providerInstanceId: instanceId,
+          modelSelection: { ...original.modelSelection, instanceId },
+          status: "failed" as const,
+          completedAt: now,
+        };
+        yield* store.apply({
+          id: EventId.make(`event:account-limit:${suffix}:failed`),
+          type: "run.updated",
+          threadId,
+          occurredAt: now,
+          payload: run,
+        });
+        const item = {
+          id: TurnItemId.make(`account-limit:${suffix}:error`),
+          threadId,
+          runId: run.id,
+          nodeId: child ? NodeId.make(`node:account-limit:${suffix}:child`) : run.rootNodeId,
+          providerThreadId: null,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: 2,
+          status: "failed" as const,
+          title: "Usage limit reached",
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+          type: "error" as const,
+          failure: {
+            class: "usage_limit" as const,
+            message: "Plan limit reached.",
+            resetAt: resetMs === null ? null : DateTime.formatIso(DateTime.makeUnsafe(resetMs)),
+            code: "usageLimitExceeded",
+            retryable: null,
+          },
+        };
+        yield* store.apply({
+          id: EventId.make(`event:account-limit:${suffix}:error`),
+          type: "turn-item.updated",
+          threadId,
+          occurredAt: now,
+          payload: item,
+        });
+        return { projection, run, item };
+      });
+      const first = yield* recordLimit("session", providerInstanceId, firstReset);
+      yield* recordLimit("weekly", providerInstanceId, lastReset);
+      yield* recordLimit("other", otherId, firstReset);
+      yield* recordLimit("unknown", unknownId, null);
+      yield* recordLimit("expired", ProviderInstanceId.make("expired"), nowMs - 1);
+      yield* recordLimit("child", ProviderInstanceId.make("child"), lastReset, true);
+      const superseded = yield* recordLimit(
+        "superseded",
+        ProviderInstanceId.make("superseded"),
+        lastReset,
+      );
+      yield* store.apply({
+        id: EventId.make("event:account-limit:superseded:auth-error"),
+        type: "turn-item.updated",
+        threadId: superseded.run.threadId,
+        occurredAt: now,
+        payload: {
+          ...superseded.item,
+          id: TurnItemId.make("account-limit:superseded:auth-error"),
+          ordinal: 3,
+          failure: { ...superseded.item.failure, class: "provider_error", resetAt: null },
+        },
+      });
+      // Moving the thread to another account and archiving it do not restore quota.
+      yield* store.apply({
+        id: EventId.make("event:account-limit:session:moved"),
+        type: "thread.metadata-updated",
+        threadId: first.run.threadId,
+        occurredAt: now,
+        payload: {
+          ...first.projection.thread,
+          providerInstanceId: otherId,
+          modelSelection: { ...modelSelection, instanceId: otherId },
+          archivedAt: now,
+        },
+      });
+      const resets = yield* store.getAccountUsageLimitResetTimes(now);
+      assert.deepEqual(
+        [...resets].sort(),
+        [
+          [providerInstanceId, lastReset],
+          [otherId, firstReset],
+          [unknownId, nowMs + ProjectionStore.UNKNOWN_USAGE_LIMIT_RESET_MS],
+        ].sort(),
+      );
+      assert.deepEqual(
+        [...(yield* store.getAccountUsageLimitResetTimes(DateTime.makeUnsafe(firstReset)))].sort(),
+        [
+          [providerInstanceId, lastReset],
+          [unknownId, nowMs + ProjectionStore.UNKNOWN_USAGE_LIMIT_RESET_MS],
+        ].sort(),
+      );
+      assert.equal(
+        (yield* store.getAccountUsageLimitResetTimes(DateTime.makeUnsafe(lastReset))).size,
+        0,
+      );
+    }).pipe(Effect.provide(layer)),
+);
+
 it.layer(layerTest)("ProjectionStoreV2", (it) => {
   // regression: #21969 keep corrupt plan JSON in the typed read error
   it.effect("returns a typed read error for malformed stored plan JSON", () =>

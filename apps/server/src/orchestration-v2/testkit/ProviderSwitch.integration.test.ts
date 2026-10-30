@@ -2456,13 +2456,16 @@ describe("orchestration v2 provider switching", () => {
       ),
   );
 
-  it.live("continues a limited thread and its queue on another account", () =>
+  it.live.each([false, true])("routes limited accounts (all exhausted: %s)", (allLimited) =>
     Effect.scoped(
       Effect.gen(function* () {
         const cwd = yield* checkpointWorkspace("account-routing");
         const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
         const started = yield* Deferred.make<void>();
         const release = yield* Deferred.make<void>();
+        const now = yield* DateTime.now;
+        const firstReset = DateTime.add(now, { hours: 1 });
+        const secondReset = DateTime.add(now, { hours: 2 });
         const workSelection: ModelSelection = {
           ...CODEX_MODEL_SELECTION,
           instanceId: ProviderInstanceId.make("codex-work"),
@@ -2482,6 +2485,7 @@ describe("orchestration v2 provider switching", () => {
               message: "Usage limit reached",
               class: "usage_limit",
               code: "usage_limit",
+              resetAt: DateTime.formatIso(firstReset),
             }),
           }),
           makeTestAdapter({
@@ -2491,6 +2495,13 @@ describe("orchestration v2 provider switching", () => {
             modelSelection: workSelection,
             responseByRunOrdinal: {},
             capturedTurns,
+            failedRunOrdinals: new Set(allLimited ? [3] : []),
+            failure: makeProviderFailure({
+              message: "Usage limit reached",
+              class: "usage_limit",
+              code: "usage_limit",
+              resetAt: DateTime.formatIso(secondReset),
+            }),
           }),
         ];
         const groupKey = "codex:shared-native-account-history";
@@ -2501,7 +2512,9 @@ describe("orchestration v2 provider switching", () => {
               const adapter = adapters.find((candidate) => candidate.instanceId === instanceId);
               return adapter === undefined
                 ? Effect.fail(
-                    new ProviderAdapterRegistry.ProviderAdapterRegistryLookupError({ instanceId }),
+                    new ProviderAdapterRegistry.ProviderAdapterRegistryLookupError({
+                      instanceId,
+                    }),
                   )
                 : Effect.succeed(adapter);
             },
@@ -2538,12 +2551,23 @@ describe("orchestration v2 provider switching", () => {
           skills: [],
           usageLimits: {
             checkedAt: "2026-10-23T00:00:00.000Z",
-            windows: [{ id: "primary", kind: "session", label: "Session", usedPercent }],
+            windows: [
+              {
+                id: "primary",
+                kind: "session",
+                label: "Session",
+                usedPercent,
+                resetsAt: DateTime.formatIso(
+                  instanceId === workSelection.instanceId ? secondReset : firstReset,
+                ),
+              },
+            ],
           },
         });
         yield* Effect.gen(function* () {
           const orchestrator = yield* Orchestrator.OrchestratorV2;
           const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+          const projections = yield* ProjectionStore.ProjectionStoreV2;
           const dispatch = (
             text: string,
             dispatchMode: "start_immediately" | "queue_after_active",
@@ -2592,68 +2616,95 @@ describe("orchestration v2 provider switching", () => {
           );
           yield* worker.drain();
 
-          const failed = yield* orchestrator.getThreadProjection(threadId);
-          const commands = accountRoutingCommands({
-            candidate: {
-              threadId,
-              projectId,
-              modelSelection: failed.thread.modelSelection,
-              runId: limited.id,
-              runProviderInstanceId: limited.providerInstanceId,
-              completedAt: DateTime.nowUnsafe(),
-              resetAt: null,
-              limitRecovery: null,
-              snoozedUntil: null,
-              queuedRuns: failed.runs
-                .filter((run) => run.status === "queued")
-                .map((run) => ({
-                  modelSelection: run.modelSelection,
-                  queueHeld: run.queueHeld === true,
-                })),
-            },
-            providers: [
-              account(CODEX_MODEL_SELECTION.instanceId, 100),
-              account(workSelection.instanceId, 10),
-            ],
-            settings: {
-              providerInstances: {
-                [CODEX_MODEL_SELECTION.instanceId]: { driver: CODEX_DRIVER },
-                [workSelection.instanceId]: { driver: CODEX_DRIVER },
+          const commandsAt = Effect.fn("test.accountRoutingCommands")(function* (at: DateTime.Utc) {
+            const candidate = (yield* projections.getAccountRoutingCandidates()).find(
+              (entry) => entry.threadId === threadId,
+            );
+            assert.isDefined(candidate);
+            return accountRoutingCommands({
+              candidate,
+              providers: [
+                account(CODEX_MODEL_SELECTION.instanceId, 10),
+                account(workSelection.instanceId, 10),
+              ],
+              blockedUntil: yield* projections.getAccountUsageLimitResetTimes(at),
+              settings: {
+                providerInstances: {
+                  [CODEX_MODEL_SELECTION.instanceId]: { driver: CODEX_DRIVER },
+                  [workSelection.instanceId]: { driver: CODEX_DRIVER },
+                },
+                projectSettingsOverrides: {},
               },
-              projectSettingsOverrides: {},
-            },
-            nowMs: DateTime.toEpochMillis(yield* DateTime.now),
+              nowMs: DateTime.toEpochMillis(at),
+            });
           });
+          const commands = yield* commandsAt(yield* DateTime.now);
           assert.isNotEmpty(commands);
           for (const command of commands) yield* orchestrator.dispatch(command);
           yield* orchestrator.streamStoredEvents.pipe(
             Stream.filter(
               ({ event }) =>
                 event.type === "run.updated" &&
-                event.runId === queued.id &&
+                (allLimited
+                  ? event.payload.providerInstanceId === workSelection.instanceId &&
+                    event.payload.status === "failed"
+                  : event.runId === queued.id) &&
                 (event.payload.status === "completed" || event.payload.status === "failed"),
             ),
             Stream.runHead,
           );
           yield* worker.drain();
 
+          if (allLimited) {
+            assert.lengthOf(yield* Ref.get(capturedTurns), 2);
+            assert.isEmpty(yield* commandsAt(yield* DateTime.now));
+            assert.isEmpty(yield* commandsAt(DateTime.subtract(firstReset, { milliseconds: 1 })));
+            const resumed = yield* commandsAt(firstReset);
+            assert.equal(
+              resumed[0]?.type === "message.dispatch" && resumed[0].modelSelection?.instanceId,
+              CODEX_MODEL_SELECTION.instanceId,
+            );
+            for (const command of resumed) yield* orchestrator.dispatch(command);
+            yield* orchestrator.streamStoredEvents.pipe(
+              Stream.filter(
+                ({ event }) =>
+                  event.type === "run.updated" &&
+                  event.runId === queued.id &&
+                  event.payload.status === "completed",
+              ),
+              Stream.runHead,
+            );
+            yield* worker.drain();
+          }
+
           const after = yield* orchestrator.getThreadProjection(threadId);
           const turns = yield* Ref.get(capturedTurns);
           assert.deepEqual(
             after.runs.map((run) => [run.providerInstanceId, run.status]),
-            [
-              [CODEX_MODEL_SELECTION.instanceId, "failed"],
-              [workSelection.instanceId, "completed"],
-              [workSelection.instanceId, "completed"],
-            ],
+            allLimited
+              ? [
+                  [CODEX_MODEL_SELECTION.instanceId, "failed"],
+                  [workSelection.instanceId, "failed"],
+                  [CODEX_MODEL_SELECTION.instanceId, "completed"],
+                  [CODEX_MODEL_SELECTION.instanceId, "completed"],
+                ]
+              : [
+                  [CODEX_MODEL_SELECTION.instanceId, "failed"],
+                  [workSelection.instanceId, "completed"],
+                  [workSelection.instanceId, "completed"],
+                ],
           );
-          assert.deepEqual(after.thread.modelSelection, workSelection);
+          assert.deepEqual(
+            after.thread.modelSelection,
+            allLimited ? CODEX_MODEL_SELECTION : workSelection,
+          );
           assert.isEmpty(after.contextHandoffs);
           assert.deepEqual(
             turns.map((turn) => [turn.text, turn.nativeThreadId]),
             [
               ["Original work", turns[0]!.nativeThreadId],
               ["Continue where you left off.", turns[0]!.nativeThreadId],
+              ...(allLimited ? [["Continue where you left off.", turns[0]!.nativeThreadId]] : []),
               ["Follow up", turns[0]!.nativeThreadId],
             ],
           );
@@ -2661,13 +2712,19 @@ describe("orchestration v2 provider switching", () => {
             after.turnItems.flatMap((item) =>
               item.type === "system_notice" ? [item.message] : [],
             ),
-            ["Personal reached its usage limit. Continuing on Work."],
+            [
+              "Personal reached its usage limit. Continuing on Work.",
+              ...(allLimited ? ["Work reached its usage limit. Continuing on Personal."] : []),
+            ],
           );
         }).pipe(
           Effect.provide(
-            ProviderReplayHarness.layerWithRegistry(
-              { name: "account-routing", runtimePolicyOverride: { cwd } },
-              layerRegistry,
+            Layer.merge(
+              ProjectionStore.layer.pipe(Layer.provide(SqlitePersistence.layerMemory)),
+              ProviderReplayHarness.layerWithRegistry(
+                { name: "account-routing", runtimePolicyOverride: { cwd } },
+                layerRegistry,
+              ),
             ),
           ),
         );

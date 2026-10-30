@@ -19,9 +19,6 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
 
-// A failure without a reset time still blocks its account for about one session window.
-const UNKNOWN_RESET_BLOCK_MS = 5 * 60 * 60 * 1000;
-
 function accountIdentity(provider: ServerProvider): string | null {
   const email = provider.auth.email?.trim().toLowerCase();
   if (email) return `email:${email}`;
@@ -37,6 +34,7 @@ export function pickRoutingAccount(input: {
   readonly limitedInstanceId: ProviderInstanceId;
   readonly models: ReadonlyArray<string>;
   readonly providers: ReadonlyArray<ServerProvider>;
+  readonly blockedUntil: ReadonlyMap<ProviderInstanceId, number>;
   readonly isEnabledForProject: (instanceId: ProviderInstanceId) => boolean;
   readonly nowMs: number;
 }): ServerProvider | null {
@@ -65,6 +63,18 @@ export function pickRoutingAccount(input: {
     ) {
       continue;
     }
+    const identity = accountIdentity(provider);
+    if (
+      input.providers.some(
+        (account) =>
+          (account.instanceId === provider.instanceId ||
+            (identity !== null &&
+              account.driver === provider.driver &&
+              accountIdentity(account) === identity)) &&
+          (input.blockedUntil.get(account.instanceId) ?? 0) > input.nowMs,
+      )
+    )
+      continue;
     // Accounts without a reading may bill per request or be limited without us knowing.
     const left = tightestLimitWindow(provider.usageLimits, input.nowMs)?.remaining;
     if (left === undefined || left <= 0) continue;
@@ -76,6 +86,7 @@ export function pickRoutingAccount(input: {
 export function accountRoutingCommands(input: {
   readonly candidate: ProjectionStore.ProjectionAccountRoutingCandidate;
   readonly providers: ReadonlyArray<ServerProvider>;
+  readonly blockedUntil: ReadonlyMap<ProviderInstanceId, number>;
   readonly settings: Pick<ServerSettingsValue, "providerInstances" | "projectSettingsOverrides">;
   readonly nowMs: number;
 }): ReadonlyArray<OrchestrationV2Command> {
@@ -88,7 +99,8 @@ export function accountRoutingCommands(input: {
     candidate.completedAt === null ? Number.NaN : DateTime.toEpochMillis(candidate.completedAt);
   const stillWaiting = Number.isFinite(resetMs)
     ? resetMs > nowMs
-    : Number.isFinite(completedMs) && completedMs + UNKNOWN_RESET_BLOCK_MS > nowMs;
+    : Number.isFinite(completedMs) &&
+      completedMs + ProjectionStore.UNKNOWN_USAGE_LIMIT_RESET_MS > nowMs;
   if (!stillWaiting) return [];
   const recovery = candidate.limitRecovery;
   const recoveryForRun = recovery?.runId === candidate.runId ? recovery : null;
@@ -115,6 +127,7 @@ export function accountRoutingCommands(input: {
       ]),
     ],
     providers: input.providers,
+    blockedUntil: input.blockedUntil,
     isEnabledForProject: (instanceId) =>
       resolveProjectProviderInstanceEnabled(input.settings, candidate.projectId, instanceId),
     nowMs,
@@ -158,11 +171,14 @@ const makeSweep = Effect.gen(function* () {
     const candidates = yield* projections.getAccountRoutingCandidates();
     if (candidates.length === 0) return;
     const snapshot = yield* providers.getProviders;
-    const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
+    const now = yield* DateTime.now;
+    const nowMs = DateTime.toEpochMillis(now);
+    const blockedUntil = yield* projections.getAccountUsageLimitResetTimes(now);
     for (const candidate of candidates) {
       const commands = accountRoutingCommands({
         candidate,
         providers: snapshot,
+        blockedUntil,
         settings: preferences,
         nowMs,
       });

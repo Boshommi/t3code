@@ -193,6 +193,9 @@ export interface ProjectionAccountRoutingCandidate {
   }>;
 }
 
+// Providers without a reset time stay blocked for about one session window.
+export const UNKNOWN_USAGE_LIMIT_RESET_MS = 5 * 60 * 60 * 1000;
+
 export type ProjectionThreadPullRequests = Pick<
   OrchestrationV2AppThread,
   "id" | "projectId" | "lineage" | "settledOverride" | "settledAt" | "pullRequests"
@@ -476,6 +479,9 @@ export interface ProjectionStoreV2Shape {
     ReadonlyArray<ProjectionAccountRoutingCandidate>,
     ProjectionStoreV2Error
   >;
+  readonly getAccountUsageLimitResetTimes: (
+    now: DateTime.Utc,
+  ) => Effect.Effect<ReadonlyMap<ProviderInstanceId, number>, ProjectionStoreV2Error>;
   readonly getSettlementCandidates: (
     threadId?: ThreadId,
   ) => Effect.Effect<ReadonlyArray<ProjectionSettlementCandidate>, ProjectionStoreV2Error>;
@@ -4085,6 +4091,45 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
     );
 
+    const getAccountUsageLimitResetTimes = Effect.fn(
+      "ProjectionStore.getAccountUsageLimitResetTimes",
+    )(
+      function* (now: DateTime.Utc) {
+        // Historical failures remain authoritative after switching accounts or
+        // archiving a thread; a cached quota reading can predate the failure.
+        const rows = yield* sql<{
+          readonly provider_instance_id: string;
+          readonly reset_ms: number;
+        }>`
+          SELECT json_extract(r.payload_json, '$.providerInstanceId') AS provider_instance_id,
+            ROUND(MAX(COALESCE(
+              unixepoch(json_extract(item.payload_json, '$.failure.resetAt'), 'subsec') * 1000,
+              unixepoch(COALESCE(r.completed_at, item.updated_at), 'subsec') * 1000 + ${UNKNOWN_USAGE_LIMIT_RESET_MS}
+            ))) AS reset_ms
+          FROM orchestration_v2_projection_turn_items item
+          INNER JOIN orchestration_v2_projection_runs r ON r.run_id = item.run_id
+            AND r.status = 'failed'
+            AND item.node_id IS json_extract(r.payload_json, '$.rootNodeId')
+          WHERE item.type = 'error' AND item.status = 'failed'
+            AND json_extract(item.payload_json, '$.failure.class') = 'usage_limit'
+            AND item.turn_item_id = (
+              SELECT error.turn_item_id FROM orchestration_v2_projection_turn_items error
+              WHERE error.thread_id = item.thread_id AND error.run_id = item.run_id
+                AND error.type = 'error' AND error.status = 'failed'
+                AND error.node_id IS item.node_id
+              ORDER BY error.updated_at DESC, error.ordinal DESC, error.turn_item_id DESC
+              LIMIT 1
+            )
+          GROUP BY provider_instance_id
+          HAVING reset_ms > ${DateTime.toEpochMillis(now)}
+        `;
+        return new Map(
+          rows.map((row) => [ProviderInstanceId.make(row.provider_instance_id), row.reset_ms]),
+        );
+      },
+      Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
+    );
+
     const getRecoveryThreadIds = Effect.fn("ProjectionStore.getRecoveryThreadIds")(
       function* (kind: ProjectionRecoveryKind) {
         const candidates = (() => {
@@ -6758,6 +6803,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getProviderControlContext,
       getLimitRecoveryCandidates,
       getAccountRoutingCandidates,
+      getAccountUsageLimitResetTimes,
       getRecoveryThreadIds,
       getUnreadableThreadIds,
       getThreadSnapshot,
@@ -7004,6 +7050,34 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
               })
               .toSorted((left, right) => left.threadId.localeCompare(right.threadId)),
           ),
+        ),
+      getAccountUsageLimitResetTimes: (now) =>
+        Ref.get(replayState).pipe(
+          Effect.map((state) => {
+            const resets = new Map<ProviderInstanceId, number>();
+            const nowMs = DateTime.toEpochMillis(now);
+            for (const projection of state.projections.values()) {
+              for (const run of projection.runs) {
+                const failure = latestRootProviderFailure(run, projection.turnItems);
+                if (failure?.class !== "usage_limit") continue;
+                const resetMs = failure.resetAt == null ? Number.NaN : Date.parse(failure.resetAt);
+                const blockedUntil = Number.isFinite(resetMs)
+                  ? resetMs
+                  : DateTime.toEpochMillis(
+                      run.completedAt ??
+                        projection.turnItems.find(
+                          (item) => item.type === "error" && item.failure === failure,
+                        )!.updatedAt,
+                    ) + UNKNOWN_USAGE_LIMIT_RESET_MS;
+                if (blockedUntil <= nowMs) continue;
+                resets.set(
+                  run.providerInstanceId,
+                  Math.max(resets.get(run.providerInstanceId) ?? 0, blockedUntil),
+                );
+              }
+            }
+            return resets;
+          }),
         ),
       getRecoveryThreadIds: Effect.fn("ProjectionStore.getRecoveryThreadIds")(function* (kind) {
         const projections = (yield* Ref.get(replayState)).projections;
