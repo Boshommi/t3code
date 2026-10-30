@@ -324,6 +324,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["usage quota rate limit account rotate route failover multiple accounts"],
   },
   {
+    id: "spread-delegated-tasks",
+    title: "Spread delegated tasks across accounts",
+    to: "/settings/general",
+    searchTerms: ["usage quota subagent delegate balance load multiple accounts"],
+  },
+  {
     id: "auto-reset-codex-usage",
     title: "Automatically use Codex resets",
     to: "/settings/general",

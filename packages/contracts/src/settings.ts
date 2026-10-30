@@ -1175,6 +1175,8 @@ export const ServerSettings = Schema.Struct({
   autoResetCodexUsage: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   /** Continues a limited thread on another account that can resume it. */
   switchLimitedAccounts: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /** Starts delegated tasks on the parent harness's account with the most quota left. */
+  spreadDelegatedTasks: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   sidebarAutoSettleKeepPullRequests: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),
@@ -1494,6 +1496,7 @@ export const ServerSettingsPatch = Schema.Struct({
   autoResetCodexUsage: Schema.optionalKey(Schema.Boolean),
   snoozeLimitedThreads: Schema.optionalKey(Schema.Boolean),
   switchLimitedAccounts: Schema.optionalKey(Schema.Boolean),
+  spreadDelegatedTasks: Schema.optionalKey(Schema.Boolean),
   backgroundActivity: Schema.optionalKey(
     Schema.Struct({
       schemaVersion: Schema.optionalKey(Schema.Literal(1)),

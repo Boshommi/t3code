@@ -92,6 +92,7 @@ function AutoSettleSettingsRows() {
       autoResetCodexUsage?: boolean;
       snoozeLimitedThreads?: boolean;
       switchLimitedAccounts?: boolean;
+      spreadDelegatedTasks?: boolean;
     },
   ) => {
     if (
@@ -207,6 +208,13 @@ function AutoSettleSettingsRows() {
             value={uniformMobileSetting(displayTargets, "switchLimitedAccounts")}
             disabled={disabled}
             onValueChange={(value) => writeToAll({ switchLimitedAccounts: value })}
+          />
+          <SettingsSwitchRow
+            icon="person.2"
+            label="Spread delegated tasks across accounts"
+            value={uniformMobileSetting(displayTargets, "spreadDelegatedTasks")}
+            disabled={disabled}
+            onValueChange={(value) => writeToAll({ spreadDelegatedTasks: value })}
           />
         </SettingsSection>
       ) : null}

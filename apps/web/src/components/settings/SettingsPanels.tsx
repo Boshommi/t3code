@@ -597,6 +597,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.switchLimitedAccounts !== DEFAULT_UNIFIED_SETTINGS.switchLimitedAccounts
       ? ["Switch accounts at limits"]
       : []),
+    ...(settings.spreadDelegatedTasks !== DEFAULT_UNIFIED_SETTINGS.spreadDelegatedTasks
+      ? ["Spread delegated tasks across accounts"]
+      : []),
     ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
     ...(settings.persistComposerContextStrip !==
     DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip
@@ -757,6 +760,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       autoResetCodexUsage: DEFAULT_UNIFIED_SETTINGS.autoResetCodexUsage,
       snoozeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads,
       switchLimitedAccounts: DEFAULT_UNIFIED_SETTINGS.switchLimitedAccounts,
+      spreadDelegatedTasks: DEFAULT_UNIFIED_SETTINGS.spreadDelegatedTasks,
       responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
       continueThreadsAfterServerUpdate: DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate,
@@ -2313,6 +2317,22 @@ export function GeneralSettingsPanel() {
                 updateSettings({ switchLimitedAccounts: Boolean(checked) })
               }
               aria-label="Switch accounts at limits"
+            />
+          }
+        />
+        <SettingsRow
+          serverScoped
+          {...searchableSetting("spread-delegated-tasks")}
+          description="Start each delegated task on the account with the most quota left among the accounts that share the thread's provider, instead of always the thread's own account."
+          settingKeys={["spreadDelegatedTasks"]}
+          control={
+            <ScopedSwitch
+              settingKeys={["spreadDelegatedTasks"]}
+              checked={settings.spreadDelegatedTasks}
+              onCheckedChange={(checked) =>
+                updateSettings({ spreadDelegatedTasks: Boolean(checked) })
+              }
+              aria-label="Spread delegated tasks across accounts"
             />
           }
         />

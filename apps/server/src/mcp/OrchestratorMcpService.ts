@@ -59,10 +59,12 @@ import {
   type ScheduledTask,
   type ScheduledTaskUpsertInput,
   type ServerProvider,
+  resolveProjectProviderInstanceEnabled,
   ThreadId,
   isOrchestrationV2WorkActive,
 } from "@t3tools/contracts";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
+import { tightestLimitWindow } from "@t3tools/shared/usageLimits";
 import {
   normalizeThreadPullRequestKey,
   visibleThreadPullRequests,
@@ -90,6 +92,7 @@ import {
   type DispatchModeRefusal,
 } from "../orchestration-v2/DispatchModeLimit.ts";
 import { runOutcome } from "../orchestration-v2/RestartBackgroundNote.ts";
+import { pickRoutingAccount } from "../orchestration-v2/AccountRoutingWorker.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -337,6 +340,74 @@ function followParentAccount(input: {
     return input.target;
   }
   return { ...input.target, providerInstanceId: parentInstanceId };
+}
+
+interface AccountBalancing {
+  readonly isEnabledForProject: (instanceId: ProviderInstanceId) => boolean;
+  readonly nowMs: number;
+}
+
+/**
+ * A child starts its own conversation, so any login of the parent's harness can take it without
+ * losing prompt cache. Moving it to the one with the most quota left keeps a busy thread from
+ * draining a single account. Accounts without a reading may bill per request, so the parent's
+ * account is kept when either side has none.
+ */
+function balanceDelegatedAccount(
+  input: Parameters<typeof followParentAccount>[0] & AccountBalancing,
+): OrchestratorMcpTarget | undefined {
+  const target = followParentAccount(input);
+  const parentSelection = input.parent.thread.modelSelection;
+  if (
+    target?.providerInstanceId !== undefined &&
+    target.providerInstanceId !== parentSelection.instanceId
+  ) {
+    return target;
+  }
+  const parentProvider = input.providers.find(
+    (provider) => provider.instanceId === parentSelection.instanceId,
+  );
+  if (
+    parentProvider === undefined ||
+    (target?.driverKind !== undefined && target.driverKind !== parentProvider.driver)
+  ) {
+    return target;
+  }
+  const model = target?.model ?? parentSelection.model;
+  const best = pickRoutingAccount({
+    limitedInstanceId: parentSelection.instanceId,
+    models: [model],
+    providers: input.providers,
+    blockedUntil: new Map(),
+    isEnabledForProject: input.isEnabledForProject,
+    nowMs: input.nowMs,
+  });
+  const parentLeft = tightestLimitWindow(parentProvider.usageLimits, input.nowMs)?.remaining;
+  const bestLeft = tightestLimitWindow(best?.usageLimits, input.nowMs)?.remaining;
+  if (
+    best === null ||
+    parentLeft === undefined ||
+    bestLeft === undefined ||
+    bestLeft <= parentLeft
+  ) {
+    return target;
+  }
+  // Options only inherit on the parent's own instance, so carry them over explicitly.
+  const inherited =
+    model === parentSelection.model && target?.options?.length !== 0
+      ? (parentSelection.options ?? [])
+      : [];
+  const options = [
+    ...new Map(
+      [...inherited, ...(target?.options ?? [])].map((selection) => [selection.id, selection]),
+    ).values(),
+  ];
+  return {
+    ...target,
+    providerInstanceId: best.instanceId,
+    model,
+    ...(options.length === 0 && target?.options === undefined ? {} : { options }),
+  };
 }
 
 /**
@@ -1262,11 +1333,22 @@ const make = Effect.gen(function* () {
       })
       .pipe(Effect.mapError(threadManagementFailure));
 
-  const resolveTargetRechecking = (requested: Parameters<typeof resolveTarget>[0]) => {
+  const resolveTargetRechecking = (
+    requested: Parameters<typeof resolveTarget>[0] & {
+      readonly balanceAccounts?: AccountBalancing;
+    },
+  ) => {
+    const { balanceAccounts, ...rest } = requested;
     const input =
-      requested.skipProjectEnablementFilter === true
-        ? requested
-        : { ...requested, target: followParentAccount(requested) };
+      rest.skipProjectEnablementFilter === true
+        ? rest
+        : {
+            ...rest,
+            target:
+              balanceAccounts === undefined
+                ? followParentAccount(rest)
+                : balanceDelegatedAccount({ ...rest, ...balanceAccounts }),
+          };
     const instanceId =
       input.target?.providerInstanceId ??
       (input.target?.driverKind === undefined
@@ -2101,11 +2183,28 @@ const make = Effect.gen(function* () {
         operation: "delegate-task",
       });
       const isRetryOfAcceptedDelegation = yield* threadManagement.hasReceipt(commandId);
+      const settings = yield* serverSettings.getSettings.pipe(
+        Effect.mapError(() => failure("orchestration_error", "Unable to read server settings.")),
+      );
+      const nowMs = yield* Clock.currentTimeMillis;
       const target = yield* resolveTargetRechecking({
         parent,
         target: input.target,
         providers,
         skipProjectEnablementFilter: isRetryOfAcceptedDelegation,
+        ...(settings.spreadDelegatedTasks
+          ? {
+              balanceAccounts: {
+                isEnabledForProject: (instanceId: ProviderInstanceId) =>
+                  resolveProjectProviderInstanceEnabled(
+                    settings,
+                    parent.thread.projectId,
+                    instanceId,
+                  ),
+                nowMs,
+              },
+            }
+          : {}),
       });
       const runtimeMode = yield* resolveRuntimeMode(
         parent.thread.runtimeMode,

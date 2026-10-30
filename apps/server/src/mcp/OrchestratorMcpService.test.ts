@@ -1385,6 +1385,122 @@ describe("OrchestratorMcpService provider resolution", () => {
     }),
   );
 
+  it.effect("spreading delegated tasks starts children on the account with the most quota", () =>
+    Effect.gen(function* () {
+      const driver = ProviderDriverKind.make("codex");
+      const fullInstanceId = ProviderInstanceId.make("codex-full");
+      const halfInstanceId = ProviderInstanceId.make("codex-half");
+      const withUsage = (provider: ServerProvider, usedPercent: number): ServerProvider => ({
+        ...provider,
+        usageLimits: {
+          checkedAt: "2026-10-23T11:00:00.000Z",
+          windows: [
+            {
+              id: "primary",
+              kind: "session",
+              label: "Session",
+              usedPercent,
+              resetsAt: "2099-01-01T00:00:00.000Z",
+            },
+          ],
+        },
+      });
+      const parentOptions = [{ id: "reasoningEffort", value: "high" }];
+      const delegateWith = (spreadDelegatedTasks: boolean) =>
+        Effect.gen(function* () {
+          const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);
+          const layerDependencies = Layer.mergeAll(
+            NodeServices.layer,
+            Layer.mock(ThreadManagementService.ThreadManagementService)({
+              hasReceipt: () => Effect.succeed(false),
+              getThreadRecords: (threadId) =>
+                Effect.succeed(
+                  threadId === parentThreadId
+                    ? parentProjection([], {
+                        instanceId: codexInstanceId,
+                        model: "gpt-5.4",
+                        options: parentOptions,
+                      })
+                    : childProjection,
+                ),
+              isProviderInstanceEnabledForProject: () => Effect.succeed(true),
+              assertProviderInstanceEnabled: () => Effect.void,
+              dispatch: (command) =>
+                Ref.update(dispatched, (commands) => [...commands, command]).pipe(
+                  // The test only inspects the dispatched selection, so no subagent event follows.
+                  Effect.as({ sequence: 1, storedEvents: [] } as never),
+                ),
+            }),
+            providerRegistryLayer([
+              withUsage(
+                providerSnapshot({
+                  instanceId: codexInstanceId,
+                  driver,
+                  model: "gpt-5.4",
+                  groupKey: "a",
+                }),
+                90,
+              ),
+              withUsage(
+                providerSnapshot({
+                  instanceId: halfInstanceId,
+                  driver,
+                  model: "gpt-5.4",
+                  groupKey: "a",
+                }),
+                50,
+              ),
+              withUsage(
+                providerSnapshot({
+                  instanceId: fullInstanceId,
+                  driver,
+                  model: "gpt-5.4",
+                  groupKey: "a",
+                }),
+                10,
+              ),
+            ]),
+            adapterRegistryLayer([codexInstanceId, halfInstanceId, fullInstanceId]),
+            Layer.mock(ProjectService.ProjectService)({}),
+            Layer.mock(SecretRequests.SecretRequests)({}),
+            Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+            ServerSettings.layerTest({
+              spreadDelegatedTasks,
+              providerInstances: {
+                [halfInstanceId]: { driver: "codex", enabled: true },
+                [fullInstanceId]: { driver: "codex", enabled: true },
+              },
+            }),
+          );
+          return yield* Effect.gen(function* () {
+            const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+            yield* Effect.exit(
+              service.delegateTask(scope, {
+                task: "Summarize the diff.",
+                mode: "async",
+                clientRequestId: `delegate-spread-${spreadDelegatedTasks}`,
+              }),
+            );
+            const [command] = (yield* Ref.get(dispatched)) as ReadonlyArray<{
+              modelSelection: unknown;
+            }>;
+            return command?.modelSelection;
+          }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(layerDependencies))));
+        });
+
+      assert.deepEqual(yield* delegateWith(true), {
+        instanceId: fullInstanceId,
+        model: "gpt-5.4",
+        options: parentOptions,
+      });
+      assert.deepEqual(yield* delegateWith(false), {
+        instanceId: codexInstanceId,
+        model: "gpt-5.4",
+        options: parentOptions,
+      });
+    }),
+  );
+
   it.effect(
     "retrying an accepted driver-only delegation replays even after the project disables every candidate",
     () =>

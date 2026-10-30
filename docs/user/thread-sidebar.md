@@ -267,6 +267,11 @@ it; switching only happens once that account reaches its limit. When every
 compatible account is limited, the thread waits until an account's quota resets
 before switching again.
 
+Enable **Spread delegated tasks across accounts** to start each task an agent
+delegates on the compatible account with the most quota left, instead of the
+thread's own account. Only accounts with subscription limits are used, and the
+thread itself stays on its account.
+
 On web and desktop, use **Agents** to follow work delegated to subagents.
 Stop on a thread also stops the subagents it delegated to.
 

@@ -18,6 +18,7 @@ const SHARED_SERVER_SETTING_KEYS = [
   "autoResetCodexUsage",
   "snoozeLimitedThreads",
   "switchLimitedAccounts",
+  "spreadDelegatedTasks",
   "newWorktreesStartFromOrigin",
   "sourceControlWritingStyle",
   "textGenerationModelSelection",
