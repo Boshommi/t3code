@@ -89,6 +89,7 @@ function AutoSettleSettingsRows() {
   const writeToAll = (
     patch: Partial<AutoSettleSettings> & {
       autoResumeLimitedThreads?: boolean;
+      autoResetCodexUsage?: boolean;
       snoozeLimitedThreads?: boolean;
       switchLimitedAccounts?: boolean;
     },
@@ -178,6 +179,14 @@ function AutoSettleSettingsRows() {
       ) : null}
       {!projectSelected ? (
         <SettingsSection title="Usage limits">
+          <SettingsSwitchRow
+            icon="arrow.clockwise"
+            label="Automatically use Codex resets"
+            subtitle="Spend a banked reset credit at 2% or less remaining."
+            value={uniformMobileSetting(displayTargets, "autoResetCodexUsage")}
+            disabled={disabled}
+            onValueChange={(value) => writeToAll({ autoResetCodexUsage: value })}
+          />
           <SettingsSwitchRow
             icon="clock"
             label="Auto-resume limited threads"

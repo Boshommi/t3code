@@ -588,6 +588,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.autoResumeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads
       ? ["Auto-resume limited threads"]
       : []),
+    ...(settings.autoResetCodexUsage !== DEFAULT_UNIFIED_SETTINGS.autoResetCodexUsage
+      ? ["Automatically use Codex resets"]
+      : []),
     ...(settings.snoozeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads
       ? ["Snooze limited threads"]
       : []),
@@ -751,6 +754,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarAutoSettleKeepPullRequests: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleKeepPullRequests,
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
       autoResumeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads,
+      autoResetCodexUsage: DEFAULT_UNIFIED_SETTINGS.autoResetCodexUsage,
       snoozeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads,
       switchLimitedAccounts: DEFAULT_UNIFIED_SETTINGS.switchLimitedAccounts,
       responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
@@ -2248,6 +2252,22 @@ export function GeneralSettingsPanel() {
           }
         />
 
+        <SettingsRow
+          serverScoped
+          {...searchableSetting("auto-reset-codex-usage")}
+          description="Spend a banked Codex reset credit when a session or weekly limit has 2% or less remaining. Applies to local accounts and connected usage hubs."
+          settingKeys={["autoResetCodexUsage"]}
+          control={
+            <ScopedSwitch
+              settingKeys={["autoResetCodexUsage"]}
+              checked={settings.autoResetCodexUsage}
+              onCheckedChange={(checked) =>
+                updateSettings({ autoResetCodexUsage: Boolean(checked) })
+              }
+              aria-label="Automatically use Codex resets"
+            />
+          }
+        />
         <SettingsRow
           serverScoped
           {...searchableSetting("auto-resume-limited-threads")}

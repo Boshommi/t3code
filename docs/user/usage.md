@@ -89,6 +89,9 @@ when the next reset lands and how much it hands back. The hatched
 part of a segment is what that reset restores. Tap a segment or account row for the account's plan,
 where it is signed in, and its reset time. On web, you can hover too. Codex and Claude accounts
 with banked reset credits show a ticket count and the **Use reset** action in the account details.
+Enable **Settings → General → Automatically use Codex resets** to spend a banked credit when a
+Codex session or weekly allowance has 2% or less remaining, including accounts on connected usage
+hubs. This is off by default and does not buy additional credits.
 Claude resets are not available when the server runs on macOS, where Claude keeps its login in the
 Keychain. On narrow screens, numbered rows below
 the bar show each account's quota, countdown, and credits. Tap a row to open its details.

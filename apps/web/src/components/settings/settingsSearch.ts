@@ -324,6 +324,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["usage quota rate limit account rotate route failover multiple accounts"],
   },
   {
+    id: "auto-reset-codex-usage",
+    title: "Automatically use Codex resets",
+    to: "/settings/general",
+    searchTerms: ["usage quota credits banked reset automatic remaining 2%"],
+  },
+  {
     id: "auto-resume-limited-threads",
     title: "Auto-resume limited threads",
     to: "/settings/general",

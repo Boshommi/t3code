@@ -96,6 +96,7 @@ import * as ProviderInstanceRegistry from "./provider/ProviderInstanceRegistry.t
 import * as ProviderAdapterRegistry from "./orchestration-v2/ProviderAdapterRegistry.ts";
 import * as ProviderRegistry from "./provider/ProviderRegistry.ts";
 import * as ProviderUsageLimitsIngestion from "./provider/ProviderUsageLimitsIngestion.ts";
+import * as AutomaticCodexReset from "./usage/AutomaticCodexReset.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
 import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
@@ -629,6 +630,12 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
     ),
   ),
   ProviderUsageLimitsIngestion.layer,
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const resets = yield* AutomaticCodexReset.AutomaticCodexReset;
+      yield* resets.start;
+    }),
+  ).pipe(Layer.provide(AutomaticCodexReset.layer)),
   layerProviderInstallationRefresh,
   ReplayMarkers.layer,
   Layer.effectDiscard(ProjectSettingsOverrideSweep.sweep),
